@@ -970,6 +970,8 @@ class _MessageBusChannels implements PostLoginStart {
         ref.listenManual<void>(notificationAlertChannelProvider, (_, _) {}),
         ref.listenManual<void>(chatNotificationAlertProvider, (_, _) {}),
         ref.listenManual<void>(logoutChannelProvider, (_, _) {}),
+        // 私信实时追踪（上游 aaea4ae4）：收件箱停留时来新私信自动刷新
+        ref.listenManual<PmIncomingState>(pmTrackingProvider, (_, _) {}),
       ]);
     });
   }
