@@ -82,7 +82,6 @@ class TopicPostList extends StatefulWidget {
   final void Function(int postId) onRefreshPost;
   final void Function(int, bool) onVoteChanged;
   final void Function(int count, bool userCreated)? onSharedIssueChanged;
-  final void Function(TopicNotificationLevel)? onNotificationLevelChanged;
   final void Function(int postId, bool accepted)? onSolutionChanged;
   final void Function(String selectedText, Post post)? onQuoteSelection;
 
@@ -165,7 +164,6 @@ class TopicPostList extends StatefulWidget {
     required this.onRefreshPost,
     required this.onVoteChanged,
     this.onSharedIssueChanged,
-    this.onNotificationLevelChanged,
     this.onSolutionChanged,
     this.onQuoteSelection,
     this.onQuoteImage,
@@ -421,8 +419,6 @@ class _TopicPostListState extends State<TopicPostList> {
   void Function(int, bool) get onVoteChanged => widget.onVoteChanged;
   void Function(int count, bool userCreated)? get onSharedIssueChanged =>
       widget.onSharedIssueChanged;
-  void Function(TopicNotificationLevel)? get onNotificationLevelChanged =>
-      widget.onNotificationLevelChanged;
   void Function(int postId, bool accepted)? get onSolutionChanged =>
       widget.onSolutionChanged;
   void Function(String selectedText, Post post)? get onQuoteSelection =>
@@ -928,7 +924,6 @@ class _TopicPostListState extends State<TopicPostList> {
                     headerKey: headerKey,
                     showTitle: !widget.hideHeaderTitle,
                     onVoteChanged: onVoteChanged,
-                    onNotificationLevelChanged: onNotificationLevelChanged,
                     onJumpToPost: onJumpToPost,
                   ),
                 ),
@@ -970,7 +965,6 @@ class _TopicPostListState extends State<TopicPostList> {
                         headerKey: headerKey,
                         showTitle: !widget.hideHeaderTitle,
                         onVoteChanged: onVoteChanged,
-                        onNotificationLevelChanged: onNotificationLevelChanged,
                         onJumpToPost: onJumpToPost,
                       ),
                     ),
