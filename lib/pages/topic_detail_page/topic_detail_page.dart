@@ -236,7 +236,6 @@ class _TopicDetailPageState extends ConsumerState<TopicDetailPage>
     false,
   );
   bool _isSwitchingMode = false; // 切换热门回复模式
-  bool _isUpdatingNotificationLevel = false;
   bool _isNestedView = false; // 嵌套视图模式
   bool _defaultNestedViewApplied = false; // 默认嵌套视图配置是否已应用（依赖 detail 加载后判定）
   int? _nestedTargetPostNumber; // 树形 context 定位的目标楼层（通知等带楼层进入）
@@ -1361,8 +1360,6 @@ class _TopicDetailPageState extends ConsumerState<TopicDetailPage>
       onClose: widget.onEmbeddedClose!,
       title: _buildEmbeddedMobileWorkspaceTitle(theme, detail),
       actions: [
-        if (detail != null && ref.watch(currentUserProvider).value != null)
-          _buildNotificationAction(detail, notifier),
         _buildSearchAction(),
         MobileWorkspaceCountButton(
           key: const ValueKey('bookmark-workspace-mobile-count-button'),
@@ -1459,20 +1456,6 @@ class _TopicDetailPageState extends ConsumerState<TopicDetailPage>
     );
   }
 
-  Widget _buildNotificationAction(
-    TopicDetail detail,
-    TopicDetailNotifier notifier,
-  ) {
-    return TopicNotificationButton(
-      key: _usesEmbeddedMobileWorkspaceChrome
-          ? const ValueKey('bookmark-workspace-mobile-notifications')
-          : null,
-      level: detail.notificationLevel,
-      isLoading: _isUpdatingNotificationLevel,
-      onChanged: (level) => _handleNotificationLevelChanged(notifier, level),
-    );
-  }
-
   /// 构建 AppBar Actions
   List<Widget> _buildAppBarActions({
     required TopicDetail? detail,
@@ -1506,8 +1489,6 @@ class _TopicDetailPageState extends ConsumerState<TopicDetailPage>
           tooltip: context.l10n.topicDetail_aiAssistant,
           onPressed: () => _showAiAssistantSheet(detail),
         ),
-      if (ref.watch(currentUserProvider).value != null)
-        _buildNotificationAction(detail, notifier),
       _buildSearchAction(),
       _buildMoreMenuAction(
         detail: detail,
@@ -1541,6 +1522,9 @@ class _TopicDetailPageState extends ConsumerState<TopicDetailPage>
     final isAuthorFilter =
         userFilter != null && userFilter == detail.createdBy?.username;
     final isOtherUserFilter = userFilter != null && !isAuthorFilter;
+    final bool subscribed =
+        detail.notificationLevel.value >= TopicNotificationLevel.tracking.value;
+
     void doBookmark() {
       final traceTarget = _bookmarkEditTarget(detail);
       final traceId = createBookmarkEditTraceId();
@@ -1598,6 +1582,28 @@ class _TopicDetailPageState extends ConsumerState<TopicDetailPage>
               : context.l10n.topicDetail_addToReadLater,
           active: isInReadLater,
           onTap: _handleReadLater,
+        ),
+        MenuQuickAction(
+          icon: TopicNotificationButton.getIcon(detail.notificationLevel),
+          tooltip: context.l10n.topic_notificationSettings,
+          active: subscribed,
+          submenu: MenuQuickActionSubmenu(
+            icon: TopicNotificationButton.getIcon(detail.notificationLevel),
+            label: context.l10n.topic_notificationSettings,
+            iconColor: subscribed
+                ? Theme.of(context).colorScheme.primary
+                : null,
+            children: [
+              for (final level in TopicNotificationLevel.values)
+                MenuQuickActionSubmenuChild(
+                  icon: TopicNotificationButton.getIcon(level),
+                  label: level.label,
+                  subtitle: level.description,
+                  selected: level == detail.notificationLevel,
+                  onTap: () => _handleNotificationLevelChanged(notifier, level),
+                ),
+            ],
+          ),
         ),
         if (!detail.isPrivateMessage)
           MenuQuickAction(
@@ -1693,6 +1699,21 @@ class _TopicDetailPageState extends ConsumerState<TopicDetailPage>
         ),
       ],
       onSelected: (value) {
+        // 行内展开的订阅子项：value 形如 'subscribe_level_<int>'
+        const subscribePrefix = 'subscribe_level_';
+        if (value.startsWith(subscribePrefix)) {
+          final levelValue = int.tryParse(
+            value.substring(subscribePrefix.length),
+          );
+          if (levelValue != null) {
+            final level = TopicNotificationLevel.values.firstWhere(
+              (e) => e.value == levelValue,
+              orElse: () => detail.notificationLevel,
+            );
+            _handleNotificationLevelChanged(notifier, level);
+          }
+          return;
+        }
         if (value == 'assign') {
           // 弹菜单本身的关闭动画(PopupMenuButton onSelected 触发时它还没
           // 收完)跟紧接着开的新 modal route 同一帧抢 GPU 合成——聊天那边
@@ -2948,6 +2969,11 @@ class _TopicDetailPageState extends ConsumerState<TopicDetailPage>
                                 detail: detail,
                                 headerKey: null,
                                 onVoteChanged: _handleVoteChanged,
+                                onNotificationLevelChanged: (level) =>
+                                    _handleNotificationLevelChanged(
+                                      notifier,
+                                      level,
+                                    ),
                                 onJumpToPost: _jumpToPostInTopic,
                               ),
                             ),
@@ -3138,6 +3164,8 @@ class _TopicDetailPageState extends ConsumerState<TopicDetailPage>
           onJumpToPost: _jumpToPostInTopic,
           onVoteChanged: _handleVoteChanged,
           onSharedIssueChanged: _handleSharedIssueChanged,
+          onNotificationLevelChanged: (level) =>
+              _handleNotificationLevelChanged(notifier, level),
           onSolutionChanged: _handleSolutionChanged,
           onQuoteSelection: isLoggedIn ? _handleQuoteSelection : null,
           onScrollNotification: _controller.handleScrollNotification,
@@ -3216,6 +3244,8 @@ class _TopicDetailPageState extends ConsumerState<TopicDetailPage>
               onRefreshPost: _handleRefreshPost,
               onVoteChanged: _handleVoteChanged,
               onSharedIssueChanged: _handleSharedIssueChanged,
+              onNotificationLevelChanged: (level) =>
+                  _handleNotificationLevelChanged(notifier, level),
               onSolutionChanged: _handleSolutionChanged,
               onQuoteSelection: isLoggedIn ? _handleQuoteSelection : null,
               onQuoteImage: isLoggedIn ? _handleImageQuote : null,
