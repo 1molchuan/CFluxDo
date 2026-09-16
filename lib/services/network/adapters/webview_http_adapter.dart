@@ -15,6 +15,7 @@ import '../../windows_webview_environment_service.dart';
 import 'adapter_log_metadata.dart';
 import 'webview_response_codec.dart';
 import 'webview_request_codec.dart';
+import 'webview_operation_guard.dart';
 
 /// WebView HTTP 适配器
 ///
@@ -242,6 +243,7 @@ document.close();
     // 这次请求的 WebView 使用期（站点请求才有）：请求前准备 cookie，
     // 响应后按结果回写；没走到回写（出错 / 二进制流 / 被节流）就按中止结束。
     WebViewUse? webViewUse;
+    String? bodyRequestId;
 
     try {
       if (!_isInitialized || _controller == null) {
@@ -259,6 +261,7 @@ document.close();
       final url = options.uri.toString();
       final method = options.method.toUpperCase();
       final requestId = (++_requestId).toString();
+      bodyRequestId = requestId;
       final requestUri = Uri.parse(url);
       final baseUri = Uri.parse(AppConstants.baseUrl);
       final shouldSyncAppCookies = _shouldSyncAppCookies(requestUri, baseUri);
@@ -307,13 +310,38 @@ document.close();
       }
 
       // 构建 body
-      final bodyPlan = await _buildRequestBodyPlan(
-        options,
-        requestStream,
-        method: method,
-        requestId: requestId,
-        requestUri: requestUri,
+      final bodyGuard = WebViewOperationGuard(
+        timeout:
+            options.sendTimeout ??
+            options.receiveTimeout ??
+            const Duration(seconds: 30),
+        timeoutError: DioException(
+          requestOptions: options,
+          type: DioExceptionType.sendTimeout,
+          error: '上传准备超时',
+        ),
+        cancel: cancelFuture,
+        cancelError: DioException(
+          requestOptions: options,
+          type: DioExceptionType.cancel,
+          error: '上传已取消',
+        ),
       );
+      late final _RequestBodyPlan bodyPlan;
+      try {
+        bodyPlan = await bodyGuard.run(
+          () => _buildRequestBodyPlan(
+            options,
+            requestStream,
+            method: method,
+            requestId: requestId,
+            requestUri: requestUri,
+            guard: bodyGuard,
+          ),
+        );
+      } finally {
+        bodyGuard.dispose();
+      }
       final bodyScript = bodyPlan.script;
 
       if (wantsBinaryStream) {
@@ -516,6 +544,9 @@ document.close();
     } finally {
       // 已回写的使用期这里是空操作
       unawaited(webViewUse?.end(WebViewUseOutcome.aborted));
+      if (bodyRequestId != null) {
+        unawaited(_clearRequestBody(bodyRequestId));
+      }
       _activeFetches--;
       if (_activeFetches == 0 && _disposeWhenIdle) {
         close(force: false);
@@ -685,11 +716,13 @@ document.close();
       timeout,
       onTimeout: () {
         unawaited(_abortWebViewFetch(requestId));
-        throw DioException(
+        final error = DioException(
           requestOptions: options,
           error: 'WebView binary response header timeout',
           type: DioExceptionType.receiveTimeout,
         );
+        bridge.completeError(error);
+        throw error;
       },
     );
     headerWatch.stop();
@@ -726,7 +759,7 @@ document.close();
     );
   }
 
-  Future<_BinaryResponseBridge> _createBinaryResponseBridge(
+  Future<WebViewBinaryResponseBridge> _createBinaryResponseBridge(
     RequestOptions options, {
     required String requestId,
   }) async {
@@ -750,8 +783,8 @@ document.close();
       );
     }
 
-    late final _BinaryResponseBridge bridge;
-    bridge = _BinaryResponseBridge(
+    late final WebViewBinaryResponseBridge bridge;
+    bridge = WebViewBinaryResponseBridge(
       requestOptions: options,
       channel: channel,
       onCancel: () async {
@@ -760,67 +793,74 @@ document.close();
     );
 
     final readyCompleter = Completer<void>();
-    final port = channel.port1;
-    await port.setWebMessageCallback((message) async {
-      final payload = message?.data;
-      final bytes = _binaryMessageBytes(payload);
-      if (bytes != null) {
-        bridge.addBytes(bytes);
-        return;
-      }
+    try {
+      final port = channel.port1;
+      await port.setWebMessageCallback((message) async {
+        final payload = message?.data;
+        final bytes = _binaryMessageBytes(payload);
+        if (bytes != null) {
+          bridge.addBytes(bytes);
+          return;
+        }
 
-      if (payload is! String || payload.isEmpty) {
-        return;
-      }
-      try {
-        final decoded = jsonDecode(payload);
-        if (decoded is! Map) return;
-        final kind = decoded['kind']?.toString();
-        if (kind == 'chunk') {
-          bridge.addBytes(WebViewResponseCodec.decodeChunk(decoded)!);
-        } else if (kind == 'ready') {
-          if (!readyCompleter.isCompleted) readyCompleter.complete();
-        } else if (kind == 'headers') {
-          bridge.completeHeaders(_BinaryResponseHeaders.fromJson(decoded));
-        } else if (kind == 'complete') {
-          bridge.complete();
-        } else if (kind == 'error') {
+        if (payload is! String || payload.isEmpty) {
+          return;
+        }
+        try {
+          final decoded = jsonDecode(payload);
+          if (decoded is! Map) return;
+          final kind = decoded['kind']?.toString();
+          if (kind == 'chunk') {
+            bridge.addBytes(WebViewResponseCodec.decodeChunk(decoded)!);
+          } else if (kind == 'ready') {
+            if (!readyCompleter.isCompleted) readyCompleter.complete();
+          } else if (kind == 'headers') {
+            bridge.completeHeaders(
+              WebViewBinaryResponseHeaders.fromJson(decoded),
+            );
+          } else if (kind == 'complete') {
+            bridge.complete();
+          } else if (kind == 'error') {
+            bridge.completeError(
+              DioException(
+                requestOptions: options,
+                type: DioExceptionType.unknown,
+                error: decoded['error']?.toString() ?? 'WebView binary error',
+              ),
+            );
+          }
+        } catch (e) {
+          bridge.completeError(e);
+        }
+      });
+
+      await controller.postWebMessage(
+        message: WebMessage(
+          data: '__fluxdo:binary-response:$requestId',
+          ports: [channel.port2],
+        ),
+        targetOrigin: WebUri(Uri.parse(AppConstants.baseUrl).origin),
+      );
+
+      await readyCompleter.future.timeout(
+        const Duration(seconds: 5),
+        onTimeout: () {
           bridge.completeError(
-            DioException(
-              requestOptions: options,
-              type: DioExceptionType.unknown,
-              error: decoded['error']?.toString() ?? 'WebView binary error',
+            TimeoutException(
+              'WebView binary response port setup timeout for $requestId',
             ),
           );
-        }
-      } catch (e) {
-        bridge.completeError(e);
-      }
-    });
-
-    await controller.postWebMessage(
-      message: WebMessage(
-        data: '__fluxdo:binary-response:$requestId',
-        ports: [channel.port2],
-      ),
-      targetOrigin: WebUri(Uri.parse(AppConstants.baseUrl).origin),
-    );
-
-    await readyCompleter.future.timeout(
-      const Duration(seconds: 5),
-      onTimeout: () {
-        bridge.completeError(
-          TimeoutException(
+          throw TimeoutException(
             'WebView binary response port setup timeout for $requestId',
-          ),
-        );
-        throw TimeoutException(
-          'WebView binary response port setup timeout for $requestId',
-        );
-      },
-    );
+          );
+        },
+      );
 
-    return bridge;
+      return bridge;
+    } catch (e) {
+      bridge.completeError(e);
+      rethrow;
+    }
   }
 
   Future<void> _installBinaryResponseBridge(
@@ -1056,6 +1096,7 @@ document.close();
     required String method,
     required String requestId,
     required Uri requestUri,
+    required WebViewOperationGuard guard,
   }) async {
     if (method == 'GET' || method == 'HEAD') {
       return const _RequestBodyPlan(script: '');
@@ -1071,12 +1112,13 @@ document.close();
       requestStream,
       requestId: requestId,
       requestUri: requestUri,
+      guard: guard,
     );
     if (streamedBodyScript != null) {
       return _RequestBodyPlan(script: streamedBodyScript);
     }
 
-    final requestBytes = await _readRequestBytes(requestStream);
+    final requestBytes = await _readRequestBytes(requestStream, guard);
     if (requestBytes != null && requestBytes.isNotEmpty) {
       final bodyBase64 = base64Encode(requestBytes);
       return _RequestBodyPlan(
@@ -1119,6 +1161,7 @@ document.close();
     Stream<Uint8List>? requestStream, {
     required String requestId,
     required Uri requestUri,
+    required WebViewOperationGuard guard,
   }) async {
     if (requestStream == null) {
       return null;
@@ -1133,52 +1176,67 @@ document.close();
     var transferStarted = false;
 
     try {
-      await _installRequestBodyBridge(controller);
+      await guard.run(() => _installRequestBodyBridge(controller));
 
-      channel = await controller.createWebMessageChannel();
+      channel = await guard.run(() async {
+        final created = await controller.createWebMessageChannel();
+        if (guard.isStopped) {
+          if (created != null) _disposeMessageChannel(created);
+        }
+        channel = created;
+        return created;
+      });
       if (channel == null) {
         return null;
       }
 
-      final port = channel.port1;
+      final port = channel!.port1;
       final readyCompleter = Completer<void>();
       final completeCompleter = Completer<void>();
       final errorCompleter = Completer<String>();
 
-      await port.setWebMessageCallback((message) async {
-        final payload = message?.data;
-        if (payload is! String || payload.isEmpty) return;
-        try {
-          final decoded = jsonDecode(payload);
-          if (decoded is! Map) return;
-          final kind = decoded['kind']?.toString();
-          if (kind == 'ready' && !readyCompleter.isCompleted) {
-            readyCompleter.complete();
-          } else if (kind == 'complete' && !completeCompleter.isCompleted) {
-            completeCompleter.complete();
-          } else if (kind == 'error' && !errorCompleter.isCompleted) {
-            errorCompleter.complete(decoded['error']?.toString() ?? 'unknown');
-          }
-        } catch (_) {}
-      });
-
-      final origin = requestUri.origin;
-      await controller.postWebMessage(
-        message: WebMessage(
-          data: '__fluxdo:body:$requestId',
-          ports: [channel.port2],
-        ),
-        targetOrigin: WebUri(origin),
+      await guard.run(
+        () => port.setWebMessageCallback((message) async {
+          final payload = message?.data;
+          if (payload is! String || payload.isEmpty) return;
+          try {
+            final decoded = jsonDecode(payload);
+            if (decoded is! Map) return;
+            final kind = decoded['kind']?.toString();
+            if (kind == 'ready' && !readyCompleter.isCompleted) {
+              readyCompleter.complete();
+            } else if (kind == 'complete' && !completeCompleter.isCompleted) {
+              completeCompleter.complete();
+            } else if (kind == 'error' && !errorCompleter.isCompleted) {
+              final error = decoded['error']?.toString() ?? 'unknown';
+              errorCompleter.complete(error);
+              guard.stop(StateError(error));
+            }
+          } catch (_) {}
+        }),
       );
 
-      await _awaitRequestBodyPortReady(
-        readyCompleter,
-        errorCompleter,
-        requestId: requestId,
+      final origin = requestUri.origin;
+      await guard.run(
+        () => controller.postWebMessage(
+          message: WebMessage(
+            data: '__fluxdo:body:$requestId',
+            ports: [channel!.port2],
+          ),
+          targetOrigin: WebUri(origin),
+        ),
+      );
+
+      await guard.run(
+        () => _awaitRequestBodyPortReady(
+          readyCompleter,
+          errorCompleter,
+          requestId: requestId,
+        ),
       );
 
       // 上传与下载复用同一原生能力查询，必须在消费流之前决定编码。
-      final useBase64 = await _responseTransport.usesBase64();
+      final useBase64 = await guard.run(_responseTransport.usesBase64);
       _setNetworkLogField(
         options,
         'webViewUploadTransport',
@@ -1189,6 +1247,7 @@ document.close();
       await WebViewRequestCodec.pipe(
         requestStream,
         useBase64: useBase64,
+        guard: guard,
         send: (payload) => port.postMessage(
           WebMessage(
             data: payload,
@@ -1199,20 +1258,25 @@ document.close();
         ),
       );
 
-      await _postRequestBodyControlMessage(port, {
-        'kind': 'complete',
-        'requestId': requestId,
-      });
+      await guard.run(
+        () => _postRequestBodyControlMessage(port, {
+          'kind': 'complete',
+          'requestId': requestId,
+        }),
+      );
 
-      await _awaitRequestBodyTransferComplete(
-        completeCompleter,
-        errorCompleter,
-        requestId: requestId,
+      await guard.run(
+        () => _awaitRequestBodyTransferComplete(
+          completeCompleter,
+          errorCompleter,
+          requestId: requestId,
+        ),
       );
 
       _setNetworkLogField(options, 'webViewUploadPhase', 'complete');
       return 'fetchOptions.body = window.__fluxdoTakeRequestBody(${jsonEncode(requestId)});';
     } catch (e) {
+      unawaited(_clearRequestBody(requestId));
       _setNetworkLogField(
         options,
         'webViewUploadPhase',
@@ -1223,6 +1287,11 @@ document.close();
         'webViewUploadErrorType',
         e.runtimeType.toString(),
       );
+      if (e is DioException &&
+          (e.type == DioExceptionType.cancel ||
+              e.type == DioExceptionType.sendTimeout)) {
+        rethrow;
+      }
       if (!transferStarted) {
         debugPrint(
           '[WebViewAdapter] Stream bridge unavailable, fallback to base64: $e',
@@ -1231,7 +1300,18 @@ document.close();
       }
       rethrow;
     } finally {
-      channel?.dispose();
+      if (channel != null) _disposeMessageChannel(channel!);
+    }
+  }
+
+  Future<void> _clearRequestBody(String requestId) async {
+    try {
+      await _controller?.evaluateJavascript(
+        source:
+            'window.__fluxdoDiscardRequestBody && window.__fluxdoDiscardRequestBody(${jsonEncode(requestId)});',
+      );
+    } catch (_) {
+      // WebView 销毁时页面内存已释放，清理异常不能覆盖原请求错误。
     }
   }
 
@@ -1261,6 +1341,16 @@ document.close();
           if (window.__fluxdoRequestBodyBridgeInstalled) return;
           window.__fluxdoRequestBodyBridgeInstalled = true;
           window.__fluxdoRequestBodyTransfers = new Map();
+
+          window.__fluxdoDiscardRequestBody = function(requestId) {
+            var state = window.__fluxdoRequestBodyTransfers.get(requestId);
+            if (!state) return;
+            state.discarded = true;
+            state.chunks = [];
+            state.body = null;
+            if (state.port) state.port.close();
+            window.__fluxdoRequestBodyTransfers.delete(requestId);
+          };
 
           function ensureState(requestId) {
             var state = window.__fluxdoRequestBodyTransfers.get(requestId);
@@ -1296,9 +1386,11 @@ document.close();
             var state = ensureState(requestId);
             state.chunks = [];
             state.body = null;
+            state.port = port;
 
             port.onmessage = function(portEvent) {
               try {
+                if (state.discarded) return;
                 var payload = portEvent.data;
                 if (typeof payload === 'string') {
                   var message = JSON.parse(payload);
@@ -1325,6 +1417,8 @@ document.close();
                   ));
                 }
               } catch (error) {
+                state.chunks = [];
+                state.body = null;
                 port.postMessage(JSON.stringify({
                   kind: 'error',
                   requestId: requestId,
@@ -1412,15 +1506,21 @@ document.close();
     return null;
   }
 
-  Future<Uint8List?> _readRequestBytes(Stream<Uint8List>? requestStream) async {
+  Future<Uint8List?> _readRequestBytes(
+    Stream<Uint8List>? requestStream,
+    WebViewOperationGuard guard,
+  ) async {
     if (requestStream == null) return null;
 
     final builder = BytesBuilder(copy: false);
-    await for (final chunk in requestStream) {
-      if (chunk.isNotEmpty) {
-        builder.add(chunk);
-      }
-    }
+    await WebViewRequestCodec.pipe(
+      requestStream,
+      useBase64: false,
+      guard: guard,
+      send: (payload) async {
+        builder.add(payload as Uint8List);
+      },
+    );
     return builder.isEmpty ? null : builder.takeBytes();
   }
 
@@ -1574,14 +1674,14 @@ class _RequestBodyPlan {
 
 enum _WebViewCookieMode { sync, readOnly, none }
 
-class _BinaryResponseHeaders {
-  const _BinaryResponseHeaders({
+class WebViewBinaryResponseHeaders {
+  const WebViewBinaryResponseHeaders({
     required this.statusCode,
     required this.headers,
     this.statusMessage,
   });
 
-  factory _BinaryResponseHeaders.fromJson(Map<dynamic, dynamic> json) {
+  factory WebViewBinaryResponseHeaders.fromJson(Map<dynamic, dynamic> json) {
     final headers = <String, List<String>>{};
     final rawHeaders = json['headers'];
     if (rawHeaders is Map) {
@@ -1589,7 +1689,7 @@ class _BinaryResponseHeaders {
         headers[key.toString()] = [value.toString()];
       });
     }
-    return _BinaryResponseHeaders(
+    return WebViewBinaryResponseHeaders(
       statusCode: json['status'] as int? ?? 200,
       statusMessage: json['statusText']?.toString(),
       headers: headers,
@@ -1601,21 +1701,41 @@ class _BinaryResponseHeaders {
   final Map<String, List<String>> headers;
 }
 
-class _BinaryResponseBridge {
-  _BinaryResponseBridge({
+/// 原生端口与 Dart MethodChannel 需要分别释放；清理不能阻塞请求结束。
+void _disposeMessageChannel(WebMessageChannel channel) {
+  for (final port in [channel.port1, channel.port2]) {
+    unawaited(
+      port
+          .close()
+          .timeout(const Duration(seconds: 1))
+          .catchError((Object _) {}),
+    );
+  }
+  channel.dispose();
+}
+
+@visibleForTesting
+class WebViewBinaryResponseBridge {
+  WebViewBinaryResponseBridge({
     required this.requestOptions,
     required this.channel,
     required Future<void> Function() onCancel,
-  }) : _streamController = StreamController<Uint8List>(
-         onCancel: () async {
-           await onCancel();
-         },
-       );
+  }) : _streamController = StreamController<Uint8List>() {
+    // 提前挂错误观察者，但保留原 Future 的错误供调用方 await。
+    unawaited(
+      headersCompleter.future.then<void>((_) {}, onError: (Object _) {}),
+    );
+    _streamController.onCancel = () async {
+      if (_closed) return;
+      complete();
+      await onCancel();
+    };
+  }
 
   final RequestOptions requestOptions;
   final WebMessageChannel channel;
   final StreamController<Uint8List> _streamController;
-  final headersCompleter = Completer<_BinaryResponseHeaders>();
+  final headersCompleter = Completer<WebViewBinaryResponseHeaders>();
   final _doneCompleter = Completer<void>();
 
   int bytesReceived = 0;
@@ -1625,7 +1745,7 @@ class _BinaryResponseBridge {
   Stream<Uint8List> get stream => _streamController.stream;
   Future<void> get done => _doneCompleter.future;
 
-  void completeHeaders(_BinaryResponseHeaders headers) {
+  void completeHeaders(WebViewBinaryResponseHeaders headers) {
     if (!headersCompleter.isCompleted) {
       headersCompleter.complete(headers);
     }
@@ -1642,7 +1762,7 @@ class _BinaryResponseBridge {
     if (_closed) return;
     _closed = true;
     _streamController.close();
-    channel.dispose();
+    _disposeMessageChannel(channel);
     if (!_doneCompleter.isCompleted) {
       _doneCompleter.complete();
     }
@@ -1656,7 +1776,7 @@ class _BinaryResponseBridge {
       _closed = true;
       _streamController.addError(error);
       _streamController.close();
-      channel.dispose();
+      _disposeMessageChannel(channel);
     }
     if (!_doneCompleter.isCompleted) {
       _doneCompleter.complete();
