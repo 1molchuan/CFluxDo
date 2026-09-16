@@ -2557,7 +2557,9 @@ class TopicListResponse {
   final List<Topic> topics;
   final String? moreTopicsUrl;
 
-  TopicListResponse({required this.topics, this.moreTopicsUrl});
+  final List<Tag> tags;
+
+  TopicListResponse({required this.topics, this.moreTopicsUrl, this.tags = const []});
 
   factory TopicListResponse.fromJson(Map<String, dynamic> json) {
     // Parse users map
@@ -2611,6 +2613,7 @@ class TopicListResponse {
           )
           .toList(),
       moreTopicsUrl: moreTopicsUrl,
+      tags: (topicList?['tags'] as List? ?? const []).map(Tag.fromJson).toList(),
     );
   }
 }

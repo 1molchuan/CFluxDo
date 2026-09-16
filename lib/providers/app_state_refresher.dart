@@ -122,7 +122,6 @@ class AppStateRefresher {
     (c) => c.invalidate(pmTrackingProvider),
     (c) => c.invalidate(doNotDisturbProvider),
     (c) => c.invalidate(categoryChangesProvider),
-    (c) => c.invalidate(latestChannelProvider),
     (c) => c.invalidate(messageBusInitProvider),
     (c) => c.invalidate(ldcUserInfoProvider),
     (c) => c.invalidate(cdkUserInfoProvider),
