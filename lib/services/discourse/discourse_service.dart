@@ -55,6 +55,7 @@ import '../user_api_key_service.dart';
 import '../user_presence_service.dart';
 import '../../l10n/s.dart';
 import '../../utils/url_helper.dart';
+import 'session_check_verdict.dart';
 
 part '_auth.dart';
 part '_login.dart';

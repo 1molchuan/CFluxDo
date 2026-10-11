@@ -1504,8 +1504,10 @@ mixin _AuthMixin on _DiscourseServiceBase {
       return false;
     } on DioException catch (e) {
       final status = e.response?.statusCode;
-      // 404 = 无用户 / 401/403 = 明确拒绝
-      if (status == 404 || status == 401 || status == 403) {
+      // 404 = 无用户 / 401/403 + 登出信号 = 明确拒绝；
+      // CF 挑战与无登出信号的 403（站点风控）不是会话问题，不能据此登出
+      final verdict = classifySessionCheckFailure(e.response);
+      if (verdict == SessionCheckVerdict.sessionInvalid) {
         LogWriter.instance.write({
           'timestamp': DateTime.now().toIso8601String(),
           'level': 'warning',
@@ -1524,6 +1526,18 @@ mixin _AuthMixin on _DiscourseServiceBase {
         });
         await logout(callApi: false, refreshPreload: false);
         return false;
+      }
+      if (status != null) {
+        LogWriter.instance.write({
+          'timestamp': DateTime.now().toIso8601String(),
+          'level': 'info',
+          'type': 'auth',
+          'event': 'auth_session_check_inconclusive',
+          'message': '登录态检查失败但未确认会话失效，保留本地登录态',
+          'statusCode': status,
+          'verdict': verdict.name,
+          'errorType': e.type.toString(),
+        });
       }
       // 网络异常/CF 验证等 → 保守保留本地状态
       _tToken = tToken;
