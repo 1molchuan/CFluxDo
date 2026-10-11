@@ -227,10 +227,14 @@ class CfChallengeInterceptor extends Interceptor {
         );
       }
 
-      // 静默请求只在后台尝试验证；页面数据/操作请求在前台展示验证。
+      // 静默请求只在后台尝试验证；页面数据/操作请求也先后台静默尝试
+      // silentFirstGrace，多数非交互式挑战会在这段时间内自动通过，过不了
+      // 再转前台展示验证。
       // (Windows 曾因插件析构竞态崩溃 0xc0000005 禁用过静默后台验证;
       // vendored 插件的 aliveGuard/TextureBridge 修复落地后恢复。)
-      final result = await cfService.showManualVerify(null, !isSilent);
+      final result = isSilent
+          ? await cfService.showManualVerify(null, false)
+          : await cfService.showVerifySilentFirst();
 
       // 本次验证的轮次号。多个并发请求撞盾会合流到同一轮验证,却各自走下面
       // 的处置分支 —— 失败计数必须带上轮次去重,否则一次时序抖动会被记成
@@ -364,7 +368,7 @@ class CfChallengeInterceptor extends Interceptor {
               // clearance 对 Dio 无效。这是确定性环境问题(典型:系统代理
               // 只对 WebView2 生效,Dio 直连,两侧出口 IP 不一致),再验证
               // 多少次都一样,立即熔断进入冷却,阻断验证无限循环。
-              if (CfChallengeService.isCfChallengeResponse(e.response)) {
+              if (retryStillBlockedByCf) {
                 cfService.startIneffectiveClearanceCooldown();
                 // 刚铸出的 clearance 重试仍被撞：同样标记为已死（它可能是
                 // IP 绑定类的确定性无效），放开换届，让下一次验证/新铸值

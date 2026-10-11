@@ -494,13 +494,42 @@ class CfChallengeService {
         lower.contains('page you requested');
   }
 
+  /// 页面数据/操作请求撞盾时，先在后台静默尝试的宽限期。
+  ///
+  /// 非交互式挑战（JS / managed 无需点击）多数能在这段时间内自动通过，
+  /// 用户全程只看到一个「正在自动验证」胶囊；仍未通过再转前台交给用户。
+  /// 此前这类请求一撞盾就直接全屏弹验证页，哪怕挑战几秒后会自己过。
+  static const silentFirstGrace = Duration(seconds: 6);
+
   /// 显示手动验证页面
   /// 返回值：true=验证成功, false=验证失败, null=冷却期内暂不可用或无 context
   /// [forceForeground] 是否强制前台显示（默认为 true）
   Future<bool?> showManualVerify([
     BuildContext? context,
     bool forceForeground = true,
-  ]) async {
+  ]) {
+    return _showVerify(context, forceForeground: forceForeground);
+  }
+
+  /// 先后台静默验证，[silentFirstGrace] 内未通过再转前台。
+  ///
+  /// 供页面数据/操作请求等自动发起的撞盾恢复使用；用户主动点击的验证入口
+  /// 仍应直接前台展示（[showManualVerify] / [showManualVerifyNow]）。
+  Future<bool?> showVerifySilentFirst([BuildContext? context]) {
+    return _showVerify(
+      context,
+      forceForeground: false,
+      foregroundAfter: silentFirstGrace,
+    );
+  }
+
+  /// [foregroundAfter] 非空表示调用方在等结果：后台最多尝试这么久就转前台，
+  /// 后台提前判定失败时也转前台交给用户，而不是直接放弃。
+  Future<bool?> _showVerify(
+    BuildContext? context, {
+    required bool forceForeground,
+    Duration? foregroundAfter,
+  }) async {
     // 检查冷却期
     if (isInCooldown) {
       debugPrint('[CfChallenge] In cooldown, skipping manual verify');
@@ -568,6 +597,23 @@ class CfChallengeService {
         }
         WidgetsBinding.instance.addPostFrameCallback((_) {
           _activePromoteToForeground?.call();
+        });
+      } else if (foregroundAfter != null) {
+        // 合流到进行中的后台验证：同样只给宽限期，到点仍未通过再转前台。
+        // 按轮次号校验，避免旧计时器把之后新起的一轮误转前台。
+        final round = _verifyRound;
+        Timer(foregroundAfter, () {
+          if (!_isVerifying ||
+              _verifyRound != round ||
+              _completedVerificationResult != null) {
+            return;
+          }
+          final promote = _activePromoteToForeground;
+          if (promote == null) {
+            _pendingPromoteToForeground = true;
+          } else {
+            promote();
+          }
         });
       }
 
@@ -738,6 +784,7 @@ class CfChallengeService {
         key: pageKey,
         verifyUrl: verifyUrl,
         startInBackground: !forceForeground,
+        foregroundAfter: forceForeground ? null : foregroundAfter,
         onResult: finish,
         onPromoteRequest: () => onPromoteToForeground(context),
         oldCfClearanceValue: backupCfClearance != null
@@ -819,6 +866,7 @@ class CfChallengePage extends StatefulWidget {
     super.key,
     required this.verifyUrl,
     this.startInBackground = false,
+    this.foregroundAfter,
     this.onResult,
     this.onPromoteRequest,
     this.oldCfClearanceValue,
@@ -828,6 +876,10 @@ class CfChallengePage extends StatefulWidget {
 
   /// 先后台尝试验证，超时后再切到前台
   final bool startInBackground;
+
+  /// 后台尝试的时限（覆盖默认的后台超时）。非空表示调用方在等结果：
+  /// 后台提前判定失败时转前台交给用户，而不是直接放弃。
+  final Duration? foregroundAfter;
   final ValueChanged<bool>? onResult;
   final VoidCallback? onPromoteRequest;
 
@@ -875,8 +927,9 @@ class _CfChallengePageState extends State<CfChallengePage> {
   /// 用于区分「旧值残留」和「验证后新设的值」
   String? _initialCfClearance;
 
-  int get _activeMaxCheckCount =>
-      _isBackground ? _backgroundMaxCheckCount : _foregroundMaxCheckCount;
+  int get _activeMaxCheckCount => _isBackground
+      ? (widget.foregroundAfter?.inSeconds ?? _backgroundMaxCheckCount)
+      : _foregroundMaxCheckCount;
 
   @override
   void initState() {
@@ -1439,11 +1492,13 @@ class _CfChallengePageState extends State<CfChallengePage> {
         success: false,
         reason: reason ?? 'no fresh cf_clearance after completion probe',
       );
-      if (_isBackground) {
+      if (_isBackground && widget.foregroundAfter == null) {
         _timeoutTimer?.cancel();
         if (mounted) _finish(false);
         return;
       }
+      // 调用方在等结果：转前台展示「重试/退出」，与直接前台验证的处置一致
+      if (_isBackground) _promoteToForeground();
       if (mounted && !_hasPopped) {
         setState(() {
           _originFallbackNeedsAction = true;

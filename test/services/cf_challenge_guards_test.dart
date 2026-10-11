@@ -57,5 +57,28 @@ void main() {
 
       expect(result, isNull, reason: '无 UI 环境应放弃验证');
     }, timeout: const Timeout(Duration(seconds: 30)));
+
+    test('先静默后前台的入口同样受 context 等待上限约束', () async {
+      // 页面数据/操作请求撞盾改走 showVerifySilentFirst,它不能绕开上面那条
+      // 无 UI 收口,否则后台拉取撞盾又会挂死。
+      final service = CfChallengeService();
+      service.resetCooldown();
+
+      final result = await service
+          .showVerifySilentFirst()
+          .timeout(const Duration(seconds: 20));
+
+      expect(result, isNull, reason: '无 UI 环境应放弃验证');
+    }, timeout: const Timeout(Duration(seconds: 30)));
+
+    test('静默宽限期短于后台验证默认时限', () {
+      // 宽限期是"用户可见请求最多多等多久"的上限,必须明显短于纯后台
+      // 请求的 10s,否则等于把前台请求降级成了静默请求。
+      expect(CfChallengeService.silentFirstGrace, greaterThan(Duration.zero));
+      expect(
+        CfChallengeService.silentFirstGrace,
+        lessThan(const Duration(seconds: 10)),
+      );
+    });
   });
 }

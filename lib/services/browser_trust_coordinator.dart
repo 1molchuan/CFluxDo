@@ -428,9 +428,9 @@ class BrowserTrustCoordinator {
       // Dio 侧(或其它入口)正在验证 → 等它广播 clearance 解决,不重复弹验证。
       gotClearance = await _awaitClearanceResolved(cf, after: cycleStartAt);
     } else if (cf.autoVerifyEnabled && !cf.isInCooldown) {
-      // 没有进行中的验证 → coordinator 主动发起(showManualVerify 内部会复用任何
-      // 期间出现的进行中验证)。
-      final ok = await cf.showManualVerify(_navigatorContext, true);
+      // 没有进行中的验证 → coordinator 主动发起(内部会复用任何期间出现的
+      // 进行中验证)。自动恢复不是用户发起的,先后台静默尝试再转前台。
+      final ok = await cf.showVerifySilentFirst(_navigatorContext);
       gotClearance = ok == true;
     }
 
