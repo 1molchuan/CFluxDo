@@ -20,7 +20,9 @@ class FluxdoApplication : Application() {
             if (enable) {
                 // 延迟初始化：只在用户主动开启时初始化 Firebase
                 if (FirebaseApp.getApps(app).isEmpty()) {
-                    FirebaseApp.initializeApp(app)
+                    // 未打包 Firebase 配置(cfluxdo 不接入 google-services)时返回 null,
+                    // 此时 getInstance() 会抛异常,直接跳过
+                    FirebaseApp.initializeApp(app) ?: return
                 }
                 FirebaseCrashlytics.getInstance().setCrashlyticsCollectionEnabled(true)
                 // Crashlytics 就绪后立刻捞上次进程的异常退出现场(ANR 全线程栈)。

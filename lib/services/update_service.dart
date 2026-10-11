@@ -83,7 +83,8 @@ class UpdateInfo {
 
 /// 应用更新检查服务
 class UpdateService {
-  static const String _repository = 'Lingyan000/fluxdo';
+  // cfluxdo 从 fork 的 Release 检查更新(包名与签名都和官方版不同,不能装官方包)
+  static const String _repository = '1molchuan/fluxdo';
   static const String _apiUrl =
       'https://api.github.com/repos/$_repository/releases/latest';
   static const String _autoCheckUpdateKey = 'auto_check_update';
@@ -433,7 +434,9 @@ class UpdateService {
     final parts1 = v1.split('.').map(int.parse).toList();
     final parts2 = v2.split('.').map(int.parse).toList();
 
-    for (int i = 0; i < 3; i++) {
+    // 不限定段数:cfluxdo 用第 4 段表示基于同一上游版本的修订(0.2.28.1)
+    final length = parts1.length > parts2.length ? parts1.length : parts2.length;
+    for (int i = 0; i < length; i++) {
       final p1 = i < parts1.length ? parts1[i] : 0;
       final p2 = i < parts2.length ? parts2[i] : 0;
       if (p1 != p2) return p1.compareTo(p2);

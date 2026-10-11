@@ -7,8 +7,8 @@ plugins {
     id("kotlin-android")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
-    id("com.google.gms.google-services")
-    id("com.google.firebase.crashlytics")
+    // cfluxdo:不接入上游的 Firebase 项目(google-services.json 绑定上游包名,
+    // 崩溃也不应上报到上游),去掉 google-services / crashlytics 插件。
 }
 
 fun Properties.readNonBlank(name: String): String? =
@@ -65,8 +65,8 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "com.github.lingyan000.fluxdo"
+        // cfluxdo 使用独立包名,可与官方 FluxDO 共存安装
+        applicationId = "com.github.molchuan.cfluxdo"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
@@ -89,13 +89,6 @@ android {
     buildTypes {
         release {
             signingConfig = signingConfigs.getByName(releaseBuildSigningName)
-            // NDK 符号上传:不开的话 libflutter.so / libapp.so 的 native 崩溃在
-            // Crashlytics 里只有裸地址(blameFrame: address: '5148676'),栈帧全空,
-            // 完全无法归因 —— 而 native 崩溃正是当前最大头的崩溃来源。
-            configure<com.google.firebase.crashlytics.buildtools.gradle.CrashlyticsExtension> {
-                nativeSymbolUploadEnabled = true
-                unstrippedNativeLibsDir = file("build/intermediates/merged_native_libs/release/out/lib")
-            }
         }
 
         debug {
