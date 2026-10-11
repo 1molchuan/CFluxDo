@@ -148,6 +148,25 @@ void main() {
       expect(policy.canHandle(_failure(404, method: 'GET')), isFalse);
       expect(policy.canHandle(_failure(403, method: 'GET')), isFalse);
     });
+
+    test('挑战型 503 不归本策略(交给 CF 盾处理)', () {
+      final policy = TransientRetryPolicy(
+        isChallengeResponse: (r) =>
+            r?.headers.value('cf-mitigated') == 'challenge',
+      );
+      expect(
+        policy.canHandle(
+          _failure(503, headers: {'cf-mitigated': ['challenge']}),
+        ),
+        isFalse,
+        reason: '不过盾就重放只会再撞盾',
+      );
+      expect(
+        policy.canHandle(_failure(503)),
+        isTrue,
+        reason: '普通 503 仍按瞬态重放',
+      );
+    });
   });
 
   group('RecoveryCoordinator 端到端', () {

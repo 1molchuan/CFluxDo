@@ -431,6 +431,28 @@ class CfChallengeService {
     return isCfChallenge(response.data);
   }
 
+  /// CF 挑战可能使用的状态码：
+  /// - 403：普通 CF 盾（WAF / bot fight / managed challenge）
+  /// - 429：速率限制规则配 challenge 类动作
+  /// - 503：「I'm Under Attack」等 JS 挑战的历史形态
+  static const _challengeStatusCodes = {403, 429, 503};
+
+  /// 错误响应是否是需要过盾的 CF 挑战（含状态码判定）。
+  ///
+  /// `cf-mitigated: challenge` 是 CF 官方权威信号，任意状态码命中都算；
+  /// 没有该头时只在 403/429/503 上用 body 兜底——其他状态码的 HTML
+  /// （如 404 页面恰好引用了挑战脚本）不应被拖进验证流程。
+  ///
+  /// 历史上拦截器只认 403/429，503 挑战会先被 TransientRetry 白白重放
+  /// 三轮，再以"服务器暂不可用"收场，永远进不了验证。
+  static bool isCfChallengeError(Response? response) {
+    if (response == null) return false;
+    final cfMitigated = response.headers.value('cf-mitigated') ?? '';
+    if (cfMitigated.contains('challenge')) return true;
+    if (!_challengeStatusCodes.contains(response.statusCode)) return false;
+    return isCfChallengeResponse(response);
+  }
+
   /// 检测是否是 CF 验证页面（用于 403 响应体判断）
   static bool isCfChallenge(dynamic responseData) {
     if (responseData == null) return false;

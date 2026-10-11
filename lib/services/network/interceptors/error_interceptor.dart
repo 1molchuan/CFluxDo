@@ -21,12 +21,12 @@ class ErrorInterceptor extends Interceptor {
     final method = err.requestOptions.method.toUpperCase();
     final spec = err.requestOptions.spec;
 
-    // CF 盾 403/429 由 CfChallengeInterceptor 统一决定展示形态:
+    // CF 盾 403/429/503 由 CfChallengeInterceptor 统一决定展示形态:
     // 页面数据走错误态按钮,操作请求走明确提示,静默请求不打扰。
     // CF 速率限制规则配 managed_challenge 时返回 429 + 挑战页,不是真正的速率限制,
-    // 不能落入下方 429 分支弹"请等待 N 秒"toast、抛 RateLimitException。
-    if ((statusCode == 403 || statusCode == 429) &&
-        CfChallengeService.isCfChallengeResponse(err.response)) {
+    // 不能落入下方 429 分支弹"请等待 N 秒"toast、抛 RateLimitException;
+    // 503 挑战同理,不能落入 5xx 分支弹"服务器暂不可用"。
+    if (CfChallengeService.isCfChallengeError(err.response)) {
       handler.next(err);
       return;
     }

@@ -66,6 +66,33 @@ void main() {
     expect(callerError, isA<ServerException>());
     expect((callerError as ServerException).statusCode, 503);
   });
+
+  test('挑战型 503 原样交给 CF 拦截器,不转 ServerException', () async {
+    final downstream = _CaptureInterceptor();
+    final dio = _buildDio(
+      statusCode: 503,
+      body: 'challenge',
+      headers: {
+        'cf-mitigated': ['challenge'],
+        Headers.contentTypeHeader: ['text/plain'],
+      },
+      downstream: downstream,
+    );
+
+    Object? callerError;
+    try {
+      await dio.get('/latest.json');
+    } on DioException catch (e) {
+      callerError = e.error;
+    }
+
+    expect(downstream.seenStatusCode, 503);
+    expect(
+      callerError,
+      isNot(isA<ServerException>()),
+      reason: '挑战不是服务器故障,不能弹"服务器暂不可用"',
+    );
+  });
 }
 
 Dio _buildDio({

@@ -87,6 +87,9 @@ class RateLimitPolicy implements RecoveryPolicy {
 /// 只对幂等方法生效——POST 重放可能造成重复发帖/重复点赞,宁可失败也不
 /// 冒这个风险(这也是为什么它不能简单等价于 dio_smart_retry 的默认行为:
 /// 后者对所有方法一视同仁)。
+///
+/// 挑战型 503 同样经 [isChallengeResponse] 放行给 CfChallengeInterceptor:
+/// 不过盾就重放只会再撞三次盾,白等 7 秒。
 class TransientRetryPolicy implements RecoveryPolicy {
   const TransientRetryPolicy({
     this.delays = const [
@@ -94,10 +97,14 @@ class TransientRetryPolicy implements RecoveryPolicy {
       Duration(seconds: 2),
       Duration(seconds: 4),
     ],
+    this.isChallengeResponse,
   });
 
   /// 第 N 次重放前的等待时长(指数退避)。
   final List<Duration> delays;
+
+  /// 判定"这个 5xx 其实是 CF 挑战"的钩子,语义同 [RateLimitPolicy]。
+  final bool Function(Response<dynamic>? response)? isChallengeResponse;
 
   static const _idempotentMethods = {'GET', 'HEAD', 'OPTIONS'};
   static const _retryableStatuses = {502, 503, 504};
@@ -113,7 +120,10 @@ class TransientRetryPolicy implements RecoveryPolicy {
       return false;
     }
     final status = outcome.statusCode;
-    if (status != null) return _retryableStatuses.contains(status);
+    if (status != null) {
+      if (!_retryableStatuses.contains(status)) return false;
+      return isChallengeResponse?.call(err.response) != true;
+    }
     return _isTransientNetworkError(err);
   }
 

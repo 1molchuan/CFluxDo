@@ -92,9 +92,11 @@ class DiscourseDio {
             if (cookiesEnabled) SessionSelfHealPolicy(),
             const EngineFallbackPolicy(),
             RateLimitPolicy(
-              isChallengeResponse: CfChallengeService.isCfChallengeResponse,
+              isChallengeResponse: CfChallengeService.isCfChallengeError,
             ),
-            const TransientRetryPolicy(),
+            TransientRetryPolicy(
+              isChallengeResponse: CfChallengeService.isCfChallengeError,
+            ),
           ],
         ),
       );

@@ -138,11 +138,10 @@ class CfChallengeInterceptor extends Interceptor {
     final skipCfChallenge = err.requestOptions.spec.skipCfChallenge;
 
     // CF 速率限制规则的 action 配为 managed_challenge / js_challenge / challenge 时,
-    // 触发后返回 429 + cf-mitigated: challenge + 挑战页,而不是 403。
-    // 因此 403 / 429 都要走 CF 验证流程,由 isCfChallengeResponse 精确判定。
-    if ((statusCode == 403 || statusCode == 429) &&
-        !skipCfChallenge &&
-        CfChallengeService.isCfChallengeResponse(err.response)) {
+    // 触发后返回 429 + cf-mitigated: challenge + 挑战页,而不是 403;
+    // Under Attack 等模式还会用 503。状态码判定统一收口在 isCfChallengeError。
+    if (!skipCfChallenge &&
+        CfChallengeService.isCfChallengeError(err.response)) {
       // 备选提取 sitekey（从 403 响应体中）
       CfClearanceRefreshService().extractAndUpdateSitekey(
         err.response?.data?.toString() ?? '',
@@ -169,7 +168,7 @@ class CfChallengeInterceptor extends Interceptor {
       SystemProxyService.instance.refresh();
       CfChallengeLogger.logInterceptorDetected(
         url: requestUrl,
-        statusCode: statusCode!,
+        statusCode: statusCode ?? 0,
       );
       // 记录在位值被撞：本次请求携带的 cf_clearance 已被 CF 挑战（= 已死），
       // 打开换届窗口——之后 sync 可以替换它（过盾新值继位，或 Turnstile
@@ -296,9 +295,7 @@ class CfChallengeInterceptor extends Interceptor {
         } catch (e) {
           final retryStillBlockedByCf =
               e is DioException &&
-              (e.response?.statusCode == 403 ||
-                  e.response?.statusCode == 429) &&
-              CfChallengeService.isCfChallengeResponse(e.response);
+              CfChallengeService.isCfChallengeError(e.response);
 
           // 验证拿到新 clearance 后，原生链路仍被 CF 拒绝，说明问题不只是
           // Cookie，而是当前原生网络身份未被信任。仅对用户可见请求询问一次，
@@ -358,7 +355,8 @@ class CfChallengeInterceptor extends Interceptor {
               'type=${e.type}, url=${e.requestOptions.uri}',
             );
             if (e.response?.statusCode == 403 ||
-                e.response?.statusCode == 429) {
+                e.response?.statusCode == 429 ||
+                e.response?.statusCode == 503) {
               debugPrint(
                 '[Dio] Retry got ${e.response?.statusCode} again — cf_clearance may not have been sent or already expired',
               );
