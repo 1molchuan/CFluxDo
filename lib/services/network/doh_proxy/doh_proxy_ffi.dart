@@ -427,6 +427,8 @@ class DohProxyFfi {
     bool gatewayMode = false,
     String? dohServer,
     String? dohServerEch,
+    List<String> dohBootstrapIps = const [],
+    List<String> dohEchBootstrapIps = const [],
     String? serverIp,
     String? upstreamProtocol,
     String? upstreamHost,
@@ -455,6 +457,9 @@ class DohProxyFfi {
       'timeout_secs': 30,
       if (dohServerEch != null && dohServerEch.isNotEmpty)
         'doh_server_ech': dohServerEch,
+      if (dohBootstrapIps.isNotEmpty) 'doh_bootstrap_ips': dohBootstrapIps,
+      if (dohEchBootstrapIps.isNotEmpty)
+        'doh_ech_bootstrap_ips': dohEchBootstrapIps,
       if (serverIp != null && serverIp.isNotEmpty) 'server_ip': serverIp,
       if (upstreamHost != null &&
           upstreamHost.isNotEmpty &&

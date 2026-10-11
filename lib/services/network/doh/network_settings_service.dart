@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' show Random;
 
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter/foundation.dart';
@@ -66,7 +67,7 @@ class NetworkSettings {
     String? selectedServerUrl,
     String? Function()? echServerUrl,
     List<DohServer>? customServers,
-    int? proxyPort,
+    int? Function()? proxyPort,
     bool? preferIPv6,
     String? Function()? serverIp,
     bool? gatewayEnabled,
@@ -77,7 +78,7 @@ class NetworkSettings {
       selectedServerUrl: selectedServerUrl ?? this.selectedServerUrl,
       echServerUrl: echServerUrl != null ? echServerUrl() : this.echServerUrl,
       customServers: customServers ?? this.customServers,
-      proxyPort: proxyPort ?? this.proxyPort,
+      proxyPort: proxyPort != null ? proxyPort() : this.proxyPort,
       preferIPv6: preferIPv6 ?? this.preferIPv6,
       gatewayEnabled: gatewayEnabled ?? this.gatewayEnabled,
       serverIp: serverIp != null ? serverIp() : this.serverIp,
@@ -204,6 +205,7 @@ class NetworkSettingsService {
   static const _echServerKey = 'doh_ech_server';
   static const _gatewayEnabledKey = 'doh_gateway_enabled';
   static const _h2MitmKey = 'doh_h2_mitm';
+  static const _accelSubdomainKey = 'doh_accel_subdomain';
 
   final ValueNotifier<NetworkSettings> notifier = ValueNotifier(
     NetworkSettings(
@@ -223,6 +225,9 @@ class NetworkSettingsService {
 
   late DohResolver _resolver;
   SharedPreferences? _prefs;
+
+  /// cfluxdo 加速服务器，initialize 时按本机的随机子域名生成
+  DohServer? _accelServer;
   int _version = 0;
   int _applyDepth = 0;
   Timer? _applyDebounce;
@@ -266,16 +271,24 @@ class NetworkSettingsService {
       current.dohEnabled || _proxyService.current.isValid;
 
   List<DohServer> get servers => [
-    ..._defaultServers,
+    ..._builtInServers,
     ...notifier.value.customServers,
   ];
+
+  /// 内置服务器：cfluxdo 加速排第一，作为默认服务器
+  List<DohServer> get _builtInServers => [
+    ?_accelServer,
+    ..._defaultServers,
+  ];
+
+  String get _defaultServerUrl => _builtInServers.first.url;
 
   Future<void> initialize(SharedPreferences prefs) async {
     if (_prefs != null) return;
     _prefs = prefs;
-    final dohEnabled = prefs.getBool(_dohEnabledKey) ?? false;
-    final selected =
-        prefs.getString(_dohSelectedKey) ?? _defaultServers.first.url;
+    _accelServer = buildAccelDohServer(await _loadAccelSubdomain(prefs));
+    final dohEnabled = prefs.getBool(_dohEnabledKey) ?? true;
+    final selected = prefs.getString(_dohSelectedKey) ?? _defaultServerUrl;
     final customRaw = prefs.getString(_dohCustomKey);
     final custom = _decodeServers(customRaw);
     final proxyPort = prefs.getInt(_proxyPortKey);
@@ -506,14 +519,7 @@ class NetworkSettingsService {
         if (_pendingStart) {
           _setPendingStart(false);
         }
-        final prefs = _prefs;
-        if (current.proxyPort != null) {
-          notifier.value = notifier.value.copyWith(proxyPort: null);
-          if (prefs != null) {
-            await prefs.remove(_proxyPortKey);
-          }
-          _touch();
-        }
+        await _clearProxyPort();
         if (_lastStartFailed) {
           _setStartFailed(false);
         }
@@ -613,6 +619,12 @@ class NetworkSettingsService {
         preferIPv6: current.preferIPv6,
         dohServer: current.dohEnabled ? current.selectedServerUrl : null,
         dohServerEch: current.dohEnabled ? current.echServerUrl : null,
+        dohBootstrapIps: current.dohEnabled
+            ? _getBootstrapIps(current.selectedServerUrl)
+            : const [],
+        dohEchBootstrapIps: current.dohEnabled && current.echServerUrl != null
+            ? _getBootstrapIps(current.echServerUrl!)
+            : const [],
         serverIp: current.serverIp,
         upstreamProtocol: upstream?.protocol,
         upstreamHost: upstream?.host,
@@ -627,10 +639,13 @@ class NetworkSettingsService {
       );
 
       if (!success) {
-        debugPrint('[DOH] Failed to start Rust proxy');
+        debugPrint('[DOH] Failed to start Rust proxy，改为直连');
         _setStartFailed(true);
         _setPendingStart(false);
         await _clearWebViewProxy();
+        // 代理没起来时清掉端口，Dio 不再指向 127.0.0.1，改用系统网络直连，
+        // 避免所有请求打到不存在的本地端口导致 App 无法使用
+        await _clearProxyPort();
         return;
       }
 
@@ -657,7 +672,7 @@ class NetworkSettingsService {
         final prefs = _prefs;
         if (prefs != null && activePort != null) {
           await prefs.setInt(_proxyPortKey, activePort);
-          notifier.value = notifier.value.copyWith(proxyPort: activePort);
+          notifier.value = notifier.value.copyWith(proxyPort: () => activePort);
           _touch(); // 触发 HttpClient 重建
         }
       }
@@ -676,6 +691,14 @@ class NetworkSettingsService {
         _touch();
       }
     }
+  }
+
+  /// 清掉本地代理端口，HTTP 客户端随之改为直连
+  Future<void> _clearProxyPort() async {
+    if (current.proxyPort == null) return;
+    notifier.value = notifier.value.copyWith(proxyPort: () => null);
+    await _prefs?.remove(_proxyPortKey);
+    _touch();
   }
 
   void _setStartFailed(bool value) {
@@ -702,7 +725,14 @@ class NetworkSettingsService {
   /// 可能失效，需要检测并重启。
   Future<void> ensureProxyAlive() async {
     if (!shouldRunLocalProxy) return;
-    if (!_rustProxyService.isRunning) return;
+    if (!_rustProxyService.isRunning) {
+      // 上次启动失败、当前处于直连状态：回到前台时再试一次
+      if (_lastStartFailed && !isApplying.value) {
+        debugPrint('[DOH] 上次代理启动失败，重新尝试');
+        await restartProxy();
+      }
+      return;
+    }
     final alive = await _rustProxyService.checkAlive();
     if (!alive) {
       debugPrint('[DOH] 代理已失效，自动重启');
@@ -1275,18 +1305,28 @@ class NetworkSettingsService {
   }
 
   String _resolveSelected(String selected, List<DohServer> customServers) {
-    final allServers = [..._defaultServers, ...customServers];
+    final allServers = [..._builtInServers, ...customServers];
     final found = allServers.any((s) => s.url == selected);
-    return found ? selected : _defaultServers.first.url;
+    return found ? selected : _defaultServerUrl;
   }
 
   /// 根据 URL 查找服务器配置
   DohServer? _findServer(String url) {
-    final allServers = [..._defaultServers, ...notifier.value.customServers];
-    for (final server in allServers) {
+    for (final server in servers) {
       if (server.url == url) return server;
     }
     return null;
+  }
+
+  /// 读取本机的加速子域名，没有或格式不对时生成一个新的并保存
+  Future<String> _loadAccelSubdomain(SharedPreferences prefs) async {
+    final saved = prefs.getString(_accelSubdomainKey);
+    if (saved != null && isValidAccelSubdomain(saved)) {
+      return saved;
+    }
+    final created = generateAccelSubdomain();
+    await prefs.setString(_accelSubdomainKey, created);
+    return created;
   }
 
   /// 获取选中服务器的 Bootstrap IP
@@ -1508,6 +1548,46 @@ class NetworkSettingsService {
     return baseUri?.host ?? 'example.com';
   }
 }
+
+/// cfluxdo 加速（Edge Smart DoH）
+///
+/// 每个安装用一个随机子域名访问，服务端借此区分安装，不关联任何账号信息。
+/// 节点 IP 作为 bootstrap：系统 DNS 解析不出加速域名时直接连这些节点（SNI 不变）。
+const String accelDohServerName = 'cfluxdo 加速';
+const String _accelDohHostSuffix = 'wq.1molchuan.top';
+const String _accelDohPath = '/v1/lookup';
+const int _accelSubdomainLength = 12;
+const String _accelSubdomainAlphabet = 'abcdefghijklmnopqrstuvwxyz0123456789';
+const List<String> accelDohBootstrapIps = [
+  '156.239.232.8',
+  '156.239.232.72',
+  '203.168.131.145',
+  '103.199.103.204',
+];
+
+final RegExp _accelSubdomainPattern = RegExp(
+  '^[a-z0-9]{$_accelSubdomainLength}\$',
+);
+
+@visibleForTesting
+bool isValidAccelSubdomain(String value) =>
+    _accelSubdomainPattern.hasMatch(value);
+
+@visibleForTesting
+String generateAccelSubdomain([Random? random]) {
+  final rng = random ?? Random.secure();
+  return List.generate(
+    _accelSubdomainLength,
+    (_) => _accelSubdomainAlphabet[rng.nextInt(_accelSubdomainAlphabet.length)],
+  ).join();
+}
+
+@visibleForTesting
+DohServer buildAccelDohServer(String subdomain) => DohServer(
+  name: accelDohServerName,
+  url: 'https://$subdomain.$_accelDohHostSuffix$_accelDohPath',
+  bootstrapIps: accelDohBootstrapIps,
+);
 
 /// 默认 DOH 服务器列表
 /// Bootstrap IP 来源：各 DNS 提供商官方文档

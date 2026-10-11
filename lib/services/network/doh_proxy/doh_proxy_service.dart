@@ -31,6 +31,7 @@ class DohProxyService {
   bool? _currentGatewayMode;
   String? _currentDohServer;
   String? _currentDohServerEch;
+  String? _currentDohBootstrapSignature;
   bool? _currentPreferIPv6;
   int? _currentPreferredPort;
   String? _currentServerIp;
@@ -64,6 +65,8 @@ class DohProxyService {
     bool gatewayMode = false,
     String? dohServer,
     String? dohServerEch,
+    List<String> dohBootstrapIps = const [],
+    List<String> dohEchBootstrapIps = const [],
     String? serverIp,
     String? upstreamProtocol,
     String? upstreamHost,
@@ -76,6 +79,10 @@ class DohProxyService {
     bool mitmConnect = true,
     bool h2Mitm = false,
   }) async {
+    final bootstrapSignature = _buildBootstrapSignature(
+      dohBootstrapIps,
+      dohEchBootstrapIps,
+    );
     final upstreamSignature = _buildUpstreamSignature(
       protocol: upstreamProtocol,
       host: upstreamHost,
@@ -90,6 +97,7 @@ class DohProxyService {
           _currentGatewayMode == gatewayMode &&
           _currentDohServer == dohServer &&
           _currentDohServerEch == dohServerEch &&
+          _currentDohBootstrapSignature == bootstrapSignature &&
           _currentPreferIPv6 == preferIPv6 &&
           _currentPreferredPort == preferredPort &&
           _currentServerIp == serverIp &&
@@ -115,6 +123,8 @@ class DohProxyService {
         preferIPv6,
         dohServer,
         dohServerEch,
+        dohBootstrapIps,
+        dohEchBootstrapIps,
         serverIp,
         upstreamProtocol,
         upstreamHost,
@@ -138,6 +148,8 @@ class DohProxyService {
           preferIPv6,
           dohServer,
           dohServerEch,
+          dohBootstrapIps,
+          dohEchBootstrapIps,
           serverIp,
           upstreamProtocol,
           upstreamHost,
@@ -158,6 +170,8 @@ class DohProxyService {
         preferIPv6,
         dohServer,
         dohServerEch,
+        dohBootstrapIps,
+        dohEchBootstrapIps,
         serverIp,
         upstreamProtocol,
         upstreamHost,
@@ -179,6 +193,8 @@ class DohProxyService {
     bool preferIPv6,
     String? dohServer,
     String? dohServerEch,
+    List<String> dohBootstrapIps,
+    List<String> dohEchBootstrapIps,
     String? serverIp,
     String? upstreamProtocol,
     String? upstreamHost,
@@ -206,6 +222,8 @@ class DohProxyService {
           preferIpv6: preferIPv6,
           dohServer: dohServer,
           dohServerEch: dohServerEch,
+          dohBootstrapIps: dohBootstrapIps,
+          dohEchBootstrapIps: dohEchBootstrapIps,
           serverIp: serverIp,
           upstreamProtocol: upstreamProtocol,
           upstreamHost: upstreamHost,
@@ -231,6 +249,10 @@ class DohProxyService {
         _currentGatewayMode = gatewayMode;
         _currentDohServer = dohServer;
         _currentDohServerEch = dohServerEch;
+        _currentDohBootstrapSignature = _buildBootstrapSignature(
+          dohBootstrapIps,
+          dohEchBootstrapIps,
+        );
         _currentPreferIPv6 = preferIPv6;
         _currentPreferredPort = port;
         _currentServerIp = serverIp;
@@ -262,6 +284,8 @@ class DohProxyService {
     bool preferIPv6,
     String? dohServer,
     String? dohServerEch,
+    List<String> dohBootstrapIps,
+    List<String> dohEchBootstrapIps,
     String? serverIp,
     String? upstreamProtocol,
     String? upstreamHost,
@@ -296,6 +320,14 @@ class DohProxyService {
         if (dohServerEch != null && dohServerEch.isNotEmpty) ...[
           '--doh-server-ech',
           dohServerEch,
+        ],
+        if (dohBootstrapIps.isNotEmpty) ...[
+          '--doh-bootstrap-ips',
+          dohBootstrapIps.join(','),
+        ],
+        if (dohEchBootstrapIps.isNotEmpty) ...[
+          '--doh-ech-bootstrap-ips',
+          dohEchBootstrapIps.join(','),
         ],
         if (serverIp != null && serverIp.isNotEmpty) ...[
           '--server-ip',
@@ -347,6 +379,10 @@ class DohProxyService {
           _currentGatewayMode = gatewayMode;
           _currentDohServer = dohServer;
           _currentDohServerEch = dohServerEch;
+          _currentDohBootstrapSignature = _buildBootstrapSignature(
+            dohBootstrapIps,
+            dohEchBootstrapIps,
+          );
           _currentPreferIPv6 = preferIPv6;
           _currentPreferredPort = preferredPort;
           _currentServerIp = serverIp;
@@ -459,6 +495,7 @@ class DohProxyService {
     _currentGatewayMode = null;
     _currentDohServer = null;
     _currentDohServerEch = null;
+    _currentDohBootstrapSignature = null;
     _currentPreferIPv6 = null;
     _currentPreferredPort = null;
     _currentServerIp = null;
@@ -782,6 +819,8 @@ class DohProxyService {
     required bool preferIpv6,
     required String? dohServer,
     required String? dohServerEch,
+    List<String> dohBootstrapIps = const [],
+    List<String> dohEchBootstrapIps = const [],
     required String? serverIp,
     required String? upstreamProtocol,
     required String? upstreamHost,
@@ -805,6 +844,8 @@ class DohProxyService {
       'preferIpv6': preferIpv6,
       'dohServer': dohServer,
       'dohServerEch': dohServerEch,
+      'dohBootstrapIps': dohBootstrapIps,
+      'dohEchBootstrapIps': dohEchBootstrapIps,
       'serverIp': serverIp,
       'upstreamProtocol': upstreamProtocol,
       'upstreamHost': upstreamHost,
@@ -1056,6 +1097,11 @@ class DohProxyService {
     });
   }
 
+  String _buildBootstrapSignature(
+    List<String> dohBootstrapIps,
+    List<String> dohEchBootstrapIps,
+  ) => '${dohBootstrapIps.join(',')}|${dohEchBootstrapIps.join(',')}';
+
   Future<SendPort> _ensureFfiIsolate() async {
     if (_ffiSendPort != null) return _ffiSendPort!;
     final readyPort = ReceivePort();
@@ -1065,6 +1111,9 @@ class DohProxyService {
     return _ffiSendPort!;
   }
 }
+
+List<String> _stringList(Object? value) =>
+    value is List ? value.whereType<String>().toList() : const [];
 
 void _ffiIsolateEntry(SendPort mainSendPort) {
   final port = ReceivePort();
@@ -1093,6 +1142,8 @@ void _ffiIsolateEntry(SendPort mainSendPort) {
           final preferIpv6 = message['preferIpv6'] as bool? ?? false;
           final dohServer = message['dohServer'] as String?;
           final dohServerEch = message['dohServerEch'] as String?;
+          final dohBootstrapIps = _stringList(message['dohBootstrapIps']);
+          final dohEchBootstrapIps = _stringList(message['dohEchBootstrapIps']);
           final serverIp = message['serverIp'] as String?;
           final upstreamProtocol = message['upstreamProtocol'] as String?;
           final upstreamHost = message['upstreamHost'] as String?;
@@ -1110,6 +1161,8 @@ void _ffiIsolateEntry(SendPort mainSendPort) {
             preferIpv6: preferIpv6,
             dohServer: dohServer,
             dohServerEch: dohServerEch,
+            dohBootstrapIps: dohBootstrapIps,
+            dohEchBootstrapIps: dohEchBootstrapIps,
             serverIp: serverIp,
             upstreamProtocol: upstreamProtocol,
             upstreamHost: upstreamHost,
@@ -1130,6 +1183,8 @@ void _ffiIsolateEntry(SendPort mainSendPort) {
               preferIpv6: preferIpv6,
               dohServer: dohServer,
               dohServerEch: dohServerEch,
+              dohBootstrapIps: dohBootstrapIps,
+              dohEchBootstrapIps: dohEchBootstrapIps,
               serverIp: serverIp,
               upstreamProtocol: upstreamProtocol,
               upstreamHost: upstreamHost,
