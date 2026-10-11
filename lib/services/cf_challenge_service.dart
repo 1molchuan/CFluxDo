@@ -49,8 +49,42 @@ class CfChallengeService {
   bool? _completedVerificationResult;
   Completer<void>? _manualTeardownCompleter;
 
+  /// 当前这一轮验证的结果，供只等结果、不发起验证的调用方使用
+  /// （见 [waitForActiveVerification]）。
+  Completer<bool>? _roundOutcome;
+
   /// CF 验证是否正在进行中（用于外部判断是否应忽略路由变化）
   bool get isVerifying => _isVerifying;
+
+  /// 等待进行中的这一轮验证产生结果。
+  ///
+  /// 返回 true=通过，false=失败/取消/超时；当前没有进行中的验证时返回 null。
+  /// 只等结果，不发起验证，也不参与失败计数。
+  Future<bool?> waitForActiveVerification({required Duration timeout}) async {
+    if (!_isVerifying) return null;
+    final completed = _completedVerificationResult;
+    if (completed != null) return completed;
+    final outcome = _roundOutcome;
+    if (outcome == null) return null;
+    return outcome.future.timeout(timeout, onTimeout: () => false);
+  }
+
+  void _completeRoundOutcome(bool success) {
+    final outcome = _roundOutcome;
+    if (outcome != null && !outcome.isCompleted) outcome.complete(success);
+  }
+
+  /// 测试用：模拟一轮验证开始（不建 WebView）。
+  @visibleForTesting
+  void debugBeginVerification() => _setVerifying(true);
+
+  /// 测试用：模拟一轮验证产生结果并结束。
+  @visibleForTesting
+  void debugFinishVerification(bool success) {
+    _completedVerificationResult = success;
+    _completeRoundOutcome(success);
+    _setVerifying(false);
+  }
 
   /// 等待当前手动验证 WebView 从 Widget 树移除并走完原生析构冷却。
   ///
@@ -82,6 +116,7 @@ class CfChallengeService {
     if (value) {
       _verifyRound++;
       _completedVerificationResult = null;
+      _roundOutcome = Completer<bool>();
       final current = _manualTeardownCompleter;
       if (current == null || current.isCompleted) {
         _manualTeardownCompleter = Completer<void>();
@@ -99,6 +134,9 @@ class CfChallengeService {
     inProgressNotifier.value = value;
     if (!value) {
       _completedVerificationResult = null;
+      // 未产生结果就结束（无 overlay 等提前退出）按失败收口，不让等待者挂起
+      _completeRoundOutcome(false);
+      _roundOutcome = null;
       final teardown = _manualTeardownCompleter;
       if (teardown != null && !teardown.isCompleted) {
         teardown.complete();
@@ -733,6 +771,7 @@ class CfChallengeService {
     void finish(bool success) {
       if (!resultCompleter.isCompleted) {
         _completedVerificationResult = success;
+        _completeRoundOutcome(success);
         resultCompleter.complete(success);
       }
       cleanup();

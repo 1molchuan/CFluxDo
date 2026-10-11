@@ -175,23 +175,39 @@ class RequestSchedulerInterceptor extends Interceptor {
       return;
     }
 
-    // CF 验证进行中时冻结所有业务请求，模拟"网页 CF 403 直接停滞"的语义，
-    // 避免挑战完成瞬间一次性 flush 心跳/poll/timings 触发服务端 429，
-    // 同时也能防止用户在验证弹窗期间触发的请求带着旧 cf_clearance 又判 403
-    // 进入挑战循环。
+    // CF 验证进行中时冻结业务请求，模拟"网页 CF 403 直接停滞"的语义，
+    // 防止验证期间触发的请求带着旧 cf_clearance 又判 403 进入挑战循环。
+    // - 静默请求（心跳/poll/timings）直接取消：挑战完成瞬间一次性 flush
+    //   它们会触发服务端 429，调用方各自有退避；
+    // - 用户可见请求（页面数据/操作）排队等这一轮验证的结果：通过后照常
+    //   进入下方调度（受并发与速率窗口约束），带新 cf_clearance 发出；失败
+    //   或超时才拒绝。此前一律取消，验证期间点开的页面过盾后只能手动重试。
     //
     // 仅 CfChallengeInterceptor 内部 retry（标记 skipCfBlock=true）能绕过。
-    if (!options.spec.skipCfBlock &&
-        CfChallengeService().isVerifying) {
-      handler.reject(
-        DioException(
-          requestOptions: options,
-          type: DioExceptionType.cancel,
-          error: CfChallengeException(silentBlockedDuringChallenge: true),
-        ),
-        true,
-      );
-      return;
+    if (!options.spec.skipCfBlock && CfChallengeService().isVerifying) {
+      final passed =
+          !options.spec.isSilent && await _waitForCfVerification(options);
+      if (options.cancelToken?.isCancelled ?? false) {
+        handler.reject(
+          DioException.requestCancelled(
+            requestOptions: options,
+            reason: '请求在等待 CF 验证时被取消',
+          ),
+          true,
+        );
+        return;
+      }
+      if (!passed) {
+        handler.reject(
+          DioException(
+            requestOptions: options,
+            type: DioExceptionType.cancel,
+            error: CfChallengeException(silentBlockedDuringChallenge: true),
+          ),
+          true,
+        );
+        return;
+      }
     }
 
     await _waitForBrowserTrustIfNeeded(options);
@@ -320,6 +336,26 @@ class RequestSchedulerInterceptor extends Interceptor {
       state.pendingTimer = null;
       _scheduleNext(state);
     });
+  }
+
+  /// 用户可见请求等待 CF 验证结果的上限。验证页在用户操作前可以一直停留，
+  /// 不能让请求无限挂起。
+  static const cfVerificationWaitTimeout = Duration(seconds: 90);
+
+  /// 等待进行中的 CF 验证结束；请求被取消时提前返回 false。
+  Future<bool> _waitForCfVerification(RequestOptions options) async {
+    final outcome = CfChallengeService().waitForActiveVerification(
+      timeout: cfVerificationWaitTimeout,
+    );
+    final cancelToken = options.cancelToken;
+    final result = cancelToken == null
+        ? await outcome
+        : await Future.any<bool?>([
+            outcome,
+            cancelToken.whenCancel.then((_) => false),
+          ]);
+    // null = 等待开始前验证已结束，按通过处理
+    return result ?? true;
   }
 
   Future<void> _waitForBrowserTrustIfNeeded(RequestOptions options) async {
