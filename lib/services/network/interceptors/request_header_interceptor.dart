@@ -23,11 +23,15 @@ class RequestHeaderInterceptor extends Interceptor {
     // 1. 设置 User-Agent
     options.headers['User-Agent'] = await AppConstants.getUserAgent();
 
-    // 2. 注入 Client Hints 请求头（Sec-CH-UA 系列，仅移动端可用）
-    final hints = AppConstants.clientHints;
-    if (hints != null) {
-      options.headers.addAll(hints);
-    }
+    // 2. Accept-Language 跟随系统语言，与 WebView 发出的值一致。
+    //
+    // 这里刻意**不**再注入 Sec-CH-UA 系列 Client Hints：ua_client_hints 给出的
+    // 品牌是应用名（"fluxdo"; v="0.2.28"），与 UA 自称的 Chrome 直接矛盾，
+    // 高熵字段（platform version、model、full version list）也与 UA 版本对不上。
+    // Cloudflare 把 UA 与 Client Hints 不一致当作强伪造信号。真实 Chrome 只在
+    // 服务端 Accept-CH 要求时才发高熵 hints，首个请求也只带低熵三件套；不发
+    // 任何 hints 是 HTTP/1.1 客户端的正常形态，反而更接近浏览器行为。
+    options.headers['Accept-Language'] = AppConstants.acceptLanguage;
 
     // 3. 设置 CSRF Token（未登录时无法获取，跳过）
     final skipCsrf = options.spec.skipCsrf;
@@ -76,7 +80,15 @@ class RequestHeaderInterceptor extends Interceptor {
 
     // 4. API 请求（XHR）设置 Origin、Referer 和 Sec-Fetch-* 头
     if (options.headers['X-Requested-With'] == 'XMLHttpRequest') {
-      options.headers['Origin'] = AppConstants.baseUrl;
+      // Origin 只在非 GET/HEAD 时发：按 Fetch 规范，同源 GET 请求不带 Origin，
+      // 浏览器里 Discourse 的 jQuery ajax 也确实不带。同源 GET 却带 Origin
+      // 是浏览器从不会出现的组合，属于指纹不一致。
+      final method = options.method.toUpperCase();
+      if (method == 'GET' || method == 'HEAD') {
+        options.headers.remove('Origin');
+      } else {
+        options.headers['Origin'] = AppConstants.baseUrl;
+      }
       options.headers['Referer'] = '${AppConstants.baseUrl}/';
       // Sec-Fetch-* 系列头：Chrome 从 2019 年起每个请求都自动添加，
       // 缺失会被 Cloudflare Bot Management 识别为非浏览器客户端

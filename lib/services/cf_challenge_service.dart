@@ -116,6 +116,7 @@ class CfChallengeService {
     if (value) {
       _verifyRound++;
       _completedVerificationResult = null;
+      _hasForegroundWaiter = false;
       _roundOutcome = Completer<bool>();
       final current = _manualTeardownCompleter;
       if (current == null || current.isCompleted) {
@@ -176,6 +177,11 @@ class CfChallengeService {
   Completer<BuildContext>? _contextReadyCompleter;
   VoidCallback? _activePromoteToForeground;
   bool _pendingPromoteToForeground = false;
+
+  /// 进行中的这一轮验证是否有调用方在等结果（页面数据/操作请求，或合流
+  /// 进来的同类请求）。纯静默轮次（只有轮询等后台请求撞盾）超时直接判失败，
+  /// 不把全屏验证页弹到用户脸上；一旦有人等结果，超时才转前台交给用户。
+  bool _hasForegroundWaiter = false;
 
   /// 冷却机制：连续失败 N 次后进入冷却期
   DateTime? _cooldownUntil;
@@ -626,6 +632,10 @@ class CfChallengeService {
       // 结果；不能再加入等待列表，否则旧流程已经清空列表后将无人完成它。
       final completedResult = _completedVerificationResult;
       if (completedResult != null) return completedResult;
+      if (forceForeground || foregroundAfter != null) {
+        // 合流进来的是用户可感知的请求：这一轮超时后要转前台，不能静默放弃
+        _hasForegroundWaiter = true;
+      }
       if (forceForeground) {
         final promote = _activePromoteToForeground;
         if (promote == null) {
@@ -661,6 +671,7 @@ class CfChallengeService {
     }
 
     _setVerifying(true);
+    _hasForegroundWaiter = forceForeground || foregroundAfter != null;
 
     // ignore: use_build_context_synchronously
     final overlayState =
@@ -1410,6 +1421,19 @@ class _CfChallengePageState extends State<CfChallengePage> {
 
       if (_checkCount > _activeMaxCheckCount) {
         if (_isBackground) {
+          if (widget.foregroundAfter == null &&
+              !CfChallengeService()._hasForegroundWaiter) {
+            // 纯静默轮次（只有轮询等后台请求撞盾，没人等结果）：超时就按
+            // 失败收口，让静默请求自己失败。此前这里会把全屏验证页弹到
+            // 正在阅读的用户脸上，而用户并没有做任何会失败的操作。
+            CfChallengeLogger.log(
+              '[VERIFY] Silent background timeout after '
+              '$_activeMaxCheckCount seconds, giving up without prompting',
+            );
+            timer.cancel();
+            _finish(false);
+            return;
+          }
           CfChallengeLogger.log(
             '[VERIFY] Background timeout after $_activeMaxCheckCount seconds, prompting manual verify',
           );
@@ -1628,6 +1652,7 @@ class _CfChallengePageState extends State<CfChallengePage> {
   }
 
   void _refresh() {
+    if (!mounted) return;
     _timeoutTimer?.cancel();
     _noChallengeCheckTimer?.cancel();
     _loadStopFallbackTimer?.cancel();
@@ -1651,7 +1676,7 @@ class _CfChallengePageState extends State<CfChallengePage> {
   }
 
   void _promoteToForeground({bool dueToTimeout = false}) {
-    if (!_isBackground) return;
+    if (!_isBackground || !mounted) return;
     setState(() {
       _isBackground = false;
       _needsManualAttention = true;
@@ -2268,7 +2293,8 @@ class _CfChallengePageState extends State<CfChallengePage> {
             _handlePageReady(controller, reason: 'onPageCommitVisible');
           },
           onProgressChanged: (controller, progress) {
-            if (_finishingFromVerifyResponse) return;
+            // 验证结束后 WebView 仍可能回调进度；页面已经弹出就不能再 setState
+            if (_hasPopped || !mounted || _finishingFromVerifyResponse) return;
             _progress = progress / 100;
             _scheduleLoadStopFallback(controller, progress);
             if (showUi) {

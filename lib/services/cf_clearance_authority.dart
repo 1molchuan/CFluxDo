@@ -102,6 +102,15 @@ class CfClearanceAuthority {
     r'(?:^|;\s*)cf_clearance=([^;]*)',
   );
 
+  /// 两个 cf_clearance 值归一化后是否相同（请求头里是解码形态，jar 里可能
+  /// 带编码，直接字符串比较会误判为不同）。任一为空视为不同。
+  static bool isSameValue(String? a, String? b) {
+    final left = _normalize(a ?? '');
+    final right = _normalize(b ?? '');
+    if (left.isEmpty || right.isEmpty) return false;
+    return left == right;
+  }
+
   /// 归一化：请求头里的值是 [CookieValueCodec.decode] 后的形态（见
   /// AppCookieManager），WebView 回读的也是解码形态；jar 存储可能带编码。
   /// 两侧统一 decode 一次（cf_clearance 值是 URL-safe 字符，重复 decode 幂等）。

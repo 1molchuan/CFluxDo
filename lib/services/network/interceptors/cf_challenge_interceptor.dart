@@ -170,15 +170,73 @@ class CfChallengeInterceptor extends Interceptor {
         url: requestUrl,
         statusCode: statusCode ?? 0,
       );
-      // 记录在位值被撞：本次请求携带的 cf_clearance 已被 CF 挑战（= 已死），
-      // 打开换届窗口——之后 sync 可以替换它（过盾新值继位，或 Turnstile
-      // 最新铸值无缝补位）。这里不做任何候选值判定、不分 403/429：
-      // 撞了就过盾，语义见 CfClearanceAuthority。
+
+      // 过期 403 直接换 cookie 重放：本次请求携带的 cf_clearance 若已不是 jar
+      // 里的当前值（请求在途期间另一轮验证换上了新值，或同批排队请求仍带着
+      // 验证前的旧 Cookie 头），这个 403 针对的是旧值，jar 里的新值很可能
+      // 本来就能过。先用新值重放一次，省掉一轮多余的验证；重放仍撞盾再走
+      // 正常验证流程。
+      final carriedClearance = CfClearanceAuthority.extractFromCookieHeader(
+        err.requestOptions.headers['Cookie']?.toString() ??
+            err.requestOptions.headers['cookie']?.toString(),
+      );
+      final currentClearance = await cookieJarService.getCfClearance();
+      final carriedIsStale =
+          currentClearance != null &&
+          currentClearance.isNotEmpty &&
+          !CfClearanceAuthority.isSameValue(carriedClearance, currentClearance);
+      if (carriedIsStale) {
+        final replayOptions = err.requestOptions.copyWith();
+        replayOptions.extra[FluxRequestKeys.skipCfChallenge] = true;
+        replayOptions.extra[FluxRequestKeys.skipCfBlock] = true;
+        await _refreshCookieHeader(replayOptions);
+        CfChallengeLogger.log(
+          '[INTERCEPTOR] Carried cf_clearance is stale '
+          '(carried=${carriedClearance?.length ?? 0} chars, '
+          'current=${currentClearance.length} chars), replaying with current: '
+          '$requestMethod $requestUrl',
+        );
+        try {
+          final response = await dio.fetch(replayOptions);
+          CfChallengeLogger.logInterceptorRetry(
+            url: requestUrl,
+            success: true,
+            statusCode: response.statusCode,
+          );
+          return handler.resolve(response);
+        } catch (e) {
+          if (e is DioException &&
+              CfChallengeService.isCfChallengeError(e.response)) {
+            // jar 里的当前值也被撞了：按它在位被撞处理，继续走验证流程
+            CfChallengeLogger.log(
+              '[INTERCEPTOR] Replay with current cf_clearance still '
+              'challenged (${e.response?.statusCode}), falling back to verify',
+            );
+          } else {
+            // 不是 CF 问题（网络错误、其他状态码）：如实返回，不再发起验证
+            CfChallengeLogger.logInterceptorRetry(
+              url: requestUrl,
+              success: false,
+              error: e.toString(),
+            );
+            if (e is DioException) return handler.reject(e);
+            return handler.reject(
+              DioException(
+                requestOptions: replayOptions,
+                error: e,
+                type: DioExceptionType.unknown,
+              ),
+            );
+          }
+        }
+      }
+
+      // 记录在位值被撞：本次请求（或刚才的重放）实际携带的 cf_clearance 已被
+      // CF 挑战（= 已死），打开换届窗口——之后 sync 可以替换它（过盾新值
+      // 继位，或 Turnstile 最新铸值无缝补位）。这里不做任何候选值判定、
+      // 不分 403/429：撞了就过盾，语义见 CfClearanceAuthority。
       CfClearanceAuthority.instance.noteIncumbentChallenged(
-        CfClearanceAuthority.extractFromCookieHeader(
-          err.requestOptions.headers['Cookie']?.toString() ??
-              err.requestOptions.headers['cookie']?.toString(),
-        ),
+        carriedIsStale ? currentClearance : carriedClearance,
       );
       final cfService = CfChallengeService();
       final isSilent = err.requestOptions.spec.isSilent;
