@@ -1448,7 +1448,8 @@ class _CfChallengePageState extends State<CfChallengePage> {
         // 此前这里会在 60 秒整记一条 FAILED、把横幅换成红色超时并弹提示，
         // 而用户随后一点就能过（2026-10-12 实测：68 秒点击，成功）。只记一次
         // 信息日志，计时继续，超时 UI 留给页面没露出挑战的卡死场景。
-        if (_challengeWebViewVisible) {
+        if (_challengeWebViewVisible || _checkingOriginFallback) {
+          if (_checkingOriginFallback) return; // 完成探测有自己的时限
           if (!_loggedForegroundWaitingForUser) {
             _loggedForegroundWaitingForUser = true;
             CfChallengeLogger.log(
@@ -1610,6 +1611,11 @@ class _CfChallengePageState extends State<CfChallengePage> {
     }
     setState(() {
       _challengeWebViewVisible = false;
+      // 挑战刚被盖住 = 完成导航/探测进行中，前台预算重新起算：用户点完勾选框
+      // 后计数早已超过 60，不清零的话旧计时器下一拍就会误报「无挑战超时」
+      // 并弹超时提示（2026-10-12 实测，距成功仅 0.15 秒）。
+      _checkCount = 0;
+      _loggedForegroundWaitingForUser = false;
       _hideOriginFallbackPage = true;
       _originFallbackNeedsAction = false;
       _needsManualAttention = false;
