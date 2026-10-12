@@ -21,6 +21,23 @@ class DohHostLookupResult {
   bool get hasData => ips.isNotEmpty || (echConfig?.isNotEmpty ?? false);
 }
 
+/// Rust 侧新拉到的加速路由表 / 节点列表，App 负责持久化
+class DohAccelUpdate {
+  const DohAccelUpdate({this.routeTable, this.nodes, this.nodesEnvelopeJson});
+
+  /// 路由表接口的原始响应 JSON（下次启动原样回传给 Rust）
+  final String? routeTable;
+
+  /// 已验签的节点 payload JSON（`{"serial","not_after","hosts":{...}}`）
+  final String? nodes;
+
+  /// 带签名的节点信封 JSON（`{"kid","payload","sig"}`，下次启动回传给 Rust 重新验签）
+  final String? nodesEnvelopeJson;
+
+  bool get isEmpty =>
+      routeTable == null && nodes == null && nodesEnvelopeJson == null;
+}
+
 class DohDnsCacheStats {
   const DohDnsCacheStats({
     required this.resolverCount,
@@ -183,6 +200,9 @@ class DohProxyFfi {
   Pointer<Utf8> Function()? _dohProxyGenerateCa;
   Pointer<Utf8> Function()? _dohProxyGetEmbeddedCaPem;
   int Function()? _dohProxyTakeAuthRejected;
+  Pointer<Utf8> Function()? _dohProxyTakeAccelUpdate;
+  Pointer<Utf8> Function(Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>)?
+  _dohProxyAccelRequest;
   late void Function(Pointer<Utf8>) _dohProxyFreeString;
 
   /// Initialize FFI bindings
@@ -298,6 +318,34 @@ class DohProxyFfi {
             .asFunction();
       } catch (_) {
         _dohProxyTakeAuthRejected = null;
+      }
+
+      // 加速路由表 / 节点列表更新取回、经 Rust 客户端发加速 HTTP 请求：新增符号，可选绑定
+      try {
+        _dohProxyTakeAccelUpdate = _lib!
+            .lookup<NativeFunction<Pointer<Utf8> Function()>>(
+              'doh_proxy_take_accel_update',
+            )
+            .asFunction();
+      } catch (_) {
+        _dohProxyTakeAccelUpdate = null;
+      }
+
+      try {
+        _dohProxyAccelRequest = _lib!
+            .lookup<
+              NativeFunction<
+                Pointer<Utf8> Function(
+                  Pointer<Utf8>,
+                  Pointer<Utf8>,
+                  Pointer<Utf8>,
+                  Pointer<Utf8>,
+                )
+              >
+            >('doh_proxy_accel_request')
+            .asFunction();
+      } catch (_) {
+        _dohProxyAccelRequest = null;
       }
 
       // doh_proxy_generate_ca 是新增符号，旧版本库可能没有，可选绑定
@@ -453,6 +501,9 @@ class DohProxyFfi {
     String? caKeyPem,
     bool mitmConnect = true,
     bool h2Mitm = false,
+    String? dohRoutesUrl,
+    String? dohRouteTableJson,
+    String? dohNodeListJson,
   }) {
     if (!_initialized && !initialize()) {
       return -1;
@@ -495,6 +546,13 @@ class DohProxyFfi {
         },
       if (caCertPem != null && caCertPem.isNotEmpty) 'ca_cert_pem': caCertPem,
       if (caKeyPem != null && caKeyPem.isNotEmpty) 'ca_key_pem': caKeyPem,
+      // 加速查表模式：路由表接口地址，以及上次持久化的表 / 签名节点列表（启动即可用）
+      if (dohRoutesUrl != null && dohRoutesUrl.isNotEmpty)
+        'doh_routes_url': dohRoutesUrl,
+      if (dohRouteTableJson != null && dohRouteTableJson.isNotEmpty)
+        'doh_route_table_json': dohRouteTableJson,
+      if (dohNodeListJson != null && dohNodeListJson.isNotEmpty)
+        'doh_node_list_json': dohNodeListJson,
     });
     final configPtr = configJson.toNativeUtf8();
     try {
@@ -671,6 +729,85 @@ class DohProxyFfi {
     final fn = _dohProxyTakeAuthRejected;
     if (fn == null) return false;
     return fn() != 0;
+  }
+
+  /// 取出 Rust 侧新拉到的加速路由表 / 节点列表（取出即清）
+  ///
+  /// [routeTable] 是服务端原始响应 JSON；[nodes] 是已验签的节点 payload JSON；
+  /// [nodesEnvelopeJson] 是带签名的信封，持久化后下次启动原样回传给 Rust 重新验签。
+  /// 库不支持或没有更新时返回 null。
+  DohAccelUpdate? takeAccelUpdate() {
+    if (!_initialized && !initialize()) return null;
+    final fn = _dohProxyTakeAccelUpdate;
+    if (fn == null) return null;
+
+    final resultPtr = fn();
+    if (resultPtr == nullptr) return null;
+
+    final jsonStr = resultPtr.toDartString();
+    _dohProxyFreeString(resultPtr);
+
+    final map = jsonDecode(jsonStr) as Map<String, dynamic>;
+    if (map['ok'] != true) {
+      debugPrint('[DOH FFI] takeAccelUpdate: ${map['error'] ?? 'unknown error'}');
+      return null;
+    }
+    final routeTable = map['route_table'];
+    final nodes = map['nodes'];
+    final envelope = map['nodes_envelope'];
+    final update = DohAccelUpdate(
+      routeTable: routeTable is String && routeTable.isNotEmpty
+          ? routeTable
+          : null,
+      nodes: nodes is String && nodes.isNotEmpty ? nodes : null,
+      nodesEnvelopeJson: envelope is Map ? jsonEncode(envelope) : null,
+    );
+    return update.isEmpty ? null : update;
+  }
+
+  /// 经 Rust 的 DoH 客户端（同一套 TLS 栈）向加速服务端发 HTTP 请求
+  ///
+  /// 返回 (status, body)；库不支持或请求失败（连不上、超时）返回 null。
+  /// 非 2xx 状态不算失败，由调用方按 status 处理。
+  ({int status, String body})? accelRequest(
+    String method,
+    String url,
+    Map<String, String> headers,
+    String? body,
+  ) {
+    if (!_initialized && !initialize()) return null;
+    final fn = _dohProxyAccelRequest;
+    if (fn == null) return null;
+
+    final methodPtr = method.toNativeUtf8();
+    final urlPtr = url.toNativeUtf8();
+    final headersPtr = jsonEncode(headers).toNativeUtf8();
+    final hasBody = body != null;
+    final bodyPtr = hasBody ? body.toNativeUtf8() : nullptr.cast<Utf8>();
+    try {
+      final resultPtr = fn(methodPtr, urlPtr, headersPtr, bodyPtr);
+      if (resultPtr == nullptr) return null;
+
+      final jsonStr = resultPtr.toDartString();
+      _dohProxyFreeString(resultPtr);
+
+      final map = jsonDecode(jsonStr) as Map<String, dynamic>;
+      if (map['ok'] == true && map['status'] is num) {
+        return (
+          status: (map['status'] as num).toInt(),
+          body: map['body']?.toString() ?? '',
+        );
+      }
+      debugPrint('[DOH FFI] accelRequest: ${map['error'] ?? 'unknown error'}');
+      return null;
+    } finally {
+      calloc.free(methodPtr);
+      calloc.free(urlPtr);
+      calloc.free(headersPtr);
+      if (hasBody) {
+        calloc.free(bodyPtr);
+      }
+    }
   }
 
   DohDnsCacheStats? dnsCacheStats() {

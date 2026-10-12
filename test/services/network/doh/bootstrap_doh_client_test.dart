@@ -26,13 +26,37 @@ void main() {
           .buildDnsQuery('linux.do');
     });
 
-    test('DNS 报文是标准 A 查询', () {
-      // 12 字节头 + "linux.do" 的 QNAME（1+5+1+2+1）+ QTYPE + QCLASS
-      expect(query.length, 12 + 10 + 4);
+    test('DNS 报文是标准 A 查询，并用 EDNS Padding 填到 128 的整倍数', () {
+      // 12 字节头 + "linux.do" 的 QNAME（1+5+1+2+1）+ QTYPE + QCLASS = 26，
+      // 再加 OPT 伪记录和 Padding 后整体凑到 128 的整倍数
+      expect(query.length % BootstrapDohClient.dnsQueryPadBlock, 0);
+      expect(query.length, greaterThan(26));
       expect(query[2], 0x01); // RD
       expect(query.sublist(4, 6), [0, 1]); // QDCOUNT
+      expect(query.sublist(10, 12), [0, 1]); // ARCOUNT（OPT 伪记录）
       expect(ascii.decode(query.sublist(13, 18)), 'linux');
-      expect(query.sublist(query.length - 4), [0, 1, 0, 1]); // A, IN
+      expect(query.sublist(22, 26), [0, 1, 0, 1]); // A, IN
+
+      // OPT 伪记录：根名、类型 41、Padding 选项码 12
+      expect(query[26], 0x00);
+      expect(query.sublist(27, 29), [0, 41]);
+      expect(query.sublist(37, 39), [0, 12]);
+      final optionLength = (query[39] << 8) | query[40];
+      expect(41 + optionLength, query.length);
+      expect(query.sublist(41).every((b) => b == 0), isTrue);
+    });
+
+    test('不同长度的域名都填到 128 的整倍数', () {
+      final client = BootstrapDohClient(serverUrl: 'https://example.invalid/dns-query');
+      for (final host in [
+        'a.b',
+        'linux.do',
+        'connect.linux.do',
+        'very-long-subdomain-name-for-padding-check.example.linux.do',
+      ]) {
+        final bytes = client.buildDnsQuery(host);
+        expect(bytes.length % BootstrapDohClient.dnsQueryPadBlock, 0, reason: host);
+      }
     });
 
     test('默认 POST：报文放请求体，带固定 UA 和令牌，地址里没有 dns=', () {

@@ -23,6 +23,7 @@ import '../system_proxy_service.dart';
 import '../webview/webview_adapter_settings_service.dart';
 import '../../windows_webview_environment_service.dart';
 import 'accel_doh_auth_service.dart';
+import 'accel_doh_nodes.dart';
 import 'doh_resolver.dart';
 import 'webview_mitm_policy.dart';
 
@@ -208,6 +209,12 @@ class NetworkSettingsService {
   static const _h2MitmKey = 'doh_h2_mitm';
   static const _accelSubdomainKey = 'doh_accel_subdomain';
 
+  /// 加速服务端下发的路由表（原始响应 JSON），启动时回传给 Rust 直接用
+  static const _accelRoutesKey = 'doh_accel_routes';
+
+  /// 加速节点列表的签名信封 `{"kid","payload","sig"}`，启动时回传给 Rust 重新验签
+  static const _accelNodesKey = 'doh_accel_nodes';
+
   final ValueNotifier<NetworkSettings> notifier = ValueNotifier(
     NetworkSettings(
       dohEnabled: false,
@@ -240,8 +247,11 @@ class NetworkSettingsService {
   final Set<String> _backgroundRefreshingHosts = <String>{};
   final Map<String, Map<String, DateTime>> _hostIpPenaltyCache = {};
   String? _resolvedHostCacheSignature;
-  Timer? _authRejectedPollTimer;
+  Timer? _accelPollTimer;
   String? _accelRouteSignature;
+
+  /// 加速服务端下发、Rust 已验签的节点列表，给 Dart 侧建连当引导 IP 用
+  final AccelNodeStore _nodeStore = AccelNodeStore();
 
   final ValueNotifier<bool> isApplying = ValueNotifier(false);
 
@@ -312,7 +322,7 @@ class NetworkSettingsService {
     if (url == server.url) {
       return (
         url: url,
-        bootstrapIps: server.bootstrapIps,
+        bootstrapIps: _mergeAccelNodes(url, server.bootstrapIps),
         authToken: _authTokenFor(url),
       );
     }
@@ -357,10 +367,14 @@ class NetworkSettingsService {
     if (_prefs != null) return;
     _prefs = prefs;
     _accelServer = buildAccelDohServer(await _loadAccelSubdomain(prefs));
+    // 上次下发的节点列表先预热，后面的引导 IP 都带上它（信封会原样交给 Rust 重新验签）
+    if (_nodeStore.loadEnvelopeJson(prefs.getString(_accelNodesKey))) {
+      debugPrint('[DOH] 已载入加速节点列表 serial=${_nodeStore.serial}');
+    }
     AccelDohAuthService.instance.initialize(
       prefs,
       serverUrl: _accelServer!.url,
-      bootstrapIps: _accelServer!.bootstrapIps,
+      bootstrapIps: _getBootstrapIps(_accelServer!.url),
     );
     final dohEnabled = prefs.getBool(_dohEnabledKey) ?? true;
     final selected = prefs.getString(_dohSelectedKey) ?? _defaultServerUrl;
@@ -392,6 +406,8 @@ class NetworkSettingsService {
       preferIPv6: preferIPv6,
       authToken: _authTokenFor(activeUrl),
       onAuthRejected: _handleAccelAuthRejected,
+      // 有 Rust 库的平台统一走 Rust 的 DoH 客户端，Dart 侧不再自己握手
+      nativeLookup: DohProxyFfi.isAvailable ? _lookupIpViaRust : null,
     );
     _accelRouteSignature = _currentAccelRouteSignature;
     AccelDohAuthService.instance.addListener(_handleAccelAuthChanged);
@@ -575,7 +591,7 @@ class NetworkSettingsService {
 
   Future<void> _applyProxyState() async {
     final startedAt = DateTime.now();
-    _syncAuthRejectedPolling();
+    _syncAccelPolling();
     _applyDepth++;
     if (_applyDepth == 1) {
       if (!isApplying.value) {
@@ -682,6 +698,17 @@ class NetworkSettingsService {
       // 加速服务器没有令牌时这里已经换成公共加速或 DNSPod，令牌只随加速服务器下发
       final dohServer = _activeServerUrl;
       final dohServerEch = _activeEchServerUrl;
+      // 加速服务器才有路由表接口；上次存下的表和节点列表作为启动种子回传给 Rust
+      final dohRoutesUrl = current.dohEnabled
+          ? accelRoutesUrlFor(dohServer)
+          : null;
+      final prefsForSeed = _prefs;
+      final dohRouteTableJson = dohRoutesUrl != null
+          ? prefsForSeed?.getString(_accelRoutesKey)
+          : null;
+      final dohNodeListJson = current.dohEnabled
+          ? prefsForSeed?.getString(_accelNodesKey)
+          : null;
 
       // Rust 代理始终为 WebView 提供 DOH/代理支持，enableDoh 不受 rhttp 影响
       final success = await _rustProxyService.start(
@@ -716,6 +743,9 @@ class NetworkSettingsService {
         caKeyPem: caKeyPem,
         mitmConnect: mitmConnect,
         h2Mitm: current.h2Mitm,
+        dohRoutesUrl: dohRoutesUrl,
+        dohRouteTableJson: dohRouteTableJson,
+        dohNodeListJson: dohNodeListJson,
       );
 
       if (!success) {
@@ -807,6 +837,7 @@ class NetworkSettingsService {
     // 回到前台顺带检查加速令牌：过期就降到公共加速，快到期就续期
     AccelDohAuthService.instance.checkNow();
     unawaited(_checkAuthRejected());
+    unawaited(_checkAccelUpdate());
     if (!shouldRunLocalProxy) return;
     if (!_rustProxyService.isRunning) {
       // 上次启动失败、当前处于直连状态：回到前台时再试一次
@@ -1004,21 +1035,21 @@ class NetworkSettingsService {
     _touch();
   }
 
-  /// 正在用带令牌的加速服务器时，定时问 Rust 代理令牌有没有被拒
-  void _syncAuthRejectedPolling() {
+  /// 正在用加速服务器（专属或公共）时，定时问 Rust 代理：令牌有没有被拒、有没有新拉到路由表 / 节点列表
+  void _syncAccelPolling() {
     final needPoll =
         current.dohEnabled &&
-        (_authTokenFor(_activeServerUrl) != null ||
+        (accelRoutesUrlFor(_activeServerUrl) != null ||
             _authTokenFor(_activeEchServerUrl) != null);
     if (!needPoll) {
-      _authRejectedPollTimer?.cancel();
-      _authRejectedPollTimer = null;
+      _accelPollTimer?.cancel();
+      _accelPollTimer = null;
       return;
     }
-    _authRejectedPollTimer ??= Timer.periodic(
-      const Duration(seconds: 20),
-      (_) => unawaited(_checkAuthRejected()),
-    );
+    _accelPollTimer ??= Timer.periodic(const Duration(seconds: 20), (_) {
+      unawaited(_checkAuthRejected());
+      unawaited(_checkAccelUpdate());
+    });
   }
 
   Future<void> _checkAuthRejected() async {
@@ -1029,6 +1060,39 @@ class NetworkSettingsService {
       }
     } catch (e) {
       debugPrint('[DOH] 读取令牌被拒标记失败: $e');
+    }
+  }
+
+  /// 取走 Rust 新拉到的路由表 / 节点列表并持久化；节点变了只刷新 Dart 侧引导 IP，不重启代理
+  Future<void> _checkAccelUpdate() async {
+    final prefs = _prefs;
+    if (prefs == null || !_rustProxyService.isRunning) return;
+    final DohAccelUpdate? update;
+    try {
+      update = await _rustProxyService.takeAccelUpdate();
+    } catch (e) {
+      debugPrint('[DOH] 读取加速更新失败: $e');
+      return;
+    }
+    if (update == null) return;
+
+    final routeTable = update.routeTable;
+    if (routeTable != null && routeTable.isNotEmpty) {
+      await prefs.setString(_accelRoutesKey, routeTable);
+      debugPrint('[DOH] 加速路由表已更新 (${routeTable.length} bytes)');
+    }
+
+    final envelope = update.nodesEnvelopeJson;
+    if (envelope != null && envelope.isNotEmpty) {
+      await prefs.setString(_accelNodesKey, envelope);
+    }
+    final nodes = update.nodes;
+    if (nodes != null && nodes.isNotEmpty && _nodeStore.loadPayloadJson(nodes)) {
+      debugPrint(
+        '[DOH] 加速节点列表已更新 serial=${_nodeStore.serial} '
+        'hosts=${_nodeStore.hosts.join(", ")}',
+      );
+      _updateResolverServer();
     }
   }
 
@@ -1340,10 +1404,11 @@ class NetworkSettingsService {
     final echConfig = fallbackResults[1] as Uint8List?;
 
     if (ips.isEmpty) {
-      final fallback = await resolver.resolveAll(host);
+      // Rust 两次都没解析出来，再发 DoH 没有意义，直接走系统 DNS 兜底
+      final fallback = await resolver.resolveSystemOnly(host);
       ips = _normalizeIpList(fallback.map((address) => address.address));
       if (ips.isNotEmpty) {
-        debugPrint('[DOH] Dart IP 已解析 $host -> ${ips.join(', ')}');
+        debugPrint('[DOH] 系统 DNS 已解析 $host -> ${ips.join(', ')}');
       }
     }
 
@@ -1467,9 +1532,18 @@ class NetworkSettingsService {
     return created;
   }
 
-  /// 获取选中服务器的 Bootstrap IP
+  /// 获取选中服务器的 Bootstrap IP（加速服务器会并上已下发的节点）
   List<String> _getBootstrapIps(String url) {
-    return _findServer(url)?.bootstrapIps ?? [];
+    return _mergeAccelNodes(url, _findServer(url)?.bootstrapIps ?? const []);
+  }
+
+  /// 加速服务器：已下发节点在前、内置种子在后；其他服务器原样返回
+  List<String> _mergeAccelNodes(String url, List<String> seeds) {
+    final host = Uri.tryParse(url)?.host;
+    if (host == null || !isAccelDohHost(host) || _nodeStore.isEmpty) {
+      return seeds;
+    }
+    return mergeAccelBootstrapIps(_nodeStore.ipsFor(host), seeds);
   }
 
   String? _normalizeHost(String host) {
@@ -1705,6 +1779,33 @@ const DohServer accelDohPublicServer = DohServer(
 
 const String _accelDohHostSuffix = 'wq.1molchuan.top';
 const String _accelDohPath = '/v1/lookup';
+
+/// 路由表接口：同一 host 下的 `/v1/routes`，专属档带令牌、公共档不带
+const String accelRoutesPath = '/v1/routes';
+
+/// 是否是加速服务器的 host（本机专属子域或公共加速）
+bool isAccelDohHost(String host) {
+  final normalized = host.trim().toLowerCase();
+  if (normalized.isEmpty) return false;
+  final publicHost = Uri.parse(accelDohPublicServer.url).host;
+  return normalized == publicHost ||
+      normalized == _accelDohHostSuffix ||
+      normalized.endsWith('.$_accelDohHostSuffix');
+}
+
+/// 给定 DoH 地址对应的路由表接口；不是加速服务器时返回 null（第三方 DoH 不查表）
+String? accelRoutesUrlFor(String dohUrl) {
+  final uri = Uri.tryParse(dohUrl);
+  if (uri == null || uri.scheme != 'https' || !isAccelDohHost(uri.host)) {
+    return null;
+  }
+  return Uri(
+    scheme: 'https',
+    host: uri.host,
+    port: uri.hasPort ? uri.port : null,
+    path: accelRoutesPath,
+  ).toString();
+}
 const int _accelSubdomainLength = 12;
 const String _accelSubdomainAlphabet = 'abcdefghijklmnopqrstuvwxyz0123456789';
 const List<String> accelDohBootstrapIps = [

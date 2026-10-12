@@ -4,6 +4,10 @@ import 'dart:io';
 import '../../network_logger.dart';
 import 'bootstrap_doh_client.dart';
 
+/// 走 Rust DoH 客户端的解析回调：返回 IP 字符串列表，空表示没解析出来
+typedef DohNativeLookup =
+    Future<List<String>> Function(String host, String serverUrl, bool preferIPv6);
+
 class DohResolver {
   DohResolver({
     required String serverUrl,
@@ -12,6 +16,7 @@ class DohResolver {
     bool preferIPv6 = false,
     String? authToken,
     this.onAuthRejected,
+    this.nativeLookup,
   })  : _serverUrl = serverUrl,
         _bootstrapIps = bootstrapIps,
         _authToken = authToken,
@@ -29,6 +34,13 @@ class DohResolver {
 
   /// 是否启用系统 DNS 回退
   final bool enableFallback;
+
+  /// 有 Rust 库的平台由它代为查询（和代理共用同一个 TLS 栈与缓存），
+  /// 为 null 时才用 Dart 自己的 [BootstrapDohClient]
+  final DohNativeLookup? nativeLookup;
+
+  /// Rust 侧已按 TTL 缓存，Dart 这层只做短期缓存
+  static const _nativeCacheTtl = Duration(seconds: 300);
 
   /// 是否优先使用 IPv6（用于绕过 SNI 阻断）
   bool _preferIPv6;
@@ -132,6 +144,10 @@ class DohResolver {
 
   /// 实际执行解析
   Future<List<InternetAddress>> _doResolveAll(String host) async {
+    final native = nativeLookup;
+    if (native != null) {
+      return _resolveViaNative(host, native);
+    }
     final stopwatch = Stopwatch()..start();
     try {
       final result = await _client.lookupAllWithTtl(host);
@@ -172,6 +188,61 @@ class DohResolver {
       );
       return _fallbackResolveAll(host);
     }
+  }
+
+  /// 经 Rust 查询；空结果或异常时回退系统 DNS
+  Future<List<InternetAddress>> _resolveViaNative(
+    String host,
+    DohNativeLookup native,
+  ) async {
+    final stopwatch = Stopwatch()..start();
+    try {
+      final raw = await native(host, _serverUrl, _preferIPv6);
+      stopwatch.stop();
+      final addresses = raw
+          .map((value) => InternetAddress.tryParse(value.trim()))
+          .whereType<InternetAddress>()
+          .toList();
+      if (addresses.isEmpty) {
+        NetworkLogger.logDoh(
+          host: host,
+          durationMs: stopwatch.elapsedMilliseconds,
+          error: 'empty response',
+        );
+        return _fallbackResolveAll(host);
+      }
+      final sorted = _sortAddresses(addresses);
+      NetworkLogger.logDoh(
+        host: host,
+        durationMs: stopwatch.elapsedMilliseconds,
+        resolvedIp: sorted.map((a) => a.address).join(', '),
+      );
+      _putCache(host, _DohCacheEntryAll(
+        addresses: sorted,
+        expiresAt: DateTime.now().add(_nativeCacheTtl),
+      ));
+      return sorted;
+    } catch (e) {
+      stopwatch.stop();
+      NetworkLogger.logDoh(
+        host: host,
+        durationMs: stopwatch.elapsedMilliseconds,
+        error: e.toString(),
+      );
+      return _fallbackResolveAll(host);
+    }
+  }
+
+  /// 只用系统 DNS 解析（不发 DoH），给上层在 DoH 已失败后兜底用
+  Future<List<InternetAddress>> resolveSystemOnly(String host) async {
+    if (host.isEmpty) return [];
+    final parsed = InternetAddress.tryParse(host);
+    if (parsed != null) return [parsed];
+    final cached = _cacheAll[host];
+    if (cached != null && !cached.isExpired) {
+      return cached.addresses;
+    }
+    return _fallbackResolveAll(host);
   }
 
   /// 系统 DNS 回退解析（全部）
@@ -242,10 +313,11 @@ class DohResolver {
           timeout: const Duration(seconds: 5),
         );
 
-        // TLS 握手（SNI 使用原始域名）
+        // TLS 握手（SNI 使用原始域名；ALPN 和正常 DoH 客户端一致，不留「无 ALPN」特征）
         final secureSocket = await SecureSocket.secure(
           rawSocket,
           host: serverHost,
+          supportedProtocols: const ['h2', 'http/1.1'],
         ).timeout(const Duration(seconds: 5));
 
         stopwatch.stop();

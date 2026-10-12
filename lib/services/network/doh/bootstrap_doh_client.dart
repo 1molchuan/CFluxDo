@@ -481,7 +481,22 @@ class BootstrapDohClient {
     return result.toBytes();
   }
 
-  /// 构建 DNS 查询消息 (RFC 1035)
+  /// 查询报文按 RFC 8467 用 EDNS(0) Padding 填到这个长度的整倍数，抹掉报文长度特征
+  static const int dnsQueryPadBlock = 128;
+
+  /// EDNS(0) 通告的 UDP 载荷上限（RFC 6891 推荐值）
+  static const int _ednsUdpPayloadSize = 1232;
+
+  /// OPT 伪记录固定部分：NAME(1) + TYPE(2) + CLASS(2) + TTL(4) + RDLEN(2)
+  static const int _optRecordFixedLength = 11;
+
+  /// Padding 选项头：OPTION-CODE(2) + OPTION-LENGTH(2)
+  static const int _ednsOptionHeaderLength = 4;
+
+  /// EDNS(0) Padding 选项码（RFC 7830）
+  static const int _ednsPaddingOptionCode = 12;
+
+  /// 构建 DNS 查询消息 (RFC 1035)，附带 EDNS(0) Padding 填到 [dnsQueryPadBlock] 的整倍数
   @visibleForTesting
   Uint8List buildDnsQuery(String host, {DnsRecordType type = DnsRecordType.a}) {
     final buffer = BytesBuilder();
@@ -507,9 +522,9 @@ class BootstrapDohClient {
     buffer.addByte(0x00);
     buffer.addByte(0x00);
 
-    // Additional RRs (2 bytes) - 0
+    // Additional RRs (2 bytes) - 1（OPT 伪记录）
     buffer.addByte(0x00);
-    buffer.addByte(0x00);
+    buffer.addByte(0x01);
 
     // Question section - QNAME
     final labels = host.split('.');
@@ -526,6 +541,29 @@ class BootstrapDohClient {
     // QCLASS (2 bytes) - IN = 1
     buffer.addByte(0x00);
     buffer.addByte(0x01);
+
+    // OPT 伪记录（RFC 6891）+ Padding 选项（RFC 7830），长度凑到 128 的整倍数
+    final unpaddedLength =
+        buffer.length + _optRecordFixedLength + _ednsOptionHeaderLength;
+    final padding =
+        (dnsQueryPadBlock - unpaddedLength % dnsQueryPadBlock) % dnsQueryPadBlock;
+    final rdLength = _ednsOptionHeaderLength + padding;
+
+    buffer.addByte(0x00); // NAME = 根
+    buffer.addByte(0x00); // TYPE = OPT (41)
+    buffer.addByte(41);
+    buffer.addByte((_ednsUdpPayloadSize >> 8) & 0xFF); // CLASS = UDP 载荷上限
+    buffer.addByte(_ednsUdpPayloadSize & 0xFF);
+    buffer.add(const [0x00, 0x00, 0x00, 0x00]); // TTL = 扩展 RCODE/版本/标志全 0
+    buffer.addByte((rdLength >> 8) & 0xFF); // RDLEN
+    buffer.addByte(rdLength & 0xFF);
+    buffer.addByte((_ednsPaddingOptionCode >> 8) & 0xFF); // OPTION-CODE
+    buffer.addByte(_ednsPaddingOptionCode & 0xFF);
+    buffer.addByte((padding >> 8) & 0xFF); // OPTION-LENGTH
+    buffer.addByte(padding & 0xFF);
+    if (padding > 0) {
+      buffer.add(Uint8List(padding));
+    }
 
     return buffer.toBytes();
   }

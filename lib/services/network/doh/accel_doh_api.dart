@@ -4,6 +4,8 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 
+import '../doh_proxy/doh_proxy_ffi.dart' show DohProxyFfi;
+import '../doh_proxy/doh_proxy_service.dart' show DohProxyService;
 import 'bootstrap_doh_client.dart' show dohUserAgent;
 
 /// 加速服务端发令牌的结果
@@ -150,6 +152,12 @@ class AccelDohApi {
     Map<String, Object?>? body,
     String? bearer,
   }) async {
+    // 有 Rust 库的平台走 Rust 的 reqwest 客户端，和 DoH 查询同一套 TLS 栈；
+    // Rust 那边失败（库没加载、请求异常）再退回 Dart 自己的 HttpClient
+    if (DohProxyFfi.isAvailable) {
+      final native = await _postViaNative(path, body: body, bearer: bearer);
+      if (native != null) return native;
+    }
     final client = _createClient();
     try {
       final request = await client
@@ -170,6 +178,33 @@ class AccelDohApi {
       return (response.statusCode, text);
     } finally {
       client.close(force: true);
+    }
+  }
+
+  Future<(int, String)?> _postViaNative(
+    String path, {
+    Map<String, Object?>? body,
+    String? bearer,
+  }) async {
+    final headers = <String, String>{
+      HttpHeaders.acceptHeader: 'application/json',
+      if (bearer != null) HttpHeaders.authorizationHeader: 'Bearer $bearer',
+      if (body != null) HttpHeaders.contentTypeHeader: 'application/json',
+    };
+    try {
+      final result = await DohProxyService.instance
+          .accelRequest(
+            'POST',
+            _baseUri.replace(path: path).toString(),
+            headers: headers,
+            body: body == null ? null : jsonEncode(body),
+          )
+          .timeout(_requestTimeout);
+      if (result == null) return null;
+      return (result.status, result.body);
+    } catch (e) {
+      debugPrint('[DOH] Rust 侧请求加速接口失败，改用 Dart 客户端: $path $e');
+      return null;
     }
   }
 
@@ -206,6 +241,7 @@ class AccelDohApi {
         return await SecureSocket.secure(
           raw,
           host: host,
+          supportedProtocols: const ['http/1.1'],
         ).timeout(_connectTimeout);
       } catch (e) {
         raw?.destroy();

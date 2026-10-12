@@ -39,8 +39,11 @@ class DohProxyService {
   bool? _currentMitmConnect;
   bool? _currentH2Mitm;
   String? _currentUpstreamSignature;
+  String? _currentDohRoutesUrl;
   String? _lastError;
   bool _processAuthRejected = false;
+  // 进程模式下 stdout 打出的 DOH_ACCEL_UPDATE 行，等 App 取走
+  DohAccelUpdate? _processAccelUpdate;
   // ignore: unused_field
   Isolate? _ffiIsolate; // 保持引用防止 GC
   SendPort? _ffiSendPort;
@@ -82,6 +85,9 @@ class DohProxyService {
     String? caKeyPem,
     bool mitmConnect = true,
     bool h2Mitm = false,
+    String? dohRoutesUrl,
+    String? dohRouteTableJson,
+    String? dohNodeListJson,
   }) async {
     final authSignature = _buildAuthSignature(dohAuthToken, dohEchAuthToken);
     final bootstrapSignature = _buildBootstrapSignature(
@@ -109,7 +115,9 @@ class DohProxyService {
           _currentServerIp == serverIp &&
           _currentMitmConnect == mitmConnect &&
           _currentH2Mitm == h2Mitm &&
-          _currentUpstreamSignature == upstreamSignature;
+          _currentUpstreamSignature == upstreamSignature &&
+          // 路由表 / 节点列表只是启动时的种子，内容变了不重启；只看接口地址
+          _currentDohRoutesUrl == dohRoutesUrl;
       if (sameConfig) {
         NetworkLogger.log('[DOH] 代理已在运行，端口: $_port');
         return true;
@@ -144,6 +152,9 @@ class DohProxyService {
         caKeyPem,
         mitmConnect,
         h2Mitm,
+        dohRoutesUrl,
+        dohRouteTableJson,
+        dohNodeListJson,
       );
       // 桌面平台 FFI 加载失败时，回退到进程模式
       if (!result && DohProxyFfi.canFallbackToProcess) {
@@ -169,6 +180,7 @@ class DohProxyService {
           upstreamCipher,
           mitmConnect,
           h2Mitm,
+          dohRoutesUrl,
         );
       }
       return result;
@@ -193,6 +205,7 @@ class DohProxyService {
         upstreamCipher,
         mitmConnect,
         h2Mitm,
+        dohRoutesUrl,
       );
     }
   }
@@ -220,6 +233,9 @@ class DohProxyService {
     String? caKeyPem,
     bool mitmConnect,
     bool h2Mitm,
+    String? dohRoutesUrl,
+    String? dohRouteTableJson,
+    String? dohNodeListJson,
   ) async {
     try {
       return await _enqueueFfiOp(() async {
@@ -251,6 +267,9 @@ class DohProxyService {
           caKeyPem: caKeyPem,
           mitmConnect: mitmConnect,
           h2Mitm: h2Mitm,
+          dohRoutesUrl: dohRoutesUrl,
+          dohRouteTableJson: dohRouteTableJson,
+          dohNodeListJson: dohNodeListJson,
         );
         if (resultPort <= 0) {
           // _callFfiStart 已设置更详细的 _lastError，仅在未设置时补充
@@ -286,6 +305,7 @@ class DohProxyService {
           password: upstreamPassword,
           cipher: upstreamCipher,
         );
+        _currentDohRoutesUrl = dohRoutesUrl;
         NetworkLogger.log('[DOH] FFI 代理已启动，端口: $_port');
         return true;
       });
@@ -317,6 +337,7 @@ class DohProxyService {
     String? upstreamCipher,
     bool mitmConnect,
     bool h2Mitm,
+    String? dohRoutesUrl,
   ) async {
     try {
       final executablePath = await _getExecutablePath();
@@ -354,6 +375,10 @@ class DohProxyService {
         if (serverIp != null && serverIp.isNotEmpty) ...[
           '--server-ip',
           serverIp,
+        ],
+        if (dohRoutesUrl != null && dohRoutesUrl.isNotEmpty) ...[
+          '--doh-routes-url',
+          dohRoutesUrl,
         ],
         if (upstreamHost != null && upstreamHost.isNotEmpty) ...[
           '--upstream-protocol',
@@ -404,6 +429,12 @@ class DohProxyService {
           _processAuthRejected = true;
           return;
         }
+        if (line.startsWith(_accelUpdatePrefix)) {
+          _processAccelUpdate = _parseProcessAccelUpdate(
+            line.substring(_accelUpdatePrefix.length),
+          );
+          return;
+        }
         NetworkLogger.log('[DOH] $line');
         // 解析端口: "DOH proxy server listening on 127.0.0.1:12345"
         final match = RegExp(r'listening on [\d.]+:(\d+)').firstMatch(line);
@@ -435,6 +466,7 @@ class DohProxyService {
             password: upstreamPassword,
             cipher: upstreamCipher,
           );
+          _currentDohRoutesUrl = dohRoutesUrl;
           NetworkLogger.log('[DOH] 代理已启动，端口: $_port');
           completed = true;
           completer.complete(true);
@@ -542,7 +574,32 @@ class DohProxyService {
     _currentMitmConnect = null;
     _currentH2Mitm = null;
     _currentUpstreamSignature = null;
+    _currentDohRoutesUrl = null;
     // 注意：不清除 _lastError，保留用于 UI 展示
+  }
+
+  static const _accelUpdatePrefix = 'DOH_ACCEL_UPDATE ';
+
+  /// 解析进程模式 stdout 里的 `DOH_ACCEL_UPDATE {json}` 行，格式同 FFI 返回值
+  DohAccelUpdate? _parseProcessAccelUpdate(String rawJson) {
+    try {
+      final map = jsonDecode(rawJson);
+      if (map is! Map) return null;
+      final routeTable = map['route_table'];
+      final nodes = map['nodes'];
+      final envelope = map['nodes_envelope'];
+      final update = DohAccelUpdate(
+        routeTable: routeTable is String && routeTable.isNotEmpty
+            ? routeTable
+            : null,
+        nodes: nodes is String && nodes.isNotEmpty ? nodes : null,
+        nodesEnvelopeJson: envelope is Map ? jsonEncode(envelope) : null,
+      );
+      return update.isEmpty ? null : update;
+    } catch (e) {
+      NetworkLogger.log('[DOH] 解析 DOH_ACCEL_UPDATE 失败: $e');
+      return null;
+    }
   }
 
   /// 获取 DOH 代理可执行文件路径（仅桌面平台）
@@ -787,6 +844,65 @@ class DohProxyService {
     });
   }
 
+  /// 取出 Rust 侧新拉到的加速路由表 / 节点列表（取出即清），没有则 null
+  Future<DohAccelUpdate?> takeAccelUpdate() async {
+    if (!DohProxyFfi.isAvailable) {
+      final update = _processAccelUpdate;
+      _processAccelUpdate = null;
+      return update;
+    }
+    return _enqueueFfiOp(() async {
+      final sendPort = await _ensureFfiIsolate();
+      final response = ReceivePort();
+      sendPort.send({
+        'cmd': 'take_accel_update',
+        'replyTo': response.sendPort,
+      });
+      final result = await response.first;
+      response.close();
+      if (result is! Map || result['ok'] != true) return null;
+      final data = result['data'];
+      if (data is! Map) return null;
+      final update = DohAccelUpdate(
+        routeTable: data['routeTable'] as String?,
+        nodes: data['nodes'] as String?,
+        nodesEnvelopeJson: data['nodesEnvelopeJson'] as String?,
+      );
+      return update.isEmpty ? null : update;
+    });
+  }
+
+  /// 经 Rust 的 DoH 客户端向加速服务端发 HTTP 请求，返回 (status, body)
+  ///
+  /// 只在 FFI 可用的平台有效；进程模式 / 库太旧返回 null，由调用方自行回退。
+  /// 连不上或超时也返回 null，非 2xx 状态照常返回。
+  Future<({int status, String body})?> accelRequest(
+    String method,
+    String url, {
+    Map<String, String> headers = const {},
+    String? body,
+  }) async {
+    if (!DohProxyFfi.isAvailable) return null;
+    return _enqueueFfiOp(() async {
+      final sendPort = await _ensureFfiIsolate();
+      final response = ReceivePort();
+      sendPort.send({
+        'cmd': 'accel_request',
+        'method': method,
+        'url': url,
+        'headers': Map<String, String>.of(headers),
+        'body': body,
+        'replyTo': response.sendPort,
+      });
+      final result = await response.first;
+      response.close();
+      if (result is! Map || result['ok'] != true) return null;
+      final status = result['status'];
+      if (status is! int) return null;
+      return (status: status, body: result['body']?.toString() ?? '');
+    });
+  }
+
   Future<bool> clearDnsCache() async {
     if (!DohProxyFfi.isAvailable) {
       return DohProxyFfi.instance.clearDnsCache();
@@ -894,6 +1010,9 @@ class DohProxyService {
     String? caKeyPem,
     bool mitmConnect = true,
     bool h2Mitm = false,
+    String? dohRoutesUrl,
+    String? dohRouteTableJson,
+    String? dohNodeListJson,
   }) async {
     final sendPort = await _ensureFfiIsolate();
     final response = ReceivePort();
@@ -920,6 +1039,9 @@ class DohProxyService {
       'caCertPem': caCertPem,
       'caKeyPem': caKeyPem,
       'mitmConnect': mitmConnect,
+      'dohRoutesUrl': dohRoutesUrl,
+      'dohRouteTableJson': dohRouteTableJson,
+      'dohNodeListJson': dohNodeListJson,
       'preferredPort': port,
       'replyTo': response.sendPort,
     });
@@ -1223,6 +1345,9 @@ void _ffiIsolateEntry(SendPort mainSendPort) {
           final caCertPem = message['caCertPem'] as String?;
           final caKeyPem = message['caKeyPem'] as String?;
           final mitmConnect = message['mitmConnect'] as bool? ?? true;
+          final dohRoutesUrl = message['dohRoutesUrl'] as String?;
+          final dohRouteTableJson = message['dohRouteTableJson'] as String?;
+          final dohNodeListJson = message['dohNodeListJson'] as String?;
           var resultPort = DohProxyFfi.instance.start(
             port: portValue,
             enableDoh: enableDoh,
@@ -1245,6 +1370,9 @@ void _ffiIsolateEntry(SendPort mainSendPort) {
             caKeyPem: caKeyPem,
             mitmConnect: mitmConnect,
             h2Mitm: h2Mitm,
+            dohRoutesUrl: dohRoutesUrl,
+            dohRouteTableJson: dohRouteTableJson,
+            dohNodeListJson: dohNodeListJson,
           );
           if (resultPort <= 0 && preferredPort != 0) {
             resultPort = DohProxyFfi.instance.start(
@@ -1269,6 +1397,9 @@ void _ffiIsolateEntry(SendPort mainSendPort) {
               caKeyPem: caKeyPem,
               mitmConnect: mitmConnect,
               h2Mitm: h2Mitm,
+              dohRoutesUrl: dohRoutesUrl,
+              dohRouteTableJson: dohRouteTableJson,
+              dohNodeListJson: dohNodeListJson,
             );
           }
           if (resultPort <= 0) {
@@ -1366,6 +1497,45 @@ void _ffiIsolateEntry(SendPort mainSendPort) {
         case 'take_auth_rejected':
           final rejected = DohProxyFfi.instance.takeAuthRejected();
           replyTo.send({'ok': true, 'rejected': rejected});
+          return;
+        case 'take_accel_update':
+          final update = DohProxyFfi.instance.takeAccelUpdate();
+          replyTo.send({
+            'ok': true,
+            'data': update == null
+                ? null
+                : {
+                    'routeTable': update.routeTable,
+                    'nodes': update.nodes,
+                    'nodesEnvelopeJson': update.nodesEnvelopeJson,
+                  },
+          });
+          return;
+        case 'accel_request':
+          final method = message['method'] as String? ?? 'GET';
+          final url = message['url'] as String? ?? '';
+          final rawHeaders = message['headers'];
+          final headers = <String, String>{
+            if (rawHeaders is Map)
+              for (final entry in rawHeaders.entries)
+                entry.key.toString(): entry.value.toString(),
+          };
+          final body = message['body'] as String?;
+          final result = DohProxyFfi.instance.accelRequest(
+            method,
+            url,
+            headers,
+            body,
+          );
+          if (result == null) {
+            replyTo.send({'ok': false, 'error': 'accel_request failed'});
+          } else {
+            replyTo.send({
+              'ok': true,
+              'status': result.status,
+              'body': result.body,
+            });
+          }
           return;
         case 'dns_cache_stats':
           final stats = DohProxyFfi.instance.dnsCacheStats();
