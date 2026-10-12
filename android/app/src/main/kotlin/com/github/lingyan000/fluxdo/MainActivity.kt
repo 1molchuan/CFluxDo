@@ -618,8 +618,8 @@ class MainActivity : FlutterActivity() {
         val pm = packageManager
         val pkgName = packageName
 
-        // 目标 alias：null → 经典图标
-        val targetAlias = "$pkgName.${iconName ?: "DefaultIcon"}"
+        // 目标 alias 短名：null → 经典图标
+        val shortName = iconName ?: "DefaultIcon"
 
         val flags = PackageManager.GET_ACTIVITIES or PackageManager.GET_DISABLED_COMPONENTS
         val pkgInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -631,9 +631,17 @@ class MainActivity : FlutterActivity() {
 
         val activities = pkgInfo.activities ?: throw IllegalStateException("No activities found")
 
+        // Manifest 里 ".DefaultIcon" / ".ModernIcon" 这类相对类名是按 Gradle 的 namespace 展开的，
+        // 而运行时的 packageName 是 applicationId；两者不同时（比如换包名分发的 fork）
+        // 用 packageName 拼出来的类名并不存在。这里改为从已安装的 activity 列表里按短名找 alias，
+        // 拿它的真实 info.name 去启用。
+        val targetAlias = activities.firstOrNull { info ->
+            info.targetActivity != null && info.name.substringAfterLast('.') == shortName
+        } ?: throw IllegalArgumentException("未找到图标 alias: $shortName")
+
         // 先启用目标 alias，确保 app 始终可从启动器打开
         pm.setComponentEnabledSetting(
-            ComponentName(pkgName, targetAlias),
+            ComponentName(pkgName, targetAlias.name),
             PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
             PackageManager.DONT_KILL_APP
         )
@@ -641,7 +649,7 @@ class MainActivity : FlutterActivity() {
         // 禁用其他 alias（只操作 activity-alias，不碰 .MainActivity）
         for (info in activities) {
             if (info.targetActivity == null) continue  // 跳过主 Activity
-            if (info.name == targetAlias) continue      // 跳过目标
+            if (info.name == targetAlias.name) continue // 跳过目标
 
             pm.setComponentEnabledSetting(
                 ComponentName(pkgName, info.name),
@@ -650,7 +658,7 @@ class MainActivity : FlutterActivity() {
             )
         }
 
-        Log.d("AppIcon", "图标已切换: ${iconName ?: "DefaultIcon"}")
+        Log.d("AppIcon", "图标已切换: $shortName (${targetAlias.name})")
     }
 
     // ======================== 应用链接解析与启动 ========================
