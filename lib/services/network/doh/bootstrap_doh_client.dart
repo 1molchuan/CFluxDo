@@ -4,6 +4,8 @@ import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
+
 import '../../../l10n/s.dart';
 import '../../network_logger.dart';
 
@@ -14,6 +16,20 @@ enum DnsRecordType {
 
   const DnsRecordType(this.value);
   final int value;
+}
+
+/// DoH 请求固定带的 User-Agent：安卓上最常见的 HTTP 库，混在普通 App 流量里不显眼。
+/// 只用于 DoH 查询和加速令牌接口，不影响发给站点的请求。
+const String dohUserAgent = 'okhttp/4.12.0';
+
+/// 服务器不接受 POST（405/415），改用 GET 重发
+class _DohPostRejected implements Exception {
+  const _DohPostRejected(this.statusLine);
+
+  final String statusLine;
+
+  @override
+  String toString() => 'DoH server rejected POST: $statusLine';
 }
 
 /// DNS 解析结果，包含地址和 TTL
@@ -65,6 +81,17 @@ class BootstrapDohClient {
 
   /// 连接最大存活时间
   static const _maxSocketAge = Duration(seconds: 30);
+
+  /// 服务器回过 405/415 后改用 GET `?dns=` 查询；默认 POST（报文放请求体）
+  bool _useGet = false;
+
+  /// 当前是否用 GET 查询（默认 POST，服务器拒绝 POST 后才切换）
+  @visibleForTesting
+  bool get usesGet => _useGet;
+
+  /// 模拟服务器拒绝过 POST，之后的请求用 GET
+  @visibleForTesting
+  void useGetForTesting() => _useGet = true;
 
   void _parseServerUrl() {
     final uri = Uri.parse(serverUrl);
@@ -182,63 +209,16 @@ class BootstrapDohClient {
   /// 按记录类型查询地址
   Future<DnsResult> _lookupByType(String host, DnsRecordType type) async {
     try {
-      final query = _buildDnsQuery(host, type: type);
-      final base64Query = base64Url.encode(query).replaceAll('=', '');
-      final requestPath = '$_path?dns=$base64Query';
+      final query = buildDnsQuery(host, type: type);
 
-      // 尝试用缓存连接发送（keep-alive），失败则新建连接
-      for (var attempt = 0; attempt < 2; attempt++) {
-        SecureSocket? socket;
-        final isReuse = attempt == 0 && _cachedSocket != null;
-
+      // 默认 POST；服务器回 405/415 则切到 GET 再发一次
+      for (var method = 0; method < 2; method++) {
         try {
-          if (isReuse) {
-            socket = _cachedSocket;
-          } else {
-            _closeSocket();
-            socket = await _getOrCreateSocket();
-          }
-
-          if (socket == null) {
-            throw SocketException(S.current.doh_cannotConnect);
-          }
-
-          // 发送 HTTP/1.1 请求，使用 keep-alive
-          final request = StringBuffer()
-            ..writeln('GET $requestPath HTTP/1.1')
-            ..writeln('Host: $_host')
-            ..writeln('Accept: application/dns-message');
-          final token = authToken;
-          if (token != null && token.isNotEmpty) {
-            request.writeln('Authorization: Bearer $token');
-          }
-          request
-            ..writeln('Connection: keep-alive')
-            ..writeln();
-
-          socket.write(request.toString());
-          await socket.flush();
-
-          // 读取响应（字节级解析）
-          final responseBytes = await _readHttpResponse(socket);
-          if (responseBytes == null) {
-            if (isReuse) {
-              // 缓存连接可能已被服务端关闭，重试
-              _closeSocket();
-              continue;
-            }
-            throw HttpException(S.current.doh_invalidHttpResponse);
-          }
-
-          return _parseDnsResponse(responseBytes);
-        } catch (e) {
-          if (isReuse) {
-            // 复用连接失败，清理后重试
-            _closeSocket();
-            continue;
-          }
-          _closeSocket();
-          rethrow;
+          return await _send(query);
+        } on _DohPostRejected catch (e) {
+          if (_useGet) rethrow;
+          NetworkLogger.log('[DOH] $_host 不接受 POST（${e.statusLine}），改用 GET');
+          _useGet = true;
         }
       }
 
@@ -247,6 +227,90 @@ class BootstrapDohClient {
       NetworkLogger.log('[DOH] 查询失败: $host | $e');
       rethrow;
     }
+  }
+
+  /// 组装 HTTP/1.1 请求：POST 把 DNS 报文放请求体，GET 放 `?dns=`
+  @visibleForTesting
+  Uint8List buildHttpRequest(Uint8List query) {
+    final lines = <String>[];
+    if (_useGet) {
+      final base64Query = base64Url.encode(query).replaceAll('=', '');
+      lines.add('GET $_path?dns=$base64Query HTTP/1.1');
+    } else {
+      lines.add('POST $_path HTTP/1.1');
+    }
+    lines
+      ..add('Host: $_host')
+      ..add('User-Agent: $dohUserAgent')
+      ..add('Accept: application/dns-message');
+    if (!_useGet) {
+      lines
+        ..add('Content-Type: application/dns-message')
+        ..add('Content-Length: ${query.length}');
+    }
+    final token = authToken;
+    if (token != null && token.isNotEmpty) {
+      lines.add('Authorization: Bearer $token');
+    }
+    lines.add('Connection: keep-alive');
+
+    final builder = BytesBuilder(copy: false)
+      ..add(utf8.encode('${lines.join('\r\n')}\r\n\r\n'));
+    if (!_useGet) {
+      builder.add(query);
+    }
+    return builder.takeBytes();
+  }
+
+  /// 发一次查询并解析应答；先用缓存连接（keep-alive），失败则新建连接重试
+  Future<DnsResult> _send(Uint8List query) async {
+    for (var attempt = 0; attempt < 2; attempt++) {
+      SecureSocket? socket;
+      final isReuse = attempt == 0 && _cachedSocket != null;
+
+      try {
+        if (isReuse) {
+          socket = _cachedSocket;
+        } else {
+          _closeSocket();
+          socket = await _getOrCreateSocket();
+        }
+
+        if (socket == null) {
+          throw SocketException(S.current.doh_cannotConnect);
+        }
+
+        socket.add(buildHttpRequest(query));
+        await socket.flush();
+
+        // 读取响应（字节级解析）
+        final responseBytes = await _readHttpResponse(socket);
+        if (responseBytes == null) {
+          if (isReuse) {
+            // 缓存连接可能已被服务端关闭，重试
+            _closeSocket();
+            continue;
+          }
+          throw HttpException(S.current.doh_invalidHttpResponse);
+        }
+
+        return _parseDnsResponse(responseBytes);
+      } on _DohPostRejected {
+        // 服务器已经应答，不是连接问题；换方法重发
+        _closeSocket();
+        rethrow;
+      } catch (e) {
+        if (isReuse) {
+          // 复用连接失败，清理后重试
+          _closeSocket();
+          continue;
+        }
+        _closeSocket();
+        rethrow;
+      }
+    }
+
+    throw SocketException(S.current.doh_queryFailed);
   }
 
   /// 在字节层面读取完整的 HTTP 响应 body
@@ -272,6 +336,14 @@ class BootstrapDohClient {
         final statusLine = headerStr.split('\r\n').first;
         if (!statusLine.contains('200')) {
           subscription?.cancel();
+          if (!_useGet &&
+              (statusLine.contains(' 405') || statusLine.contains(' 415'))) {
+            // 服务器不接受 POST，由调用方切到 GET 重发
+            if (!completer.isCompleted) {
+              completer.completeError(_DohPostRejected(statusLine));
+            }
+            return;
+          }
           final token = authToken;
           if (token != null &&
               token.isNotEmpty &&
@@ -410,7 +482,8 @@ class BootstrapDohClient {
   }
 
   /// 构建 DNS 查询消息 (RFC 1035)
-  Uint8List _buildDnsQuery(String host, {DnsRecordType type = DnsRecordType.a}) {
+  @visibleForTesting
+  Uint8List buildDnsQuery(String host, {DnsRecordType type = DnsRecordType.a}) {
     final buffer = BytesBuilder();
 
     // Transaction ID (2 bytes) - 随机生成

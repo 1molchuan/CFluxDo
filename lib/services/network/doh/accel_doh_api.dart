@@ -4,6 +4,8 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 
+import 'bootstrap_doh_client.dart' show dohUserAgent;
+
 /// 加速服务端发令牌的结果
 enum AccelDohIssueOutcome {
   /// 拿到令牌
@@ -174,6 +176,7 @@ class AccelDohApi {
   HttpClient _createClient() {
     final bootstrapIps = _bootstrapIps;
     return HttpClient()
+      ..userAgent = dohUserAgent
       ..connectionTimeout = _connectTimeout
       ..findProxy = ((_) => 'DIRECT')
       ..connectionFactory = (uri, proxyHost, proxyPort) async =>
