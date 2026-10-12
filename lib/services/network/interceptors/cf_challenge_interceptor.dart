@@ -127,6 +127,98 @@ class CfChallengeInterceptor extends Interceptor {
     }
   }
 
+  /// 撞盾后用 WebView 持有的另一枚 cf_clearance 换值重放。
+  ///
+  /// 返回 null 表示没有可换的值或换值未生效（调用方继续走验证流程）；
+  /// 否则 [_WebViewClearanceReplay.response] 为重放成功的响应，
+  /// [_WebViewClearanceReplay.error] 为非 CF 原因的失败（如实上抛，不再验证）；
+  /// 两者皆空表示重放仍撞盾（已登记该值被撞，调用方继续验证）。
+  Future<_WebViewClearanceReplay?> _tryReplayWithWebViewClearance({
+    required DioException err,
+    required String? challengedClearance,
+    required String requestMethod,
+    required String requestUrl,
+  }) async {
+    final authority = CfClearanceAuthority.instance;
+    List<String> candidates;
+    try {
+      candidates = await BoundarySyncService.instance
+          .readCfClearanceCandidatesFromWebView();
+    } catch (e) {
+      // WebView cookie 管理器未就绪等情况：不是本路径该处理的问题，跳过。
+      debugPrint('[Dio] 读取 WebView cf_clearance 失败，跳过换值重放: $e');
+      return null;
+    }
+    String? candidate;
+    for (final value in candidates) {
+      if (CfClearanceAuthority.isSameValue(value, challengedClearance)) continue;
+      if (authority.isKnownChallenged(value)) continue;
+      candidate = value;
+      break;
+    }
+    if (candidate == null) return null;
+
+    // 经 BoundarySync 正常写入（domain/path 处理、日志口径都复用），
+    // acceptValues 锁定只写这一枚，避免把 WebView 里的其他变体一并带进来。
+    await BoundarySyncService.instance.syncFromWebView(
+      cookieNames: const {CfClearanceAuthority.cookieName},
+      acceptValues: {CfClearanceAuthority.cookieName: candidate},
+      trusted: true,
+    );
+    final swappedIn = await cookieJarService.getCfClearance();
+    if (!CfClearanceAuthority.isSameValue(swappedIn, candidate)) {
+      CfChallengeLogger.log(
+        '[INTERCEPTOR] WebView cf_clearance (${candidate.length} chars) '
+        'not adopted by sync gate, falling back to verify',
+      );
+      return null;
+    }
+
+    final replayOptions = err.requestOptions.copyWith();
+    replayOptions.extra[FluxRequestKeys.skipCfChallenge] = true;
+    replayOptions.extra[FluxRequestKeys.skipCfBlock] = true;
+    await _refreshCookieHeader(replayOptions);
+    CfChallengeLogger.log(
+      '[INTERCEPTOR] Swapped in WebView cf_clearance '
+      '(challenged=${challengedClearance?.length ?? 0} chars, '
+      'webview=${candidate.length} chars), replaying: '
+      '$requestMethod $requestUrl',
+    );
+    try {
+      final response = await dio.fetch(replayOptions);
+      CfChallengeLogger.logInterceptorRetry(
+        url: requestUrl,
+        success: true,
+        statusCode: response.statusCode,
+      );
+      return _WebViewClearanceReplay(response: response);
+    } catch (e) {
+      if (e is DioException && CfChallengeService.isCfChallengeError(e.response)) {
+        // 换上的值也被撞：登记为已死，继续走验证流程
+        authority.noteIncumbentChallenged(candidate);
+        CfChallengeLogger.log(
+          '[INTERCEPTOR] Replay with WebView cf_clearance still '
+          'challenged (${e.response?.statusCode}), falling back to verify',
+        );
+        return const _WebViewClearanceReplay();
+      }
+      CfChallengeLogger.logInterceptorRetry(
+        url: requestUrl,
+        success: false,
+        error: e.toString(),
+      );
+      return _WebViewClearanceReplay(
+        error: e is DioException
+            ? e
+            : DioException(
+                requestOptions: replayOptions,
+                error: e,
+                type: DioExceptionType.unknown,
+              ),
+      );
+    }
+  }
+
   @override
   Future<void> onError(
     DioException err,
@@ -235,10 +327,33 @@ class CfChallengeInterceptor extends Interceptor {
       // CF 挑战（= 已死），打开换届窗口——之后 sync 可以替换它（过盾新值
       // 继位，或 Turnstile 最新铸值无缝补位）。这里不做任何候选值判定、
       // 不分 403/429：撞了就过盾，语义见 CfClearanceAuthority。
+      final challengedClearance = carriedIsStale
+          ? currentClearance
+          : carriedClearance;
       CfClearanceAuthority.instance.noteIncumbentChallenged(
-        carriedIsStale ? currentClearance : carriedClearance,
+        challengedClearance,
       );
       final cfService = CfChallengeService();
+
+      // 撞盾先换值重放：WebView 若已持有一枚与被撞值不同、且本会话未被撞过的
+      // cf_clearance（典型：站点在 WebView 里刚签了新值，但 sync 闸门因在位值
+      // 当时还健康而把它挡在 jar 外），直接换进 jar 重放一次，省掉一轮验证
+      // WebView 导航（实测可把 3～6 秒的恢复缩到一个请求往返）。在位值刚登记
+      // 为已撞，闸门此时放行。验证进行中不做（验证页自己会同步新值，避免
+      // 两边抢写）；WebView 值也撞盾则按它在位被撞处理，继续走验证流程。
+      if (!cfService.isVerifying) {
+        final swapped = await _tryReplayWithWebViewClearance(
+          err: err,
+          challengedClearance: challengedClearance,
+          requestMethod: requestMethod,
+          requestUrl: requestUrl,
+        );
+        if (swapped != null) {
+          if (swapped.response != null) return handler.resolve(swapped.response!);
+          if (swapped.error != null) return handler.reject(swapped.error!);
+        }
+      }
+
       final isSilent = err.requestOptions.spec.isSilent;
       final shouldShowActionPrompt = _shouldShowActionPrompt(
         err.requestOptions,
@@ -518,4 +633,12 @@ class CfChallengeInterceptor extends Interceptor {
 
     handler.next(err);
   }
+}
+
+/// 「撞盾先换值重放」的结果：成功响应 / 非 CF 失败 / 两者皆空（仍撞盾）。
+class _WebViewClearanceReplay {
+  const _WebViewClearanceReplay({this.response, this.error});
+
+  final Response<dynamic>? response;
+  final DioException? error;
 }

@@ -36,20 +36,59 @@ class CfClearanceAuthority {
   static const Duration rotationWindow = Duration(minutes: 30);
 
   /// 最近一次撞盾时 jar 里的值（= 已死的在位值）。
-  /// 只记这一个：撞了就过盾，没有语义要判，不需要计数/集合。
+  /// 换届闸门只看这一个：撞了就过盾，没有语义要判，不需要计数。
   String? _lastChallengedValue;
+
+  /// 本会话内所有被撞过的值（归一化，有界）。只用于「撞盾先换值重放」时排除
+  /// 已知死值，不参与换届闸门判定（闸门契约仍只看最近一次被撞的在位值）。
+  final Set<String> _challengedValues = <String>{};
+
+  /// 本会话内从 WebView 回读到过的 cf_clearance 值（归一化，有界）。
+  /// 用于区分「本会话新铸值」与「残留旧值」：闸门决定不变，只影响日志口径，
+  /// 让线上日志能看出被挡下的是哪一类候选值。
+  final Set<String> _observedWebViewValues = <String>{};
+
+  static const int _maxTrackedValues = 16;
 
   /// 撞盾时登记：请求实际携带的 cf_clearance 已被 CF 挑战 = 在位值已死，
   /// 此后 sync 可以替换它（过盾新值继位，或 Turnstile 新铸值无缝补位）。
   void noteIncumbentChallenged(String? value) {
     final normalized = _normalize(value ?? '');
-    if (normalized.isEmpty || normalized == _lastChallengedValue) return;
+    if (normalized.isEmpty) return;
+    _remember(_challengedValues, normalized);
+    if (normalized == _lastChallengedValue) return;
     _lastChallengedValue = normalized;
     debugPrint('[CfClearanceAuthority] 在位 cf_clearance 被撞，放开换届');
     CfChallengeLogger.log(
       '[AUTHORITY] incumbent challenged (${normalized.length} chars), '
       'rotation window open',
     );
+  }
+
+  /// 该值是否在本会话内被撞过（已知死值）。
+  bool isKnownChallenged(String? value) {
+    final normalized = _normalize(value ?? '');
+    return normalized.isNotEmpty && _challengedValues.contains(normalized);
+  }
+
+  /// 登记一次 WebView 回读到的 cf_clearance 值（每次 sync 都调用）。
+  void noteWebViewValueObserved(String? value) {
+    final normalized = _normalize(value ?? '');
+    if (normalized.isEmpty) return;
+    _remember(_observedWebViewValues, normalized);
+  }
+
+  /// 该值是否在本会话内从 WebView 回读到过。
+  bool hasObservedWebViewValue(String? value) {
+    final normalized = _normalize(value ?? '');
+    return normalized.isNotEmpty && _observedWebViewValues.contains(normalized);
+  }
+
+  /// 有界集合：超出上限时淘汰最早登记的值（Set 保持插入顺序）。
+  static void _remember(Set<String> set, String value) {
+    if (set.contains(value)) return;
+    if (set.length >= _maxTrackedValues) set.remove(set.first);
+    set.add(value);
   }
 
   /// sync 闸门判定：候选值 [candidateValue] 是否允许替换 jar 当前值。
@@ -119,6 +158,8 @@ class CfClearanceAuthority {
   /// 登出/换账号时清空：标记随登录会话失效。
   void reset() {
     _lastChallengedValue = null;
+    _challengedValues.clear();
+    _observedWebViewValues.clear();
   }
 
   // ---------------------------------------------------------------------------
