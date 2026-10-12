@@ -408,7 +408,7 @@ class _DohDetailSettingsPageState extends State<DohDetailSettingsPage> {
 
     setState(() => _testingServers.add(server.url));
 
-    // 加速按当前档位测（专属加速带令牌，否则测公共加速或 DNSPod）
+    // 加速按当前档位测（专属加速带令牌，否则测公共加速）
     final target = _service.latencyTestTarget(server);
     final resolver = DohResolver(
       serverUrl: target.url,

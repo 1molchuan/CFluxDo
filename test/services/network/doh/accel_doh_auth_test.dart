@@ -80,7 +80,6 @@ void main() {
     final service = NetworkSettingsService.instance;
     final api = _FakeApi();
     final flow = _FakeConnectFlow();
-    const dnsPodUrl = 'https://doh.pub/dns-query';
 
     late DohServer accelServer;
 
@@ -165,7 +164,7 @@ void main() {
       );
     });
 
-    test('等级降到 0：作废令牌，改走 DNSPod', () async {
+    test('等级降到 0：作废令牌，改走公共加速（不落 DNSPod）', () async {
       auth.onUserChanged(User(id: 7, username: 'alice', trustLevel: 0));
       await pumpEventQueue();
       expect(auth.token, isNull);
@@ -176,9 +175,9 @@ void main() {
       // 等级回升后不受 6 小时限制
       expect(prefs.getString('doh_accel_last_connect'), isNull);
       expect(service.current.selectedServerUrl, service.accelServerUrl);
-      expect(activeUrl(), dnsPodUrl);
+      expect(activeUrl(), accelDohPublicServer.url);
       expect(activeToken(), isNull);
-      expect(service.accelFallbackHint, contains('DNSPod'));
+      expect(service.accelFallbackHint, contains('公共加速'));
     });
 
     test('等级回到 1、之前同意过：自动走 Connect 换到新令牌', () async {
@@ -254,7 +253,7 @@ void main() {
       expect(activeToken(), 'token-9');
     });
 
-    test('主动退出：作废令牌、清掉授权记录，改回 DNSPod', () async {
+    test('主动退出：作废令牌、清掉授权记录，改回公共加速', () async {
       await auth.revoke();
       expect(auth.token, isNull);
       expect(auth.isMember, isFalse);
@@ -263,7 +262,7 @@ void main() {
       expect(prefs.getString('doh_accel_consent'), isNull);
       expect(prefs.getBool('doh_accel_member'), isNull);
       expect(prefs.getString('doh_accel_last_connect'), isNull);
-      expect(activeUrl(), dnsPodUrl);
+      expect(activeUrl(), accelDohPublicServer.url);
     });
   });
 }

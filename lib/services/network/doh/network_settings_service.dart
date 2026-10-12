@@ -287,7 +287,7 @@ class NetworkSettingsService {
     }
     return switch (AccelDohAuthService.instance.status) {
       AccelDohAuthStatus.ready => null,
-      AccelDohAuthStatus.notEligible => '登录且信任等级 ≥ 1 后启用，当前使用 DNSPod',
+      AccelDohAuthStatus.notEligible => '登录且信任等级 ≥ 1 后可授权专属加速，当前使用公共加速',
       AccelDohAuthStatus.notAuthorized => '未授权 L 站 Connect，当前使用公共加速',
       AccelDohAuthStatus.unavailable => '此账号无法使用 Connect，当前使用公共加速',
       AccelDohAuthStatus.denied => '加速服务端拒绝了此账号，当前使用公共加速',
@@ -296,13 +296,13 @@ class NetworkSettingsService {
     };
   }
 
-  /// 选中加速时按账号分档：有令牌走专属加速，登录佬友走公共加速，游客/TL0 走 DNSPod
+  /// 选中加速时按账号分档：有令牌走专属加速，没令牌（登录佬友、游客/TL0）一律走公共加速。
+  /// 游客不能落到 DNSPod：国内公共 DoH 对 linux.do 的应答已被污染（解析到 Twitter/Facebook
+  /// 段 IP，TLS 握手挂死），未登录就连不上，也就永远登不进去拿不到加速。
   String _activeDohUrl(String url) {
     if (url != _accelServer?.url) return url;
-    final auth = AccelDohAuthService.instance;
-    if (auth.token != null) return url;
-    if (auth.isMember) return accelDohPublicServer.url;
-    return _defaultServers.first.url;
+    if (AccelDohAuthService.instance.token != null) return url;
+    return accelDohPublicServer.url;
   }
 
   /// 测速时测实际会用的那个服务器（加速按当前档位，带上令牌）
@@ -1691,12 +1691,12 @@ class NetworkSettingsService {
 ///
 /// 每个安装用一个随机子域名访问，服务端借此区分安装。
 /// 查询要带账号令牌（见 [AccelDohAuthService]）：用 L 站 Connect 核验过的账号才发令牌。
-/// 没有令牌时，登录且等级 ≥ 1 的走 [accelDohPublicServer]，游客/TL0 走 DNSPod。
+/// 没有令牌时（登录佬友、游客/TL0）一律走 [accelDohPublicServer]。
 /// 节点 IP 作为 bootstrap：系统 DNS 解析不出加速域名时直接连这些节点（SNI 不变）。
 const String accelDohServerName = 'cfluxdo 加速';
 
-/// 公共加速：不需要令牌，给没授权 Connect 或用不了 Connect 的佬友（如青春版）用。
-/// 不在服务器列表里显示，只在选中加速且没有令牌时顶上。
+/// 公共加速：不需要令牌，给没授权 Connect 或用不了 Connect 的佬友（如青春版）
+/// 以及游客/TL0 用。不在服务器列表里显示，只在选中加速且没有令牌时顶上。
 const DohServer accelDohPublicServer = DohServer(
   name: 'cfluxdo 公共加速',
   url: 'https://edge.1molchuan.top/linuxdo',

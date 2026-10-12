@@ -13,7 +13,7 @@ enum AccelDohAuthStatus {
   /// 有专属令牌，走 cfluxdo 加速
   ready,
 
-  /// 游客或信任等级不足，走 DNSPod
+  /// 游客或信任等级不足，拿不到令牌，走公共加速
   notEligible,
 
   /// 还没授权 Connect（没问过或选了暂不），走公共加速
@@ -39,8 +39,8 @@ enum AccelDohAuthStatus {
 /// 授权，把回调里的 code/state 交给加速服务端；服务端去 Connect 核验身份后
 /// 发一个令牌，之后查询都带 `Authorization: Bearer <令牌>`。
 ///
-/// 没有令牌时：登录且等级 ≥ 1 的走公共加速（青春版等用不了 Connect 的账号也在这档），
-/// 游客/TL0 走 DNSPod。
+/// 没有令牌时一律走公共加速：登录且等级 ≥ 1 但没授权的、青春版等用不了 Connect 的账号，
+/// 以及游客/TL0（国内公共 DoH 对 linux.do 的应答已被污染，游客不能落到 DNSPod）。
 ///
 /// 发给加速服务端的只有 code/state 和它自己发的令牌，
 /// 从不携带 linux.do 的 cookie、_t 或 API key。
