@@ -1,9 +1,9 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:ui' show Locale, PlatformDispatcher;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
-import 'package:ua_client_hints/ua_client_hints.dart';
 import 'config/site_customization.dart';
 import 'config/sites/linuxdo.dart';
 import 'services/windows_webview_environment_service.dart';
@@ -29,8 +29,8 @@ class AppConstants {
   /// 与原生层通信的系统信息 channel（目前只有 macOS 用到）
   static const MethodChannel _systemInfoChannel = MethodChannel('com.fluxdo/system_info');
 
-  /// 缓存的 Client Hints 请求头（仅移动端可用）
-  static Map<String, String>? _cachedClientHints;
+  /// 拿不到系统语言列表（引擎尚未就绪）时的 Accept-Language 兜底值
+  static const String _defaultAcceptLanguage = 'zh-CN,zh;q=0.9,en;q=0.8';
 
   /// 初始化 User-Agent（应用启动时调用一次）
   /// 获取 WebView 的真实 UA 并移除 wv 标识（解决 Google 登录问题）
@@ -58,7 +58,6 @@ class AppConstants {
         _cachedUserAgent = _buildDefaultUserAgent();
       }
       _uaCompleter.complete(_cachedUserAgent!);
-      await _initClientHints();
       return;
     }
 
@@ -79,9 +78,6 @@ class AppConstants {
       _cachedUserAgent = _buildDefaultUserAgent();
     }
     _uaCompleter.complete(_cachedUserAgent!);
-
-    // 初始化 Client Hints（仅 Android/iOS）
-    await _initClientHints();
   }
 
   static Future<String?> _getDesktopWebViewUserAgent() async {
@@ -142,23 +138,49 @@ class AppConstants {
     }
   }
 
-  /// 初始化 User-Agent Client Hints 请求头
-  /// ua_client_hints 仅支持 Android/iOS，桌面端跳过
-  static Future<void> _initClientHints() async {
-    if (!Platform.isAndroid && !Platform.isIOS) return;
-    try {
-      final hints = await userAgentClientHintsHeader();
-      // 移除包自带的 User-Agent（我们用自己清理过的）
-      hints.remove('User-Agent');
-      _cachedClientHints = hints;
-      debugPrint('[AppConstants] Client Hints: $_cachedClientHints');
-    } catch (e) {
-      debugPrint('[AppConstants] 获取 Client Hints 失败: $e');
-    }
-  }
+  /// 按系统语言列表生成 Accept-Language，算法对齐 Chromium
+  /// （LocaleUtils.toLanguageTag → HttpUtil::ExpandLanguageList →
+  /// GenerateAcceptLanguageHeader）：同一语系最后一个带地区的标签之后补上
+  /// 基础语言，q 值从 0.9 起逐项递减 0.1，最低 0.1。
+  ///
+  /// 系统 WebView 发出的就是这个值；Dio 与它保持一致，避免同一个 UA 下
+  /// 出现两套语言偏好。拿不到系统语言（引擎尚未就绪）时退回内置默认值。
+  static String get acceptLanguage =>
+      buildAcceptLanguage(PlatformDispatcher.instance.locales);
 
-  /// 获取缓存的 Client Hints 请求头（可能为 null）
-  static Map<String, String>? get clientHints => _cachedClientHints;
+  /// [acceptLanguage] 的纯函数版本，便于测试。
+  @visibleForTesting
+  static String buildAcceptLanguage(List<Locale> locales) {
+    final tags = <String>[];
+    void add(String tag) {
+      if (!tags.contains(tag)) tags.add(tag);
+    }
+
+    final normalized = <({String tag, String base})>[];
+    for (final locale in locales) {
+      final language = locale.languageCode.toLowerCase();
+      if (language.isEmpty || language == 'und') continue;
+      final country = locale.countryCode;
+      final tag = (country == null || country.isEmpty)
+          ? language
+          : '$language-${country.toUpperCase()}';
+      normalized.add((tag: tag, base: language));
+    }
+    for (var i = 0; i < normalized.length; i++) {
+      add(normalized[i].tag);
+      final next = i + 1 < normalized.length ? normalized[i + 1].base : null;
+      if (next != normalized[i].base) add(normalized[i].base);
+    }
+    if (tags.isEmpty) return _defaultAcceptLanguage;
+
+    final buffer = StringBuffer(tags.first);
+    var q = 9;
+    for (final tag in tags.skip(1)) {
+      buffer.write(',$tag;q=0.$q');
+      if (q > 1) q--;
+    }
+    return buffer.toString();
+  }
 
   /// 清理 WebView UA，使其看起来像普通浏览器，以通过 Google OAuth 检测
   ///

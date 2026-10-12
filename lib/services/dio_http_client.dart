@@ -47,10 +47,8 @@ class DioHttpClient extends http.BaseClient {
         enableNetworkLog: false,
       );
 
-  static const Map<String, String> _imageHeaders = {
-    'Accept': '*/*',
-    'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-  };
+  /// Accept-Language 由 RequestHeaderInterceptor 按系统语言逐请求设置
+  static const Map<String, String> _imageHeaders = {'Accept': '*/*'};
 
   /// 图片下载并发通道(下载侧按内容域分队,与缓存 bucket 分池同思路)。
   ///

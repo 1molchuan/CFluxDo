@@ -212,7 +212,7 @@ class DiscourseService extends _DiscourseServiceBase
     : _dio = DiscourseDio.create(
         defaultHeaders: {
           'Accept': 'application/json, text/javascript, */*; q=0.01',
-          'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+          // Accept-Language 由 RequestHeaderInterceptor 按系统语言逐请求设置
           'X-Requested-With': 'XMLHttpRequest',
         },
       ),
