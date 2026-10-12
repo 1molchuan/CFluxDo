@@ -389,6 +389,7 @@ class _DohDetailSettingsPageState extends State<DohDetailSettingsPage> {
       case AccelDohAuthStatus.denied:
         ToastService.showError('加速服务端拒绝了此账号，继续使用公共加速');
       case AccelDohAuthStatus.pending:
+      case AccelDohAuthStatus.displaced:
         ToastService.showError('授权没有完成，稍后会自动重试');
       case AccelDohAuthStatus.notAuthorized:
       case AccelDohAuthStatus.notEligible:

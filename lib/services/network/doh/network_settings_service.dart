@@ -291,6 +291,7 @@ class NetworkSettingsService {
       AccelDohAuthStatus.notAuthorized => '未授权 L 站 Connect，当前使用公共加速',
       AccelDohAuthStatus.unavailable => '此账号无法使用 Connect，当前使用公共加速',
       AccelDohAuthStatus.denied => '加速服务端拒绝了此账号，当前使用公共加速',
+      AccelDohAuthStatus.displaced => '授权被收回（可能是设备超过 3 台），稍后自动重试，当前使用公共加速',
       AccelDohAuthStatus.pending => '等待 Connect 授权，当前使用公共加速',
     };
   }

@@ -25,6 +25,10 @@ enum AccelDohAuthStatus {
   /// 加速服务端拒绝给这个账号发令牌，走公共加速
   denied,
 
+  /// 刚授权不久令牌就被收回（多半是同一账号设备超过上限被挤掉），
+  /// 走公共加速，等离上次授权满 6 小时再自动重新授权
+  displaced,
+
   /// 正在授权或等网络恢复后重试，走公共加速
   pending,
 }
@@ -50,6 +54,7 @@ class AccelDohAuthService extends ChangeNotifier {
   static const String _memberKey = 'doh_accel_member';
   static const String _consentKey = 'doh_accel_consent';
   static const String _backoffKey = 'doh_accel_backoff';
+  static const String _lastConnectKey = 'doh_accel_last_connect';
 
   /// 0.2.28.3 测试版自报身份时用的键，已废弃
   static const String _legacyTokenKey = 'doh_accel_auth';
@@ -58,7 +63,8 @@ class AccelDohAuthService extends ChangeNotifier {
   static const int minTrustLevel = 1;
 
   /// 同一个令牌被拒后，至少隔这么久才再处理一次
-  static const Duration _rejectCooldown = Duration(seconds: 60);
+  @visibleForTesting
+  Duration rejectCooldown = const Duration(seconds: 60);
 
   /// 这段时间内被拒超过 [_maxRejectsInWindow] 次就暂停加速
   static const Duration _rejectWindow = Duration(minutes: 10);
@@ -69,6 +75,10 @@ class AccelDohAuthService extends ChangeNotifier {
 
   /// 账号用不了 Connect 时多久后再试
   static const Duration _unavailableRetryDelay = Duration(hours: 24);
+
+  /// 两次自动 Connect 授权之间至少隔这么久。服务端每个账号只留 3 台设备，
+  /// 第 4 台授权会挤掉最早那台；被挤掉的马上重新授权又会挤掉别的，几台设备会来回互踢
+  static const Duration _reconnectInterval = Duration(hours: 6);
 
   /// 网络/服务端异常后的重试间隔，逐次拉长
   static const List<Duration> _retryDelays = [
@@ -96,6 +106,9 @@ class AccelDohAuthService extends ChangeNotifier {
   bool _member = false;
   _AccelDohConsent? _consent;
   _AccelDohBackoff? _backoff;
+
+  /// 最近一次 Connect 授权成功是哪个账号、什么时候
+  _AccelDohLastConnect? _lastConnect;
 
   /// 最近一次拿到的登录用户；主动退出后清空
   User? _user;
@@ -137,9 +150,11 @@ class AccelDohAuthService extends ChangeNotifier {
     final user = _user;
     final backoff = _activeBackoff(user);
     if (backoff != null) {
-      return backoff.reason == _BackoffReason.denied
-          ? AccelDohAuthStatus.denied
-          : AccelDohAuthStatus.unavailable;
+      return switch (backoff.reason) {
+        _BackoffReason.denied => AccelDohAuthStatus.denied,
+        _BackoffReason.unavailable => AccelDohAuthStatus.unavailable,
+        _BackoffReason.displaced => AccelDohAuthStatus.displaced,
+      };
     }
     final consent = user == null ? _consent?.granted : _consentFor(user);
     if (consent != true) return AccelDohAuthStatus.notAuthorized;
@@ -160,6 +175,9 @@ class AccelDohAuthService extends ChangeNotifier {
     _member = prefs.getBool(_memberKey) ?? false;
     _consent = _AccelDohConsent.decode(prefs.getString(_consentKey));
     _backoff = _AccelDohBackoff.decode(prefs.getString(_backoffKey));
+    _lastConnect = _AccelDohLastConnect.decode(
+      prefs.getString(_lastConnectKey),
+    );
     _publish();
     if (_user != null) {
       unawaited(_sync());
@@ -210,7 +228,7 @@ class AccelDohAuthService extends ChangeNotifier {
     if (_prefs == null || _stored == null) return;
     final now = DateTime.now();
     final last = _lastRejectAt;
-    if (last != null && now.difference(last) < _rejectCooldown) return;
+    if (last != null && now.difference(last) < rejectCooldown) return;
     _lastRejectAt = now;
 
     final windowStart = _rejectWindowStart;
@@ -249,6 +267,7 @@ class AccelDohAuthService extends ChangeNotifier {
     await prefs?.remove(_memberKey);
     await prefs?.remove(_consentKey);
     await prefs?.remove(_backoffKey);
+    await _clearLastConnect();
     await _clearToken();
     if (stored != null && prefs != null) {
       unawaited(_api.revoke(stored.token));
@@ -284,6 +303,7 @@ class AccelDohAuthService extends ChangeNotifier {
 
     if (user.trustLevel < minTrustLevel) {
       await _setMember(false);
+      await _clearLastConnect();
       final stored = _stored;
       if (stored != null) {
         debugPrint('[DOH] 当前账号等级不足，停用加速令牌');
@@ -329,11 +349,28 @@ class AccelDohAuthService extends ChangeNotifier {
 
     final consent = _consentFor(user);
     if (consent == false && !interactive) return;
-    if (!interactive && _activeBackoff(user) != null) return;
+    if (!interactive) {
+      final backoff = _activeBackoff(user);
+      if (backoff != null) {
+        // 重启 App 后冷却记录还在，到点要接着试
+        _scheduleSyncAt(backoff.until);
+        return;
+      }
+    }
     if (!force && !interactive && _inRetryBackoff) return;
     if (consent == null) {
       _scheduleConsentPrompt();
       return;
+    }
+    if (!interactive) {
+      // 刚授权不久又要重新授权，多半是被同账号的其他设备挤掉了，先别抢回来
+      final last = _lastConnectFor(user);
+      final until = last?.add(_reconnectInterval);
+      if (until != null && DateTime.now().isBefore(until)) {
+        debugPrint('[DOH] 距上次 Connect 授权不到 6 小时，先用公共加速');
+        await _setBackoff(user, _BackoffReason.displaced, until: until);
+        return;
+      }
     }
     await _connect(user, epoch, interactive: interactive);
   }
@@ -382,6 +419,7 @@ class AccelDohAuthService extends ChangeNotifier {
         case AccelDohIssueOutcome.issued:
           _resetRetry();
           await _clearBackoff();
+          await _setLastConnect(user);
           await _saveToken(user.id, result);
         case AccelDohIssueOutcome.rejected:
           debugPrint('[DOH] 加速服务端拒绝了此账号，使用公共加速');
@@ -456,20 +494,54 @@ class AccelDohAuthService extends ChangeNotifier {
     return backoff;
   }
 
-  Future<void> _setBackoff(User user, _BackoffReason reason) async {
-    final delay = reason == _BackoffReason.denied
-        ? _deniedRetryDelay
-        : _unavailableRetryDelay;
+  /// 没给 [until] 时按原因取默认冷却时长
+  Future<void> _setBackoff(
+    User user,
+    _BackoffReason reason, {
+    DateTime? until,
+  }) async {
     final backoff = _AccelDohBackoff(
       key: _backoffKeyOf(user),
       reason: reason,
-      until: DateTime.now().add(delay),
+      until:
+          until ??
+          DateTime.now().add(
+            reason == _BackoffReason.denied
+                ? _deniedRetryDelay
+                : _unavailableRetryDelay,
+          ),
     );
     _backoff = backoff;
     await _prefs?.setString(_backoffKey, backoff.encode());
-    _retryTimer?.cancel();
-    _retryTimer = Timer(delay, () => unawaited(_sync()));
+    _scheduleSyncAt(backoff.until);
     notifyListeners();
+  }
+
+  /// 多等 1 秒，免得定时器提前一点点触发时还在冷却期内
+  void _scheduleSyncAt(DateTime at) {
+    _retryTimer?.cancel();
+    _retryTimer = Timer(
+      at.difference(DateTime.now()) + const Duration(seconds: 1),
+      () => unawaited(_sync()),
+    );
+  }
+
+  DateTime? _lastConnectFor(User user) {
+    final last = _lastConnect;
+    if (last == null || last.userId != user.id) return null;
+    return last.at;
+  }
+
+  Future<void> _setLastConnect(User user) async {
+    final last = _AccelDohLastConnect(userId: user.id, at: DateTime.now());
+    _lastConnect = last;
+    await _prefs?.setString(_lastConnectKey, last.encode());
+  }
+
+  Future<void> _clearLastConnect() async {
+    if (_lastConnect == null) return;
+    _lastConnect = null;
+    await _prefs?.remove(_lastConnectKey);
   }
 
   Future<void> _clearBackoff() async {
@@ -614,9 +686,32 @@ class _AccelDohConsent {
   }
 }
 
-enum _BackoffReason { denied, unavailable }
+/// 最近一次 Connect 授权成功的记录，用来限制自动重新授权的频率
+class _AccelDohLastConnect {
+  const _AccelDohLastConnect({required this.userId, required this.at});
 
-/// 被拒/用不了 Connect 的冷却记录，重启 App 后仍然有效
+  final int userId;
+  final DateTime at;
+
+  String encode() =>
+      jsonEncode({'user_id': userId, 'at': at.millisecondsSinceEpoch});
+
+  static _AccelDohLastConnect? decode(String? raw) {
+    final json = _decodeMap(raw);
+    if (json == null) return null;
+    final userId = json['user_id'];
+    final at = json['at'];
+    if (userId is! int || at is! int) return null;
+    return _AccelDohLastConnect(
+      userId: userId,
+      at: DateTime.fromMillisecondsSinceEpoch(at),
+    );
+  }
+}
+
+enum _BackoffReason { denied, unavailable, displaced }
+
+/// 被拒/用不了 Connect/被挤掉的冷却记录，重启 App 后仍然有效
 class _AccelDohBackoff {
   const _AccelDohBackoff({
     required this.key,

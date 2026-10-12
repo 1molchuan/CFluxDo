@@ -98,6 +98,10 @@ void main() {
         }),
         'doh_accel_member': true,
         'doh_accel_consent': jsonEncode({'user_id': 7, 'granted': true}),
+        'doh_accel_last_connect': jsonEncode({
+          'user_id': 7,
+          'at': now.subtract(const Duration(days: 7)).millisecondsSinceEpoch,
+        }),
         // 旧版自报身份的令牌，启动时要被清掉
         'doh_accel_auth': '{"token":"old"}',
       });
@@ -105,7 +109,8 @@ void main() {
       auth
         ..debugApi = api
         ..debugConnectFlow = flow
-        ..consentPromptDelay = Duration.zero;
+        ..consentPromptDelay = Duration.zero
+        ..rejectCooldown = Duration.zero;
       await service.initialize(prefs);
       accelServer = service.servers.first;
     });
@@ -144,14 +149,32 @@ void main() {
       expect(auth.token, 'stored-token');
     });
 
+    test('令牌被收回、上次授权已过很久：马上重新走 Connect', () async {
+      await auth.handleRejected();
+      await pumpEventQueue();
+      expect(api.startCalls, 1);
+      expect(api.lastCode, 'the-code');
+      expect(api.lastState, 'the-state');
+      expect(auth.token, 'connect-token');
+      expect(auth.status, AccelDohAuthStatus.ready);
+      expect(activeToken(), 'connect-token');
+      final last = jsonDecode(prefs.getString('doh_accel_last_connect')!);
+      expect(
+        DateTime.now().millisecondsSinceEpoch - (last['at'] as int),
+        lessThan(const Duration(minutes: 1).inMilliseconds),
+      );
+    });
+
     test('等级降到 0：作废令牌，改走 DNSPod', () async {
       auth.onUserChanged(User(id: 7, username: 'alice', trustLevel: 0));
       await pumpEventQueue();
       expect(auth.token, isNull);
       expect(auth.isMember, isFalse);
       expect(auth.status, AccelDohAuthStatus.notEligible);
-      expect(api.revoked, contains('stored-token'));
+      expect(api.revoked, contains('connect-token'));
       expect(prefs.getString('doh_accel_token'), isNull);
+      // 等级回升后不受 6 小时限制
+      expect(prefs.getString('doh_accel_last_connect'), isNull);
       expect(service.current.selectedServerUrl, service.accelServerUrl);
       expect(activeUrl(), dnsPodUrl);
       expect(activeToken(), isNull);
@@ -161,25 +184,35 @@ void main() {
     test('等级回到 1、之前同意过：自动走 Connect 换到新令牌', () async {
       auth.onUserChanged(User(id: 7, username: 'alice', trustLevel: 1));
       await pumpEventQueue();
-      expect(api.startCalls, 1);
-      expect(api.lastCode, 'the-code');
-      expect(api.lastState, 'the-state');
+      expect(api.startCalls, 2);
       expect(auth.token, 'connect-token');
       expect(auth.status, AccelDohAuthStatus.ready);
       expect(activeUrl(), service.accelServerUrl);
       expect(activeToken(), 'connect-token');
     });
 
-    test('令牌被拒、服务端也不再发：降到公共加速', () async {
-      api.exchangeResult = const AccelDohIssueResult.rejected();
+    test('刚授权不久令牌就被收回：不自动抢回来，走公共加速；手动授权不受限', () async {
       await auth.handleRejected();
       await pumpEventQueue();
+      expect(api.startCalls, 2);
       expect(auth.token, isNull);
-      expect(auth.status, AccelDohAuthStatus.denied);
+      expect(auth.status, AccelDohAuthStatus.displaced);
       expect(activeUrl(), accelDohPublicServer.url);
       expect(activeToken(), isNull);
+      expect(service.accelFallbackHint, contains('3 台'));
+      final backoff = jsonDecode(prefs.getString('doh_accel_backoff')!);
+      expect(backoff['reason'], 'displaced');
+
+      // 手动授权照样走 Connect；这次服务端拒绝了（比如 3 台都在用）
+      api.exchangeResult = const AccelDohIssueResult.rejected();
+      final status = await auth.authorizeNow();
+      expect(api.startCalls, 3);
+      expect(status, AccelDohAuthStatus.denied);
+      expect(auth.token, isNull);
+      expect(activeUrl(), accelDohPublicServer.url);
       expect(service.accelFallbackHint, contains('拒绝'));
-      expect(prefs.getString('doh_accel_backoff'), isNotNull);
+      final denied = jsonDecode(prefs.getString('doh_accel_backoff')!);
+      expect(denied['reason'], 'denied');
     });
 
     test('换成用不了 Connect 的账号（青春版）：同意后仍走公共加速', () async {
@@ -229,6 +262,7 @@ void main() {
       expect(api.revoked, contains('token-9'));
       expect(prefs.getString('doh_accel_consent'), isNull);
       expect(prefs.getBool('doh_accel_member'), isNull);
+      expect(prefs.getString('doh_accel_last_connect'), isNull);
       expect(activeUrl(), dnsPodUrl);
     });
   });
