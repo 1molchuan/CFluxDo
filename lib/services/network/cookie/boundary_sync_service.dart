@@ -75,6 +75,40 @@ class BoundarySyncService {
     return selected?.value?.toString();
   }
 
+  /// 读取 WebView 当前持有的全部 cf_clearance 候选值（去重，不写 jar）。
+  ///
+  /// 顺序即优先级：先是按 [_selectBestWebViewCookie] 规则选出的最佳变体，
+  /// 其余按原顺序排在后面。供拦截器在撞盾时「先换值重放」使用。
+  Future<List<String>> readCfClearanceCandidatesFromWebView({
+    String? currentUrl,
+  }) async {
+    final url = currentUrl ?? AppConstants.baseUrl;
+    final host = Uri.parse(url).host;
+    final webViewCookies = await _strategy.readCookiesFromWebView(
+      _jar.webViewCookieManager,
+      url,
+    );
+    final matches = <Cookie>[];
+    for (final cookie in webViewCookies) {
+      final value = cookie.value?.toString() ?? '';
+      if (cookie.name != CfClearanceAuthority.cookieName || value.isEmpty) {
+        continue;
+      }
+      CfClearanceAuthority.instance.noteWebViewValueObserved(value);
+      matches.add(cookie);
+    }
+    if (matches.isEmpty) return const [];
+
+    final ordered = <String>[];
+    final best = _selectBestWebViewCookie(matches, host);
+    if (best != null) ordered.add(best.value.toString());
+    for (final cookie in matches) {
+      final value = cookie.value.toString();
+      if (!ordered.contains(value)) ordered.add(value);
+    }
+    return ordered;
+  }
+
   /// 从 WebView 读 cookie 写入 jar。
   ///
   /// [currentUrl] 当前页面 URL，用于确定读取哪个域名的 cookie。
@@ -140,10 +174,20 @@ class BoundarySyncService {
       );
       final cookiesToPersist = <Cookie>[];
       final cookieGroups = <String, List<Cookie>>{};
+      // 本次回读前从未见过的 cf_clearance 值 = 本会话新铸值（区别于残留旧值），
+      // 只用于闸门日志口径；登记放在过滤之前，WebView 持有什么就记什么。
+      final freshClearanceValues = <String>{};
 
       for (final wc in webViewCookies) {
         final value = wc.value?.toString() ?? '';
         if (value.isEmpty) continue;
+        if (wc.name == CfClearanceAuthority.cookieName) {
+          final authority = CfClearanceAuthority.instance;
+          if (!authority.hasObservedWebViewValue(value)) {
+            freshClearanceValues.add(value);
+          }
+          authority.noteWebViewValueObserved(value);
+        }
         if (cookieNames != null && !cookieNames.contains(wc.name)) continue;
         if (excludeCookieNames != null &&
             excludeCookieNames.contains(wc.name)) {
@@ -208,19 +252,29 @@ class BoundarySyncService {
         // 同样畅通，而 2026-08-19「残留旧值顶替过盾成果」与 2026-08-22
         // 「恢复被墓碑堵死」两类事故同时从机制上消失。判定见
         // CfClearanceAuthority。
-        if (wc.name == 'cf_clearance') {
+        if (wc.name == CfClearanceAuthority.cookieName) {
           final decision = await CfClearanceAuthority.instance
               .evaluateReplacement(value);
           if (decision == CfClearanceReplaceDecision.skipHealthyIncumbent) {
+            // 被挡下的候选值分两类记日志：本会话首次见到的是站点新签的值
+            // （fresh_mint_held，撞盾时拦截器会优先拿它换值重放），
+            // 见过的是残留旧值（rotation_skipped，2026-08-19 那类）。
+            final isFreshMint = freshClearanceValues.contains(value);
             LogWriter.instance.write({
               'timestamp': DateTime.now().toIso8601String(),
               'level': 'info',
               'type': 'cookie_trace',
-              'event': 'cf_clearance_rotation_skipped',
-              'message': '[BoundarySync] cf_clearance 在位值健康，'
-                  '跳过异值替换（valueLength=${value.length}）',
+              'event': isFreshMint
+                  ? 'cf_clearance_fresh_mint_held'
+                  : 'cf_clearance_rotation_skipped',
+              'message': isFreshMint
+                  ? '[BoundarySync] cf_clearance 在位值健康，'
+                        '本会话新铸值暂不替换（valueLength=${value.length}）'
+                  : '[BoundarySync] cf_clearance 在位值健康，'
+                        '跳过异值替换（valueLength=${value.length}）',
               'name': wc.name,
               'valueLength': value.length,
+              'freshMint': isFreshMint,
               'url': url,
             });
           }

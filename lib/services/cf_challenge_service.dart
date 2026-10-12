@@ -960,6 +960,9 @@ class _CfChallengePageState extends State<CfChallengePage> {
   int _challengeRevealProbeGeneration = 0;
   bool _hasTimedOut = false;
   int _checkCount = 0;
+
+  /// 前台预算用尽但挑战仍可见时已记过一次「等待用户」日志（每轮只记一次）。
+  bool _loggedForegroundWaitingForUser = false;
   Timer? _timeoutTimer;
   Timer? _noChallengeCheckTimer;
   Timer? _loadStopFallbackTimer;
@@ -1406,6 +1409,7 @@ class _CfChallengePageState extends State<CfChallengePage> {
     _timeoutTimer?.cancel();
     _checkCount = 0;
     _hasTimedOut = false;
+    _loggedForegroundWaitingForUser = false;
     _timeoutTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (!mounted || _finishingFromVerifyResponse) {
         timer.cancel();
@@ -1440,10 +1444,25 @@ class _CfChallengePageState extends State<CfChallengePage> {
           _promoteToForeground(dueToTimeout: true);
           return;
         }
+        // 交互式挑战已经露出（勾选框等着用户点）：这不是失败，是在等人。
+        // 此前这里会在 60 秒整记一条 FAILED、把横幅换成红色超时并弹提示，
+        // 而用户随后一点就能过（2026-10-12 实测：68 秒点击，成功）。只记一次
+        // 信息日志，计时继续，超时 UI 留给页面没露出挑战的卡死场景。
+        if (_challengeWebViewVisible) {
+          if (!_loggedForegroundWaitingForUser) {
+            _loggedForegroundWaitingForUser = true;
+            CfChallengeLogger.log(
+              '[VERIFY] Foreground budget ($_activeMaxCheckCount s) elapsed '
+              'while interactive challenge is visible, waiting for user',
+            );
+          }
+          return;
+        }
         if (!_hasTimedOut) {
-          CfChallengeLogger.logVerifyResult(
-            success: false,
-            reason: 'timeout after $_activeMaxCheckCount seconds',
+          CfChallengeLogger.log(
+            '[VERIFY] Foreground timeout after $_activeMaxCheckCount seconds '
+            'without a visible challenge, prompting refresh',
+            level: 'warning',
           );
           if (mounted) {
             setState(() {
@@ -1661,6 +1680,7 @@ class _CfChallengePageState extends State<CfChallengePage> {
     _hasMarkedPageReady = false;
     _checkCount = 0;
     _hasTimedOut = false;
+    _loggedForegroundWaitingForUser = false;
     _needsManualAttention = true;
     _challengeWebViewVisible = false;
     _hasSeenChallenge = false;
@@ -1682,6 +1702,7 @@ class _CfChallengePageState extends State<CfChallengePage> {
       _needsManualAttention = true;
       _hasTimedOut = false;
       _checkCount = 0;
+      _loggedForegroundWaitingForUser = false;
     });
     widget.onPromoteRequest?.call();
 
@@ -2265,7 +2286,11 @@ class _CfChallengePageState extends State<CfChallengePage> {
             _loadStopFallbackTimer?.cancel();
             _pageReadyFallbackTimer?.cancel();
             _hasMarkedPageReady = false;
+            // 新一次导航重新起算预算：只清 _hasTimedOut 不清计数，旧计时器
+            // 下一拍会立刻再记一次超时（2026-10-12 实测两条 FAILED 相隔 3 秒）。
             _hasTimedOut = false;
+            _checkCount = 0;
+            _loggedForegroundWaitingForUser = false;
             _needsManualAttention = false;
             _challengeWebViewVisible = false;
             _hideOriginFallbackPage = isCompletionNavigation;

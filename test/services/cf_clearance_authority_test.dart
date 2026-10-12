@@ -175,6 +175,77 @@ void main() {
     });
   });
 
+  group('撞盾先换值重放的依据(已知死值 / WebView 观察值)', () {
+    test('被撞过的值全程记为已知死值,不止最近一枚', () async {
+      authority.noteIncumbentChallenged('dead-1');
+      authority.noteIncumbentChallenged('dead-2');
+      expect(authority.isKnownChallenged('dead-1'), isTrue);
+      expect(authority.isKnownChallenged('dead-2'), isTrue);
+      expect(authority.isKnownChallenged('alive'), isFalse);
+      expect(authority.isKnownChallenged(null), isFalse);
+      expect(authority.isKnownChallenged(''), isFalse);
+
+      // 换届闸门契约不变:只看最近一次被撞的在位值
+      final expires = DateTime.now().add(const Duration(days: 7));
+      jarWith(clearance('dead-1', expiresAt: expires));
+      expect(
+        await authority.evaluateReplacement('other'),
+        CfClearanceReplaceDecision.skipHealthyIncumbent,
+      );
+      jarWith(clearance('dead-2', expiresAt: expires));
+      expect(
+        await authority.evaluateReplacement('other'),
+        CfClearanceReplaceDecision.allow,
+      );
+    });
+
+    test('已知死值按编码归一化命中', () {
+      const raw = 'clear{"ace}';
+      authority.noteIncumbentChallenged(CookieValueCodec.encode(raw));
+      expect(authority.isKnownChallenged(raw), isTrue);
+    });
+
+    test('WebView 观察值:首次为新铸值,之后视为见过;闸门决定不受影响', () async {
+      expect(authority.hasObservedWebViewValue('mint-1'), isFalse);
+      authority.noteWebViewValueObserved('mint-1');
+      expect(authority.hasObservedWebViewValue('mint-1'), isTrue);
+      expect(
+        authority.hasObservedWebViewValue(CookieValueCodec.encode('mint-1')),
+        isTrue,
+      );
+      expect(authority.hasObservedWebViewValue(null), isFalse);
+
+      // 在位值健康时,本会话新铸值同样不许顶替(2026-08-19 契约不放松)
+      jarWith(clearance('fresh-597', expiresAt: DateTime.now().add(const Duration(days: 7))));
+      expect(
+        await authority.evaluateReplacement('mint-1'),
+        CfClearanceReplaceDecision.skipHealthyIncumbent,
+      );
+      expect(
+        await authority.evaluateReplacement('never-seen'),
+        CfClearanceReplaceDecision.skipHealthyIncumbent,
+      );
+    });
+
+    test('观察集合有界:超出上限淘汰最早登记的值', () {
+      for (var i = 0; i < 20; i++) {
+        authority.noteWebViewValueObserved('v$i');
+      }
+      expect(authority.hasObservedWebViewValue('v0'), isFalse);
+      expect(authority.hasObservedWebViewValue('v3'), isFalse);
+      expect(authority.hasObservedWebViewValue('v4'), isTrue);
+      expect(authority.hasObservedWebViewValue('v19'), isTrue);
+    });
+
+    test('reset 同时清空已知死值与观察值', () {
+      authority.noteIncumbentChallenged('dead');
+      authority.noteWebViewValueObserved('seen');
+      authority.reset();
+      expect(authority.isKnownChallenged('dead'), isFalse);
+      expect(authority.hasObservedWebViewValue('seen'), isFalse);
+    });
+  });
+
   group('extractFromCookieHeader', () {
     test('提取与误匹配', () {
       expect(
