@@ -22,6 +22,7 @@ import '../rhttp/rhttp_settings_service.dart';
 import '../system_proxy_service.dart';
 import '../webview/webview_adapter_settings_service.dart';
 import '../../windows_webview_environment_service.dart';
+import 'accel_doh_auth_service.dart';
 import 'doh_resolver.dart';
 import 'webview_mitm_policy.dart';
 
@@ -239,6 +240,7 @@ class NetworkSettingsService {
   final Set<String> _backgroundRefreshingHosts = <String>{};
   final Map<String, Map<String, DateTime>> _hostIpPenaltyCache = {};
   String? _resolvedHostCacheSignature;
+  Timer? _authRejectedPollTimer;
 
   final ValueNotifier<bool> isApplying = ValueNotifier(false);
 
@@ -261,9 +263,52 @@ class NetworkSettingsService {
       current.gatewayEnabled &&
       _rustProxyService.isRunning;
 
-  String? get _effectiveEchServerUrl => current.dohEnabled
-      ? (current.echServerUrl ?? current.selectedServerUrl)
+  String? get _effectiveEchServerUrl =>
+      current.dohEnabled ? (_activeEchServerUrl ?? _activeServerUrl) : null;
+
+  /// 实际用来解析的 DNS 服务器（选中加速但没有令牌时是 DNSPod）
+  String get _activeServerUrl => _activeDohUrl(current.selectedServerUrl);
+
+  /// 实际用来查 ECH 的服务器，null = 与 DNS 相同
+  String? get _activeEchServerUrl {
+    final url = current.echServerUrl;
+    return url == null ? null : _activeDohUrl(url);
+  }
+
+  /// 本机的 cfluxdo 加速服务器地址
+  String? get accelServerUrl => _accelServer?.url;
+
+  /// 选中了 cfluxdo 加速，但还没有账号令牌（游客/TL0/未申请到）
+  bool get isAccelWaitingForAuth {
+    final accelUrl = _accelServer?.url;
+    return accelUrl != null &&
+        current.selectedServerUrl == accelUrl &&
+        AccelDohAuthService.instance.token == null;
+  }
+
+  /// 加速服务器只给有令牌的账号用：没有令牌时改用公共 DNSPod
+  String _activeDohUrl(String url) {
+    if (url == _accelServer?.url &&
+        AccelDohAuthService.instance.token == null) {
+      return _defaultServers.first.url;
+    }
+    return url;
+  }
+
+  /// 只有加速服务器才带令牌，其他 DoH 一律不带
+  String? _authTokenFor(String? url) => url != null && url == _accelServer?.url
+      ? AccelDohAuthService.instance.token
       : null;
+
+  /// 按实际使用的服务器和令牌更新 Dart 侧解析器
+  void _updateResolverServer() {
+    final url = _activeServerUrl;
+    _resolver.updateServer(
+      url,
+      bootstrapIps: _getBootstrapIps(url),
+      authToken: _authTokenFor(url),
+    );
+  }
 
   // Rust 代理始终为 WebView 提供 DOH/代理支持，不受 rhttp 影响
   // rhttp 只改变 Dio 用哪个适配器，不改变代理生命周期
@@ -287,6 +332,11 @@ class NetworkSettingsService {
     if (_prefs != null) return;
     _prefs = prefs;
     _accelServer = buildAccelDohServer(await _loadAccelSubdomain(prefs));
+    AccelDohAuthService.instance.initialize(
+      prefs,
+      serverUrl: _accelServer!.url,
+      bootstrapIps: _accelServer!.bootstrapIps,
+    );
     final dohEnabled = prefs.getBool(_dohEnabledKey) ?? true;
     final selected = prefs.getString(_dohSelectedKey) ?? _defaultServerUrl;
     final customRaw = prefs.getString(_dohCustomKey);
@@ -310,10 +360,16 @@ class NetworkSettingsService {
       gatewayEnabled: gatewayEnabled,
       h2Mitm: h2Mitm,
     );
+    final activeUrl = _activeServerUrl;
     _resolver = DohResolver(
-      serverUrl: notifier.value.selectedServerUrl,
-      bootstrapIps: _getBootstrapIps(notifier.value.selectedServerUrl),
+      serverUrl: activeUrl,
+      bootstrapIps: _getBootstrapIps(activeUrl),
       preferIPv6: preferIPv6,
+      authToken: _authTokenFor(activeUrl),
+      onAuthRejected: _handleAccelAuthRejected,
+    );
+    AccelDohAuthService.instance.tokenNotifier.addListener(
+      _handleAccelAuthChanged,
     );
     await _applyProxyState();
     await refreshDnsCacheStats();
@@ -340,7 +396,7 @@ class NetworkSettingsService {
     final prefs = _prefs;
     if (prefs == null) return;
     notifier.value = notifier.value.copyWith(selectedServerUrl: url);
-    _resolver.updateServer(url, bootstrapIps: _getBootstrapIps(url));
+    _updateResolverServer();
     if (current.dohEnabled) {
       _clearResolvedHostCache();
     }
@@ -379,10 +435,7 @@ class NetworkSettingsService {
       selectedServerUrl: newSelected,
     );
     if (newSelected != selectedUrl) {
-      _resolver.updateServer(
-        newSelected,
-        bootstrapIps: _getBootstrapIps(newSelected),
-      );
+      _updateResolverServer();
       _clearResolvedHostCache();
       _scheduleApplyProxyState();
     }
@@ -410,10 +463,7 @@ class NetworkSettingsService {
       customServers: updated,
       selectedServerUrl: resolvedSelected,
     );
-    _resolver.updateServer(
-      resolvedSelected,
-      bootstrapIps: _getBootstrapIps(resolvedSelected),
-    );
+    _updateResolverServer();
     _clearResolvedHostCache();
     await prefs.setString(
       _dohCustomKey,
@@ -433,10 +483,7 @@ class NetworkSettingsService {
       customServers: const [],
       selectedServerUrl: resolvedSelected,
     );
-    _resolver.updateServer(
-      resolvedSelected,
-      bootstrapIps: _getBootstrapIps(resolvedSelected),
-    );
+    _updateResolverServer();
     _clearResolvedHostCache();
     await prefs.setString(_dohCustomKey, jsonEncode([]));
     _touch();
@@ -504,6 +551,7 @@ class NetworkSettingsService {
 
   Future<void> _applyProxyState() async {
     final startedAt = DateTime.now();
+    _syncAuthRejectedPolling();
     _applyDepth++;
     if (_applyDepth == 1) {
       if (!isApplying.value) {
@@ -607,6 +655,10 @@ class NetworkSettingsService {
         }
       }
 
+      // 加速服务器没有令牌时这里已经换成 DNSPod，令牌只随加速服务器下发
+      final dohServer = _activeServerUrl;
+      final dohServerEch = _activeEchServerUrl;
+
       // Rust 代理始终为 WebView 提供 DOH/代理支持，enableDoh 不受 rhttp 影响
       final success = await _rustProxyService.start(
         preferredPort:
@@ -617,14 +669,18 @@ class NetworkSettingsService {
         enableDoh: current.dohEnabled,
         gatewayMode: useGateway,
         preferIPv6: current.preferIPv6,
-        dohServer: current.dohEnabled ? current.selectedServerUrl : null,
-        dohServerEch: current.dohEnabled ? current.echServerUrl : null,
+        dohServer: current.dohEnabled ? dohServer : null,
+        dohServerEch: current.dohEnabled ? dohServerEch : null,
         dohBootstrapIps: current.dohEnabled
-            ? _getBootstrapIps(current.selectedServerUrl)
+            ? _getBootstrapIps(dohServer)
             : const [],
-        dohEchBootstrapIps: current.dohEnabled && current.echServerUrl != null
-            ? _getBootstrapIps(current.echServerUrl!)
+        dohEchBootstrapIps: current.dohEnabled && dohServerEch != null
+            ? _getBootstrapIps(dohServerEch)
             : const [],
+        dohAuthToken: current.dohEnabled ? _authTokenFor(dohServer) : null,
+        dohEchAuthToken: current.dohEnabled
+            ? _authTokenFor(dohServerEch)
+            : null,
         serverIp: current.serverIp,
         upstreamProtocol: upstream?.protocol,
         upstreamHost: upstream?.host,
@@ -724,6 +780,9 @@ class NetworkSettingsService {
   /// 用于 App 从后台恢复时调用：iOS 挂起进程后 Rust 代理的 TCP listener
   /// 可能失效，需要检测并重启。
   Future<void> ensureProxyAlive() async {
+    // 回到前台顺带检查加速令牌：过期就换 DNSPod，快到期就续期
+    AccelDohAuthService.instance.checkNow();
+    unawaited(_checkAuthRejected());
     if (!shouldRunLocalProxy) return;
     if (!_rustProxyService.isRunning) {
       // 上次启动失败、当前处于直连状态：回到前台时再试一次
@@ -898,6 +957,56 @@ class NetworkSettingsService {
     _touch();
   }
 
+  /// 加速令牌变了（拿到/续期/作废/过期）：切换实际使用的服务器并按需重启代理
+  void _handleAccelAuthChanged() {
+    if (_prefs == null) return;
+    _updateResolverServer();
+    final accelUrl = _accelServer?.url;
+    final usesAccel =
+        current.selectedServerUrl == accelUrl ||
+        current.echServerUrl == accelUrl;
+    if (current.dohEnabled && usesAccel) {
+      debugPrint(
+        '[DOH] 加速令牌${AccelDohAuthService.instance.token == null ? "已失效，改用 DNSPod" : "已就绪，使用 cfluxdo 加速"}',
+      );
+      // 服务器地址变了时，下次解析会按签名自动清掉旧缓存
+      _scheduleApplyProxyState();
+    }
+    _touch();
+  }
+
+  /// 正在用带令牌的加速服务器时，定时问 Rust 代理令牌有没有被拒
+  void _syncAuthRejectedPolling() {
+    final needPoll =
+        current.dohEnabled &&
+        (_authTokenFor(_activeServerUrl) != null ||
+            _authTokenFor(_activeEchServerUrl) != null);
+    if (!needPoll) {
+      _authRejectedPollTimer?.cancel();
+      _authRejectedPollTimer = null;
+      return;
+    }
+    _authRejectedPollTimer ??= Timer.periodic(
+      const Duration(seconds: 20),
+      (_) => unawaited(_checkAuthRejected()),
+    );
+  }
+
+  Future<void> _checkAuthRejected() async {
+    if (!_rustProxyService.isRunning) return;
+    try {
+      if (await _rustProxyService.takeAuthRejected()) {
+        _handleAccelAuthRejected();
+      }
+    } catch (e) {
+      debugPrint('[DOH] 读取令牌被拒标记失败: $e');
+    }
+  }
+
+  void _handleAccelAuthRejected() {
+    unawaited(AccelDohAuthService.instance.handleRejected());
+  }
+
   void _handleWebViewAdapterSettingsChanged() {
     if (_prefs == null || !shouldRunLocalProxy) return;
     _scheduleApplyProxyState();
@@ -970,8 +1079,8 @@ class NetworkSettingsService {
     );
     penalties[normalizedIp] = DateTime.now().add(_failedHostIpPenaltyTtl);
     if (current.dohEnabled) {
-      final dohServer = current.selectedServerUrl;
-      final dohServerEch = _effectiveEchServerUrl ?? current.selectedServerUrl;
+      final dohServer = _activeServerUrl;
+      final dohServerEch = _effectiveEchServerUrl ?? _activeServerUrl;
       unawaited(
         _rustProxyService.clearPreferredHostIp(
           normalizedHost,
@@ -1000,8 +1109,8 @@ class NetworkSettingsService {
     }
 
     if (current.dohEnabled) {
-      final dohServer = current.selectedServerUrl;
-      final dohServerEch = _effectiveEchServerUrl ?? current.selectedServerUrl;
+      final dohServer = _activeServerUrl;
+      final dohServerEch = _effectiveEchServerUrl ?? _activeServerUrl;
       unawaited(
         _rustProxyService.recordHostSuccess(
           normalizedHost,
@@ -1162,8 +1271,8 @@ class NetworkSettingsService {
     String host, {
     required bool forceRefresh,
   }) async {
-    final dohServer = current.selectedServerUrl;
-    final dohServerEch = _effectiveEchServerUrl ?? current.selectedServerUrl;
+    final dohServer = _activeServerUrl;
+    final dohServerEch = _effectiveEchServerUrl ?? _activeServerUrl;
     final resolvedAt = DateTime.now();
 
     final rustResult = await _rustProxyService.lookupHost(
@@ -1365,7 +1474,7 @@ class NetworkSettingsService {
   }
 
   String? get _currentResolvedHostCacheSignature => current.dohEnabled
-      ? '${current.selectedServerUrl}|${_effectiveEchServerUrl ?? ""}|${current.preferIPv6 ? "v6" : "v4"}'
+      ? '$_activeServerUrl|${_effectiveEchServerUrl ?? ""}|${current.preferIPv6 ? "v6" : "v4"}'
       : null;
 
   List<String> _collectCommonHosts() {
@@ -1551,9 +1660,15 @@ class NetworkSettingsService {
 
 /// cfluxdo 加速（Edge Smart DoH）
 ///
-/// 每个安装用一个随机子域名访问，服务端借此区分安装，不关联任何账号信息。
+/// 每个安装用一个随机子域名访问，服务端借此区分安装。
+/// 查询要带账号令牌（见 [AccelDohAuthService]）：登录且等级 ≥ 1 才发令牌，
+/// 游客/TL0 没有令牌时自动改用 DNSPod。
 /// 节点 IP 作为 bootstrap：系统 DNS 解析不出加速域名时直接连这些节点（SNI 不变）。
 const String accelDohServerName = 'cfluxdo 加速';
+
+/// 选中加速但还没有令牌时，在服务器列表里给的提示
+const String accelDohWaitingHint = '登录且信任等级 ≥ 1 后启用，当前使用 DNSPod';
+
 const String _accelDohHostSuffix = 'wq.1molchuan.top';
 const String _accelDohPath = '/v1/lookup';
 const int _accelSubdomainLength = 12;

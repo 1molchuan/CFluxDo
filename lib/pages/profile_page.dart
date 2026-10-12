@@ -50,6 +50,7 @@ import '../utils/dialog_utils.dart';
 import '../utils/responsive.dart';
 import '../services/emoji_handler.dart';
 import '../services/log/log_writer.dart';
+import '../services/network/doh/accel_doh_auth_service.dart';
 import '../providers/theme_provider.dart';
 import '../widgets/layout/master_detail_layout.dart';
 
@@ -268,6 +269,8 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
 
       try {
         await ref.read(discourseServiceProvider).logout(callApi: true);
+        // 主动退出：作废加速 DoH 令牌，改回公共 DoH
+        await AccelDohAuthService.instance.revoke();
         // 这里刻意不判 mounted:provider 容器的生命周期与本 widget 无关,
         // 状态重置必须执行完(否则登出后残留上一个账号的缓存)。
         await AppStateRefresher.resetForLogout(container);

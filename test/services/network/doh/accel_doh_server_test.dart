@@ -2,6 +2,7 @@ import 'dart:math';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fluxdo/services/network/doh/network_settings_service.dart';
+import 'package:fluxdo/services/network/doh_proxy/doh_proxy_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
@@ -66,10 +67,16 @@ void main() {
       expect(service.servers.first.name, accelDohServerName);
       expect(service.servers.first.url, current.selectedServerUrl);
 
-      // 测试环境没有代理可执行文件，启动必然失败：端口要被清掉，HTTP 走直连
-      expect(service.lastStartFailed, isTrue);
-      expect(current.proxyPort, isNull);
-      expect(prefs.getInt('doh_proxy_port'), isNull);
+      // 本机没编过 core/doh_proxy 时没有代理可执行文件，启动失败：端口要被清掉，HTTP 走直连
+      if (service.lastStartFailed) {
+        expect(current.proxyPort, isNull);
+        expect(prefs.getInt('doh_proxy_port'), isNull);
+      } else {
+        expect(current.proxyPort, isNotNull);
+      }
     });
+
+    // 代理能起来时要关掉，不然测试结束后进程会留下
+    tearDownAll(() => DohProxyService.instance.stop());
   });
 }

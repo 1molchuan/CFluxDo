@@ -182,6 +182,7 @@ class DohProxyFfi {
   Pointer<Utf8> Function()? _dohProxyDnsCacheRecords;
   Pointer<Utf8> Function()? _dohProxyGenerateCa;
   Pointer<Utf8> Function()? _dohProxyGetEmbeddedCaPem;
+  int Function()? _dohProxyTakeAuthRejected;
   late void Function(Pointer<Utf8>) _dohProxyFreeString;
 
   /// Initialize FFI bindings
@@ -287,6 +288,16 @@ class DohProxyFfi {
             .asFunction();
       } catch (_) {
         _dohProxyDnsCacheRecords = null;
+      }
+
+      try {
+        _dohProxyTakeAuthRejected = _lib!
+            .lookup<NativeFunction<Int32 Function()>>(
+              'doh_proxy_take_auth_rejected',
+            )
+            .asFunction();
+      } catch (_) {
+        _dohProxyTakeAuthRejected = null;
       }
 
       // doh_proxy_generate_ca 是新增符号，旧版本库可能没有，可选绑定
@@ -429,6 +440,8 @@ class DohProxyFfi {
     String? dohServerEch,
     List<String> dohBootstrapIps = const [],
     List<String> dohEchBootstrapIps = const [],
+    String? dohAuthToken,
+    String? dohEchAuthToken,
     String? serverIp,
     String? upstreamProtocol,
     String? upstreamHost,
@@ -460,6 +473,10 @@ class DohProxyFfi {
       if (dohBootstrapIps.isNotEmpty) 'doh_bootstrap_ips': dohBootstrapIps,
       if (dohEchBootstrapIps.isNotEmpty)
         'doh_ech_bootstrap_ips': dohEchBootstrapIps,
+      if (dohAuthToken != null && dohAuthToken.isNotEmpty)
+        'doh_auth_token': dohAuthToken,
+      if (dohEchAuthToken != null && dohEchAuthToken.isNotEmpty)
+        'doh_ech_auth_token': dohEchAuthToken,
       if (serverIp != null && serverIp.isNotEmpty) 'server_ip': serverIp,
       if (upstreamHost != null &&
           upstreamHost.isNotEmpty &&
@@ -646,6 +663,14 @@ class DohProxyFfi {
   bool clearDnsCache() {
     if (!_initialized && !initialize()) return false;
     return _dohProxyClearDnsCache() != 0;
+  }
+
+  /// 取出并清除「DoH 服务器拒绝了令牌」标记，true 表示需要重新申请令牌
+  bool takeAuthRejected() {
+    if (!_initialized && !initialize()) return false;
+    final fn = _dohProxyTakeAuthRejected;
+    if (fn == null) return false;
+    return fn() != 0;
   }
 
   DohDnsCacheStats? dnsCacheStats() {

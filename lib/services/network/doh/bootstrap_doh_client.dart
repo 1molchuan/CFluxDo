@@ -34,6 +34,8 @@ class BootstrapDohClient {
     this.bootstrapIps = const [],
     this.timeout = const Duration(seconds: 5),
     this.preferIPv6 = false,
+    this.authToken,
+    this.onAuthRejected,
   }) {
     _parseServerUrl();
   }
@@ -41,6 +43,12 @@ class BootstrapDohClient {
   final String serverUrl;
   final List<String> bootstrapIps;
   final Duration timeout;
+
+  /// DoH 访问令牌，非空时放在 `Authorization: Bearer` 里
+  final String? authToken;
+
+  /// 带令牌查询却被服务端以 401/403 拒绝时回调
+  final void Function()? onAuthRejected;
 
   /// 是否优先使用 IPv6 连接 DOH 服务
   bool preferIPv6;
@@ -199,7 +207,12 @@ class BootstrapDohClient {
           final request = StringBuffer()
             ..writeln('GET $requestPath HTTP/1.1')
             ..writeln('Host: $_host')
-            ..writeln('Accept: application/dns-message')
+            ..writeln('Accept: application/dns-message');
+          final token = authToken;
+          if (token != null && token.isNotEmpty) {
+            request.writeln('Authorization: Bearer $token');
+          }
+          request
             ..writeln('Connection: keep-alive')
             ..writeln();
 
@@ -259,6 +272,12 @@ class BootstrapDohClient {
         final statusLine = headerStr.split('\r\n').first;
         if (!statusLine.contains('200')) {
           subscription?.cancel();
+          final token = authToken;
+          if (token != null &&
+              token.isNotEmpty &&
+              (statusLine.contains(' 401') || statusLine.contains(' 403'))) {
+            onAuthRejected?.call();
+          }
           if (!completer.isCompleted) {
             completer.completeError(
                 HttpException(S.current.doh_serverError(statusLine)));

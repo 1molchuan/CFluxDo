@@ -32,6 +32,7 @@ class DohProxyService {
   String? _currentDohServer;
   String? _currentDohServerEch;
   String? _currentDohBootstrapSignature;
+  String? _currentDohAuthSignature;
   bool? _currentPreferIPv6;
   int? _currentPreferredPort;
   String? _currentServerIp;
@@ -39,6 +40,7 @@ class DohProxyService {
   bool? _currentH2Mitm;
   String? _currentUpstreamSignature;
   String? _lastError;
+  bool _processAuthRejected = false;
   // ignore: unused_field
   Isolate? _ffiIsolate; // 保持引用防止 GC
   SendPort? _ffiSendPort;
@@ -67,6 +69,8 @@ class DohProxyService {
     String? dohServerEch,
     List<String> dohBootstrapIps = const [],
     List<String> dohEchBootstrapIps = const [],
+    String? dohAuthToken,
+    String? dohEchAuthToken,
     String? serverIp,
     String? upstreamProtocol,
     String? upstreamHost,
@@ -79,6 +83,7 @@ class DohProxyService {
     bool mitmConnect = true,
     bool h2Mitm = false,
   }) async {
+    final authSignature = _buildAuthSignature(dohAuthToken, dohEchAuthToken);
     final bootstrapSignature = _buildBootstrapSignature(
       dohBootstrapIps,
       dohEchBootstrapIps,
@@ -98,6 +103,7 @@ class DohProxyService {
           _currentDohServer == dohServer &&
           _currentDohServerEch == dohServerEch &&
           _currentDohBootstrapSignature == bootstrapSignature &&
+          _currentDohAuthSignature == authSignature &&
           _currentPreferIPv6 == preferIPv6 &&
           _currentPreferredPort == preferredPort &&
           _currentServerIp == serverIp &&
@@ -125,6 +131,8 @@ class DohProxyService {
         dohServerEch,
         dohBootstrapIps,
         dohEchBootstrapIps,
+        dohAuthToken,
+        dohEchAuthToken,
         serverIp,
         upstreamProtocol,
         upstreamHost,
@@ -150,6 +158,8 @@ class DohProxyService {
           dohServerEch,
           dohBootstrapIps,
           dohEchBootstrapIps,
+          dohAuthToken,
+          dohEchAuthToken,
           serverIp,
           upstreamProtocol,
           upstreamHost,
@@ -172,6 +182,8 @@ class DohProxyService {
         dohServerEch,
         dohBootstrapIps,
         dohEchBootstrapIps,
+        dohAuthToken,
+        dohEchAuthToken,
         serverIp,
         upstreamProtocol,
         upstreamHost,
@@ -195,6 +207,8 @@ class DohProxyService {
     String? dohServerEch,
     List<String> dohBootstrapIps,
     List<String> dohEchBootstrapIps,
+    String? dohAuthToken,
+    String? dohEchAuthToken,
     String? serverIp,
     String? upstreamProtocol,
     String? upstreamHost,
@@ -224,6 +238,8 @@ class DohProxyService {
           dohServerEch: dohServerEch,
           dohBootstrapIps: dohBootstrapIps,
           dohEchBootstrapIps: dohEchBootstrapIps,
+          dohAuthToken: dohAuthToken,
+          dohEchAuthToken: dohEchAuthToken,
           serverIp: serverIp,
           upstreamProtocol: upstreamProtocol,
           upstreamHost: upstreamHost,
@@ -252,6 +268,10 @@ class DohProxyService {
         _currentDohBootstrapSignature = _buildBootstrapSignature(
           dohBootstrapIps,
           dohEchBootstrapIps,
+        );
+        _currentDohAuthSignature = _buildAuthSignature(
+          dohAuthToken,
+          dohEchAuthToken,
         );
         _currentPreferIPv6 = preferIPv6;
         _currentPreferredPort = port;
@@ -286,6 +306,8 @@ class DohProxyService {
     String? dohServerEch,
     List<String> dohBootstrapIps,
     List<String> dohEchBootstrapIps,
+    String? dohAuthToken,
+    String? dohEchAuthToken,
     String? serverIp,
     String? upstreamProtocol,
     String? upstreamHost,
@@ -357,8 +379,17 @@ class DohProxyService {
         ],
       ];
 
-      // 启动进程
-      _process = await Process.start(executablePath, args);
+      // 启动进程；令牌走环境变量，不放命令行，避免出现在进程列表里
+      _process = await Process.start(
+        executablePath,
+        args,
+        environment: {
+          if (dohAuthToken != null && dohAuthToken.isNotEmpty)
+            'DOH_PROXY_AUTH_TOKEN': dohAuthToken,
+          if (dohEchAuthToken != null && dohEchAuthToken.isNotEmpty)
+            'DOH_PROXY_ECH_AUTH_TOKEN': dohEchAuthToken,
+        },
+      );
 
       // 监听 stdout 获取端口信息
       final stdoutLines = _process!.stdout
@@ -369,6 +400,10 @@ class DohProxyService {
       var completed = false;
 
       _stdoutSubscription = stdoutLines.listen((line) {
+        if (line.trim() == 'DOH_AUTH_REJECTED') {
+          _processAuthRejected = true;
+          return;
+        }
         NetworkLogger.log('[DOH] $line');
         // 解析端口: "DOH proxy server listening on 127.0.0.1:12345"
         final match = RegExp(r'listening on [\d.]+:(\d+)').firstMatch(line);
@@ -382,6 +417,10 @@ class DohProxyService {
           _currentDohBootstrapSignature = _buildBootstrapSignature(
             dohBootstrapIps,
             dohEchBootstrapIps,
+          );
+          _currentDohAuthSignature = _buildAuthSignature(
+            dohAuthToken,
+            dohEchAuthToken,
           );
           _currentPreferIPv6 = preferIPv6;
           _currentPreferredPort = preferredPort;
@@ -496,6 +535,7 @@ class DohProxyService {
     _currentDohServer = null;
     _currentDohServerEch = null;
     _currentDohBootstrapSignature = null;
+    _currentDohAuthSignature = null;
     _currentPreferIPv6 = null;
     _currentPreferredPort = null;
     _currentServerIp = null;
@@ -727,6 +767,26 @@ class DohProxyService {
     );
   }
 
+  /// 取出并清除「DoH 服务器拒绝了令牌」标记，true 表示需要重新申请令牌
+  Future<bool> takeAuthRejected() async {
+    if (!DohProxyFfi.isAvailable) {
+      final rejected = _processAuthRejected;
+      _processAuthRejected = false;
+      return rejected;
+    }
+    return _enqueueFfiOp(() async {
+      final sendPort = await _ensureFfiIsolate();
+      final response = ReceivePort();
+      sendPort.send({
+        'cmd': 'take_auth_rejected',
+        'replyTo': response.sendPort,
+      });
+      final result = await response.first;
+      response.close();
+      return result is Map && result['rejected'] == true;
+    });
+  }
+
   Future<bool> clearDnsCache() async {
     if (!DohProxyFfi.isAvailable) {
       return DohProxyFfi.instance.clearDnsCache();
@@ -821,6 +881,8 @@ class DohProxyService {
     required String? dohServerEch,
     List<String> dohBootstrapIps = const [],
     List<String> dohEchBootstrapIps = const [],
+    String? dohAuthToken,
+    String? dohEchAuthToken,
     required String? serverIp,
     required String? upstreamProtocol,
     required String? upstreamHost,
@@ -846,6 +908,8 @@ class DohProxyService {
       'dohServerEch': dohServerEch,
       'dohBootstrapIps': dohBootstrapIps,
       'dohEchBootstrapIps': dohEchBootstrapIps,
+      'dohAuthToken': dohAuthToken,
+      'dohEchAuthToken': dohEchAuthToken,
       'serverIp': serverIp,
       'upstreamProtocol': upstreamProtocol,
       'upstreamHost': upstreamHost,
@@ -1102,6 +1166,9 @@ class DohProxyService {
     List<String> dohEchBootstrapIps,
   ) => '${dohBootstrapIps.join(',')}|${dohEchBootstrapIps.join(',')}';
 
+  String _buildAuthSignature(String? dohAuthToken, String? dohEchAuthToken) =>
+      '${dohAuthToken ?? ''}|${dohEchAuthToken ?? ''}';
+
   Future<SendPort> _ensureFfiIsolate() async {
     if (_ffiSendPort != null) return _ffiSendPort!;
     final readyPort = ReceivePort();
@@ -1144,6 +1211,8 @@ void _ffiIsolateEntry(SendPort mainSendPort) {
           final dohServerEch = message['dohServerEch'] as String?;
           final dohBootstrapIps = _stringList(message['dohBootstrapIps']);
           final dohEchBootstrapIps = _stringList(message['dohEchBootstrapIps']);
+          final dohAuthToken = message['dohAuthToken'] as String?;
+          final dohEchAuthToken = message['dohEchAuthToken'] as String?;
           final serverIp = message['serverIp'] as String?;
           final upstreamProtocol = message['upstreamProtocol'] as String?;
           final upstreamHost = message['upstreamHost'] as String?;
@@ -1163,6 +1232,8 @@ void _ffiIsolateEntry(SendPort mainSendPort) {
             dohServerEch: dohServerEch,
             dohBootstrapIps: dohBootstrapIps,
             dohEchBootstrapIps: dohEchBootstrapIps,
+            dohAuthToken: dohAuthToken,
+            dohEchAuthToken: dohEchAuthToken,
             serverIp: serverIp,
             upstreamProtocol: upstreamProtocol,
             upstreamHost: upstreamHost,
@@ -1185,6 +1256,8 @@ void _ffiIsolateEntry(SendPort mainSendPort) {
               dohServerEch: dohServerEch,
               dohBootstrapIps: dohBootstrapIps,
               dohEchBootstrapIps: dohEchBootstrapIps,
+              dohAuthToken: dohAuthToken,
+              dohEchAuthToken: dohEchAuthToken,
               serverIp: serverIp,
               upstreamProtocol: upstreamProtocol,
               upstreamHost: upstreamHost,
@@ -1289,6 +1362,10 @@ void _ffiIsolateEntry(SendPort mainSendPort) {
         case 'clear_dns_cache':
           final ok = DohProxyFfi.instance.clearDnsCache();
           replyTo.send({'ok': ok});
+          return;
+        case 'take_auth_rejected':
+          final rejected = DohProxyFfi.instance.takeAuthRejected();
+          replyTo.send({'ok': true, 'rejected': rejected});
           return;
         case 'dns_cache_stats':
           final stats = DohProxyFfi.instance.dnsCacheStats();

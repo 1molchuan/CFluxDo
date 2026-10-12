@@ -10,15 +10,22 @@ class DohResolver {
     List<String> bootstrapIps = const [],
     this.enableFallback = true,
     bool preferIPv6 = false,
+    String? authToken,
+    this.onAuthRejected,
   })  : _serverUrl = serverUrl,
         _bootstrapIps = bootstrapIps,
+        _authToken = authToken,
         _preferIPv6 = preferIPv6 {
     _initClient();
   }
 
   String _serverUrl;
   List<String> _bootstrapIps;
+  String? _authToken;
   late BootstrapDohClient _client;
+
+  /// 带令牌查询被服务端拒绝（401/403）时回调
+  final void Function()? onAuthRejected;
 
   /// 是否启用系统 DNS 回退
   final bool enableFallback;
@@ -45,16 +52,21 @@ class DohResolver {
       bootstrapIps: _bootstrapIps,
       timeout: const Duration(seconds: 5),
       preferIPv6: _preferIPv6,
+      authToken: _authToken,
+      onAuthRejected: onAuthRejected,
     );
   }
 
   void updateServer(String serverUrl,
-      {List<String> bootstrapIps = const []}) {
-    if (_serverUrl == serverUrl && _listEquals(_bootstrapIps, bootstrapIps)) {
+      {List<String> bootstrapIps = const [], String? authToken}) {
+    if (_serverUrl == serverUrl &&
+        _authToken == authToken &&
+        _listEquals(_bootstrapIps, bootstrapIps)) {
       return;
     }
     _serverUrl = serverUrl;
     _bootstrapIps = bootstrapIps;
+    _authToken = authToken;
     _cacheAll.clear();
     _inflight.clear();
     _client.close();

@@ -44,6 +44,7 @@ import '../network/adapters/webview_http_adapter.dart';
 import '../network/webview/webview_adapter_settings_service.dart';
 import '../login_ready_coordinator.dart';
 import '../network/discourse_dio.dart';
+import '../network/doh/accel_doh_auth_service.dart';
 import '../network/flux_request_spec.dart';
 import '../preloaded_data_service.dart';
 import '../webview_session_cookie_refresh_service.dart';
@@ -221,6 +222,11 @@ class DiscourseService extends _DiscourseServiceBase
     // 独立 Dio 只装 3 个拦截器,在后台/会话失效窗口撞 CF 会静默失败。
     _cookieSync.attachDio(_dio);
     _initInterceptors();
+    // 加速 DoH 令牌跟随登录账号，只用到 id / 用户名 / 等级
+    currentUserNotifier.addListener(
+      () =>
+          AccelDohAuthService.instance.onUserChanged(currentUserNotifier.value),
+    );
   }
 
   // ========== 共享工具方法 ==========

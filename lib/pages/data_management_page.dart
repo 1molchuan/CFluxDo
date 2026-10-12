@@ -12,6 +12,7 @@ import '../providers/app_state_refresher.dart';
 import '../providers/core_providers.dart';
 import '../providers/theme_provider.dart';
 import '../utils/dialog_utils.dart';
+import '../services/network/doh/accel_doh_auth_service.dart';
 import '../services/data_management/cache_size_service.dart';
 import '../services/data_management/data_backup_service.dart';
 import '../services/toast_service.dart';
@@ -207,6 +208,7 @@ class _CacheManagementSectionState
   Future<void> _doClearCookies() async {
     final container = ProviderScope.containerOf(context, listen: false);
     await ref.read(discourseServiceProvider).logout(callApi: false);
+    await AccelDohAuthService.instance.revoke();
     await AppStateRefresher.resetForLogout(container);
   }
 

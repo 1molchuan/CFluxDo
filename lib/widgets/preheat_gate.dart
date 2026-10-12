@@ -9,6 +9,7 @@ import '../l10n/s.dart';
 import '../pages/about_page.dart';
 import '../pages/network_settings_page/network_settings_page.dart';
 import '../providers/app_icon_provider.dart';
+import '../services/network/doh/accel_doh_auth_service.dart';
 import '../services/browser_trust_coordinator.dart';
 import '../services/discourse/discourse_service.dart';
 import '../services/emoji_handler.dart';
@@ -320,6 +321,7 @@ class _PreheatFailed extends StatelessWidget {
         'message': S.current.preheat_logoutMessage,
       });
       await DiscourseService().logout(callApi: false, refreshPreload: false);
+      await AccelDohAuthService.instance.revoke();
       onRetry();
     }
   }

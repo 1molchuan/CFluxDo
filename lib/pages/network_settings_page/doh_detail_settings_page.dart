@@ -246,7 +246,10 @@ class _DohDetailSettingsPageState extends State<DohDetailSettingsPage> {
         ],
       ),
       subtitle: Text(
-        server.url,
+        // 加速要登录且等级 ≥ 1 才有令牌，没有时说明当前实际用的是 DNSPod
+        server.url == _service.accelServerUrl && _service.isAccelWaitingForAuth
+            ? accelDohWaitingHint
+            : server.url,
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
         style: theme.textTheme.bodySmall?.copyWith(
