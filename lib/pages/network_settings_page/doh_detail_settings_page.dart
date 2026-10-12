@@ -6,6 +6,7 @@ import 'package:app_icons/app_icons.dart';
 import 'package:flutter/services.dart';
 
 import '../../l10n/s.dart';
+import '../../services/network/doh/accel_doh_auth_service.dart';
 import '../../services/network/doh/doh_resolver.dart';
 import '../../utils/dialog_utils.dart';
 import '../../services/network/doh/network_settings_service.dart';
@@ -221,6 +222,15 @@ class _DohDetailSettingsPageState extends State<DohDetailSettingsPage> {
     final selected = server.url == settings.selectedServerUrl;
     final isTesting = _testingServers.contains(server.url);
     final latency = _latencies[server.url];
+    final isAccel = server.url == _service.accelServerUrl;
+    final accelAuth = AccelDohAuthService.instance;
+    // 登录佬友还没有专属令牌时，可以手动走一次 Connect 授权
+    final canAuthorizeAccel =
+        isAccel &&
+        accelAuth.isMember &&
+        accelAuth.token == null &&
+        accelAuth.status != AccelDohAuthStatus.pending;
+    final accelHint = isAccel ? _service.accelFallbackHint : null;
 
     return ListTile(
       contentPadding: const EdgeInsets.only(left: 8, right: 12),
@@ -246,10 +256,8 @@ class _DohDetailSettingsPageState extends State<DohDetailSettingsPage> {
         ],
       ),
       subtitle: Text(
-        // 加速要登录且等级 ≥ 1 才有令牌，没有时说明当前实际用的是 DNSPod
-        server.url == _service.accelServerUrl && _service.isAccelWaitingForAuth
-            ? accelDohWaitingHint
-            : server.url,
+        // 加速没有专属令牌时，说明当前实际用的是公共加速还是 DNSPod
+        accelHint ?? server.url,
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
         style: theme.textTheme.bodySmall?.copyWith(
@@ -306,6 +314,8 @@ class _DohDetailSettingsPageState extends State<DohDetailSettingsPage> {
                 case 'copy':
                   Clipboard.setData(ClipboardData(text: server.url));
                   ToastService.showInfo(S.current.dohDetail_dohAddressCopied);
+                case 'accel_connect':
+                  _authorizeAccel();
                 case 'edit':
                   _showEditServerDialog(server);
                 case 'delete':
@@ -322,6 +332,16 @@ class _DohDetailSettingsPageState extends State<DohDetailSettingsPage> {
                   contentPadding: EdgeInsets.zero,
                 ),
               ),
+              if (canAuthorizeAccel)
+                const PopupMenuItem(
+                  value: 'accel_connect',
+                  child: ListTile(
+                    leading: Icon(Symbols.verified_user_rounded, size: 20),
+                    title: Text('用 L 站 Connect 授权'),
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                ),
               if (server.isCustom) ...[
                 PopupMenuItem(
                   value: 'edit',
@@ -358,6 +378,24 @@ class _DohDetailSettingsPageState extends State<DohDetailSettingsPage> {
     );
   }
 
+  /// 授权过程中列表里会显示「等待 Connect 授权」，结束后按结果提示
+  Future<void> _authorizeAccel() async {
+    final status = await AccelDohAuthService.instance.authorizeNow();
+    switch (status) {
+      case AccelDohAuthStatus.ready:
+        ToastService.showSuccess('授权成功，已切换到 cfluxdo 加速');
+      case AccelDohAuthStatus.unavailable:
+        ToastService.showError('此账号无法使用 Connect，继续使用公共加速');
+      case AccelDohAuthStatus.denied:
+        ToastService.showError('加速服务端拒绝了此账号，继续使用公共加速');
+      case AccelDohAuthStatus.pending:
+        ToastService.showError('授权没有完成，稍后会自动重试');
+      case AccelDohAuthStatus.notAuthorized:
+      case AccelDohAuthStatus.notEligible:
+        break;
+    }
+  }
+
   Color _getLatencyColor(int latency) {
     if (latency < 100) return Colors.green;
     if (latency < 300) return Colors.orange;
@@ -369,9 +407,12 @@ class _DohDetailSettingsPageState extends State<DohDetailSettingsPage> {
 
     setState(() => _testingServers.add(server.url));
 
+    // 加速按当前档位测（专属加速带令牌，否则测公共加速或 DNSPod）
+    final target = _service.latencyTestTarget(server);
     final resolver = DohResolver(
-      serverUrl: server.url,
-      bootstrapIps: server.bootstrapIps,
+      serverUrl: target.url,
+      bootstrapIps: target.bootstrapIps,
+      authToken: target.authToken,
       enableFallback: false,
     );
     try {

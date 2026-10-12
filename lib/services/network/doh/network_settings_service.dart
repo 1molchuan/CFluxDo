@@ -241,6 +241,7 @@ class NetworkSettingsService {
   final Map<String, Map<String, DateTime>> _hostIpPenaltyCache = {};
   String? _resolvedHostCacheSignature;
   Timer? _authRejectedPollTimer;
+  String? _accelRouteSignature;
 
   final ValueNotifier<bool> isApplying = ValueNotifier(false);
 
@@ -278,21 +279,43 @@ class NetworkSettingsService {
   /// 本机的 cfluxdo 加速服务器地址
   String? get accelServerUrl => _accelServer?.url;
 
-  /// 选中了 cfluxdo 加速，但还没有账号令牌（游客/TL0/未申请到）
-  bool get isAccelWaitingForAuth {
+  /// 选中了 cfluxdo 加速但没有专属令牌时，说明当前实际用的是哪个
+  String? get accelFallbackHint {
     final accelUrl = _accelServer?.url;
-    return accelUrl != null &&
-        current.selectedServerUrl == accelUrl &&
-        AccelDohAuthService.instance.token == null;
+    if (accelUrl == null || current.selectedServerUrl != accelUrl) {
+      return null;
+    }
+    return switch (AccelDohAuthService.instance.status) {
+      AccelDohAuthStatus.ready => null,
+      AccelDohAuthStatus.notEligible => '登录且信任等级 ≥ 1 后启用，当前使用 DNSPod',
+      AccelDohAuthStatus.notAuthorized => '未授权 L 站 Connect，当前使用公共加速',
+      AccelDohAuthStatus.unavailable => '此账号无法使用 Connect，当前使用公共加速',
+      AccelDohAuthStatus.denied => '加速服务端拒绝了此账号，当前使用公共加速',
+      AccelDohAuthStatus.pending => '等待 Connect 授权，当前使用公共加速',
+    };
   }
 
-  /// 加速服务器只给有令牌的账号用：没有令牌时改用公共 DNSPod
+  /// 选中加速时按账号分档：有令牌走专属加速，登录佬友走公共加速，游客/TL0 走 DNSPod
   String _activeDohUrl(String url) {
-    if (url == _accelServer?.url &&
-        AccelDohAuthService.instance.token == null) {
-      return _defaultServers.first.url;
+    if (url != _accelServer?.url) return url;
+    final auth = AccelDohAuthService.instance;
+    if (auth.token != null) return url;
+    if (auth.isMember) return accelDohPublicServer.url;
+    return _defaultServers.first.url;
+  }
+
+  /// 测速时测实际会用的那个服务器（加速按当前档位，带上令牌）
+  ({String url, List<String> bootstrapIps, String? authToken})
+  latencyTestTarget(DohServer server) {
+    final url = _activeDohUrl(server.url);
+    if (url == server.url) {
+      return (
+        url: url,
+        bootstrapIps: server.bootstrapIps,
+        authToken: _authTokenFor(url),
+      );
     }
-    return url;
+    return (url: url, bootstrapIps: _getBootstrapIps(url), authToken: null);
   }
 
   /// 只有加速服务器才带令牌，其他 DoH 一律不带
@@ -302,6 +325,7 @@ class NetworkSettingsService {
 
   /// 按实际使用的服务器和令牌更新 Dart 侧解析器
   void _updateResolverServer() {
+    _accelRouteSignature = _currentAccelRouteSignature;
     final url = _activeServerUrl;
     _resolver.updateServer(
       url,
@@ -368,9 +392,8 @@ class NetworkSettingsService {
       authToken: _authTokenFor(activeUrl),
       onAuthRejected: _handleAccelAuthRejected,
     );
-    AccelDohAuthService.instance.tokenNotifier.addListener(
-      _handleAccelAuthChanged,
-    );
+    _accelRouteSignature = _currentAccelRouteSignature;
+    AccelDohAuthService.instance.addListener(_handleAccelAuthChanged);
     await _applyProxyState();
     await refreshDnsCacheStats();
     _touch();
@@ -655,7 +678,7 @@ class NetworkSettingsService {
         }
       }
 
-      // 加速服务器没有令牌时这里已经换成 DNSPod，令牌只随加速服务器下发
+      // 加速服务器没有令牌时这里已经换成公共加速或 DNSPod，令牌只随加速服务器下发
       final dohServer = _activeServerUrl;
       final dohServerEch = _activeEchServerUrl;
 
@@ -780,7 +803,7 @@ class NetworkSettingsService {
   /// 用于 App 从后台恢复时调用：iOS 挂起进程后 Rust 代理的 TCP listener
   /// 可能失效，需要检测并重启。
   Future<void> ensureProxyAlive() async {
-    // 回到前台顺带检查加速令牌：过期就换 DNSPod，快到期就续期
+    // 回到前台顺带检查加速令牌：过期就降到公共加速，快到期就续期
     AccelDohAuthService.instance.checkNow();
     unawaited(_checkAuthRejected());
     if (!shouldRunLocalProxy) return;
@@ -957,21 +980,26 @@ class NetworkSettingsService {
     _touch();
   }
 
-  /// 加速令牌变了（拿到/续期/作废/过期）：切换实际使用的服务器并按需重启代理
+  /// 实际使用的服务器和令牌，变了才需要重启代理
+  String get _currentAccelRouteSignature {
+    final dns = _activeServerUrl;
+    final ech = _activeEchServerUrl;
+    return '$dns|${_authTokenFor(dns) ?? ""}|${ech ?? ""}|${_authTokenFor(ech) ?? ""}';
+  }
+
+  /// 加速档位变了（拿到/续期/作废/过期令牌、登录状态变化）：切换实际使用的服务器并按需重启代理
   void _handleAccelAuthChanged() {
     if (_prefs == null) return;
-    _updateResolverServer();
-    final accelUrl = _accelServer?.url;
-    final usesAccel =
-        current.selectedServerUrl == accelUrl ||
-        current.echServerUrl == accelUrl;
-    if (current.dohEnabled && usesAccel) {
-      debugPrint(
-        '[DOH] 加速令牌${AccelDohAuthService.instance.token == null ? "已失效，改用 DNSPod" : "已就绪，使用 cfluxdo 加速"}',
-      );
-      // 服务器地址变了时，下次解析会按签名自动清掉旧缓存
-      _scheduleApplyProxyState();
+    final signature = _currentAccelRouteSignature;
+    if (signature != _accelRouteSignature) {
+      _updateResolverServer();
+      if (current.dohEnabled) {
+        debugPrint('[DOH] 加速档位变化，当前使用 $_activeServerUrl');
+        // 服务器地址变了时，下次解析会按签名自动清掉旧缓存
+        _scheduleApplyProxyState();
+      }
     }
+    // 只是提示文字变了也要刷新设置页
     _touch();
   }
 
@@ -1419,9 +1447,9 @@ class NetworkSettingsService {
     return found ? selected : _defaultServerUrl;
   }
 
-  /// 根据 URL 查找服务器配置
+  /// 根据 URL 查找服务器配置（公共加速不在列表里，但也要能查到）
   DohServer? _findServer(String url) {
-    for (final server in servers) {
+    for (final server in [...servers, accelDohPublicServer]) {
       if (server.url == url) return server;
     }
     return null;
@@ -1661,13 +1689,18 @@ class NetworkSettingsService {
 /// cfluxdo 加速（Edge Smart DoH）
 ///
 /// 每个安装用一个随机子域名访问，服务端借此区分安装。
-/// 查询要带账号令牌（见 [AccelDohAuthService]）：登录且等级 ≥ 1 才发令牌，
-/// 游客/TL0 没有令牌时自动改用 DNSPod。
+/// 查询要带账号令牌（见 [AccelDohAuthService]）：用 L 站 Connect 核验过的账号才发令牌。
+/// 没有令牌时，登录且等级 ≥ 1 的走 [accelDohPublicServer]，游客/TL0 走 DNSPod。
 /// 节点 IP 作为 bootstrap：系统 DNS 解析不出加速域名时直接连这些节点（SNI 不变）。
 const String accelDohServerName = 'cfluxdo 加速';
 
-/// 选中加速但还没有令牌时，在服务器列表里给的提示
-const String accelDohWaitingHint = '登录且信任等级 ≥ 1 后启用，当前使用 DNSPod';
+/// 公共加速：不需要令牌，给没授权 Connect 或用不了 Connect 的佬友（如青春版）用。
+/// 不在服务器列表里显示，只在选中加速且没有令牌时顶上。
+const DohServer accelDohPublicServer = DohServer(
+  name: 'cfluxdo 公共加速',
+  url: 'https://edge.1molchuan.top/linuxdo',
+  bootstrapIps: accelDohBootstrapIps,
+);
 
 const String _accelDohHostSuffix = 'wq.1molchuan.top';
 const String _accelDohPath = '/v1/lookup';

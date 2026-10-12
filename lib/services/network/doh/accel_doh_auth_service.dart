@@ -1,36 +1,61 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../models/user.dart';
+import 'accel_doh_api.dart';
+import 'accel_doh_connect_flow.dart';
+
+/// 加速 DoH 当前处在哪一档
+enum AccelDohAuthStatus {
+  /// 有专属令牌，走 cfluxdo 加速
+  ready,
+
+  /// 游客或信任等级不足，走 DNSPod
+  notEligible,
+
+  /// 还没授权 Connect（没问过或选了暂不），走公共加速
+  notAuthorized,
+
+  /// 这个账号用不了 Connect（如青春版），走公共加速
+  unavailable,
+
+  /// 加速服务端拒绝给这个账号发令牌，走公共加速
+  denied,
+
+  /// 正在授权或等网络恢复后重试，走公共加速
+  pending,
+}
 
 /// cfluxdo 加速 DoH 的账号令牌
 ///
-/// 登录且信任等级 ≥ 1 时，向加速服务端上报 id / 用户名 / 等级换一个令牌，
-/// 之后查询都带 `Authorization: Bearer <令牌>`。游客、TL0 或还没换到令牌时
-/// 没有令牌，DoH 自动改用公共 DNSPod。
+/// 登录且信任等级 ≥ 1 的账号经用户同意后，在 App 里走一遍 LinuxDo Connect
+/// 授权，把回调里的 code/state 交给加速服务端；服务端去 Connect 核验身份后
+/// 发一个令牌，之后查询都带 `Authorization: Bearer <令牌>`。
 ///
-/// 发给加速服务端的只有上面三项和它自己发的令牌，
+/// 没有令牌时：登录且等级 ≥ 1 的走公共加速（青春版等用不了 Connect 的账号也在这档），
+/// 游客/TL0 走 DNSPod。
+///
+/// 发给加速服务端的只有 code/state 和它自己发的令牌，
 /// 从不携带 linux.do 的 cookie、_t 或 API key。
 /// 会话被动失效不动令牌；只有主动退出登录才作废（[revoke]）。
-class AccelDohAuthService {
+class AccelDohAuthService extends ChangeNotifier {
   AccelDohAuthService._();
 
   static final AccelDohAuthService instance = AccelDohAuthService._();
 
-  static const String _prefsKey = 'doh_accel_auth';
+  static const String _tokenKey = 'doh_accel_token';
+  static const String _memberKey = 'doh_accel_member';
+  static const String _consentKey = 'doh_accel_consent';
+  static const String _backoffKey = 'doh_accel_backoff';
 
-  /// 能拿到令牌的最低信任等级
+  /// 0.2.28.3 测试版自报身份时用的键，已废弃
+  static const String _legacyTokenKey = 'doh_accel_auth';
+
+  /// 能用加速的最低信任等级
   static const int minTrustLevel = 1;
-
-  static const Duration _connectTimeout = Duration(seconds: 5);
-  static const Duration _requestTimeout = Duration(seconds: 10);
-
-  /// 服务端没给 expires_in 时按这个有效期算
-  static const Duration _defaultLifetime = Duration(hours: 24);
 
   /// 同一个令牌被拒后，至少隔这么久才再处理一次
   static const Duration _rejectCooldown = Duration(seconds: 60);
@@ -39,10 +64,13 @@ class AccelDohAuthService {
   static const Duration _rejectWindow = Duration(minutes: 10);
   static const int _maxRejectsInWindow = 3;
 
-  /// 服务端拒绝发令牌后，同一账号状态多久内不再申请
-  static const Duration _deniedRetryDelay = Duration(hours: 1);
+  /// 服务端拒绝发令牌后，同一账号同一等级多久内不再申请
+  static const Duration _deniedRetryDelay = Duration(hours: 6);
 
-  /// 申请失败（网络/服务端异常）后的重试间隔，逐次拉长
+  /// 账号用不了 Connect 时多久后再试
+  static const Duration _unavailableRetryDelay = Duration(hours: 24);
+
+  /// 网络/服务端异常后的重试间隔，逐次拉长
   static const List<Duration> _retryDelays = [
     Duration(minutes: 1),
     Duration(minutes: 5),
@@ -50,39 +78,75 @@ class AccelDohAuthService {
     Duration(minutes: 30),
   ];
 
-  static final RegExp _tokenPattern = RegExp(r'^[\x21-\x7E]{1,4096}$');
+  /// 拿到登录用户后隔多久再弹授权说明，避开启动时的一堆弹窗
+  @visibleForTesting
+  Duration consentPromptDelay = const Duration(seconds: 5);
 
-  /// 当前可用的令牌；null 表示没有（游客/TL0/过期/未申请到）
-  final ValueNotifier<String?> tokenNotifier = ValueNotifier(null);
+  @visibleForTesting
+  AccelDohApi? debugApi;
+
+  @visibleForTesting
+  AccelDohConnectFlow? debugConnectFlow;
 
   SharedPreferences? _prefs;
-  Uri? _baseUri;
-  List<String> _bootstrapIps = const [];
+  AccelDohApi? _defaultApi;
+  AccelDohConnectFlow? _defaultFlow;
   _AccelDohToken? _stored;
+  String? _token;
+  bool _member = false;
+  _AccelDohConsent? _consent;
+  _AccelDohBackoff? _backoff;
 
   /// 最近一次拿到的登录用户；主动退出后清空
   User? _user;
 
-  /// 主动退出时自增，用来丢弃退出前发出、退出后才返回的申请结果
+  /// 主动退出时自增，用来丢弃退出前发出、退出后才返回的结果
   int _epoch = 0;
 
   Future<void>? _inflight;
 
   /// 同步进行中又有新的触发（换号/退出后重新登录），结束后再跑一次
   bool _resyncRequested = false;
+  bool _connecting = false;
   Timer? _refreshTimer;
   Timer? _expiryTimer;
   Timer? _retryTimer;
+  Timer? _consentPromptTimer;
+  bool _consentPromptShowing = false;
   int _failures = 0;
   DateTime? _nextAttemptAt;
-  String? _lastAttemptKey;
   DateTime? _lastRejectAt;
   DateTime? _rejectWindowStart;
   int _rejectCount = 0;
 
-  String? get token => tokenNotifier.value;
+  AccelDohApi get _api => debugApi ?? _defaultApi!;
 
-  /// [serverUrl] 是本机的加速 DoH 地址，申请/作废令牌走同一个域名
+  AccelDohConnectFlow get _flow =>
+      debugConnectFlow ?? (_defaultFlow ??= AccelDohConnectFlow());
+
+  /// 当前可用的令牌；null 表示没有
+  String? get token => _token;
+
+  /// 登录且等级 ≥ 1（冷启动还没拿到用户时按上次记下的算）
+  bool get isMember => _member || _stored != null;
+
+  AccelDohAuthStatus get status {
+    if (_token != null) return AccelDohAuthStatus.ready;
+    if (!isMember) return AccelDohAuthStatus.notEligible;
+    if (_connecting) return AccelDohAuthStatus.pending;
+    final user = _user;
+    final backoff = _activeBackoff(user);
+    if (backoff != null) {
+      return backoff.reason == _BackoffReason.denied
+          ? AccelDohAuthStatus.denied
+          : AccelDohAuthStatus.unavailable;
+    }
+    final consent = user == null ? _consent?.granted : _consentFor(user);
+    if (consent != true) return AccelDohAuthStatus.notAuthorized;
+    return AccelDohAuthStatus.pending;
+  }
+
+  /// [serverUrl] 是本机的加速 DoH 地址，令牌接口走同一个域名
   void initialize(
     SharedPreferences prefs, {
     required String serverUrl,
@@ -90,14 +154,12 @@ class AccelDohAuthService {
   }) {
     if (_prefs != null) return;
     _prefs = prefs;
-    final uri = Uri.parse(serverUrl);
-    _baseUri = Uri(
-      scheme: 'https',
-      host: uri.host,
-      port: uri.hasPort ? uri.port : null,
-    );
-    _bootstrapIps = bootstrapIps;
-    _stored = _AccelDohToken.decode(prefs.getString(_prefsKey));
+    _defaultApi = AccelDohApi(serverUrl: serverUrl, bootstrapIps: bootstrapIps);
+    unawaited(prefs.remove(_legacyTokenKey));
+    _stored = _AccelDohToken.decode(prefs.getString(_tokenKey));
+    _member = prefs.getBool(_memberKey) ?? false;
+    _consent = _AccelDohConsent.decode(prefs.getString(_consentKey));
+    _backoff = _AccelDohBackoff.decode(prefs.getString(_backoffKey));
     _publish();
     if (_user != null) {
       unawaited(_sync());
@@ -108,19 +170,42 @@ class AccelDohAuthService {
   void onUserChanged(User? user) {
     // 会话失效时也会变成 null，这里不动令牌；主动退出走 revoke()
     if (user == null) return;
+    final previous = _user;
     _user = user;
+    if (previous != null && previous.id != user.id) {
+      _resetRetry();
+    }
     if (_prefs == null) return;
     unawaited(_sync());
   }
 
-  /// 回到前台等时机主动检查一次：过期了就改用公共 DoH，快到期就续期
+  /// 回到前台等时机主动检查一次：过期了就降档，快到期就续期
   void checkNow() {
     if (_prefs == null) return;
     _publish();
     unawaited(_sync());
   }
 
-  /// 加速服务端拒绝了当前令牌（401/403）：先换一个，换不到就丢掉改走公共 DoH
+  /// 用户在设置里点了「用 L 站 Connect 授权」：没同意过就先弹说明，然后立即授权
+  Future<AccelDohAuthStatus> authorizeNow() async {
+    final user = _user;
+    if (_prefs == null || user == null || user.trustLevel < minTrustLevel) {
+      return status;
+    }
+    if (_consentFor(user) != true) {
+      final answer = await _flow.askConsent();
+      if (answer == null || _user?.id != user.id) return status;
+      await _setConsent(user, answer);
+      if (!answer) return status;
+    }
+    while (_inflight != null) {
+      await _inflight;
+    }
+    await _sync(force: true, interactive: true);
+    return status;
+  }
+
+  /// 加速服务端拒绝了当前令牌（401/403）：先降到公共加速，再重新走 Connect
   Future<void> handleRejected() async {
     if (_prefs == null || _stored == null) return;
     final now = DateTime.now();
@@ -134,46 +219,49 @@ class AccelDohAuthService {
       _rejectCount = 0;
     }
     _rejectCount++;
+    await _clearToken();
     if (_rejectCount > _maxRejectsInWindow) {
-      // 新令牌也接连被拒，多半是服务端出了问题：先改走公共 DoH，过一阵再申请
-      debugPrint('[DOH] 加速令牌接连被拒，暂停使用加速');
-      _nextAttemptAt = now.add(_retryDelays.last);
-      final user = _user;
-      _lastAttemptKey = user == null ? null : _attemptKeyOf(user);
-      _retryTimer?.cancel();
-      _retryTimer = Timer(_retryDelays.last, () => unawaited(_sync()));
-      await _clear();
+      // 新令牌也接连被拒，多半是服务端出了问题：先用公共加速，过一阵再申请
+      debugPrint('[DOH] 加速令牌接连被拒，暂停申请');
+      _failures = _retryDelays.length - 1;
+      _scheduleRetry();
       return;
     }
 
-    debugPrint('[DOH] 加速令牌被服务端拒绝，重新申请');
-    await _sync(force: true, dropOnFailure: true);
+    debugPrint('[DOH] 加速令牌被服务端拒绝，重新走 Connect');
+    await _sync(force: true);
   }
 
-  /// 主动退出登录：作废令牌并改回公共 DoH
+  /// 主动退出登录：作废令牌，清掉授权记录，改回 DNSPod
   Future<void> revoke() async {
     _epoch++;
     _user = null;
-    _failures = 0;
-    _nextAttemptAt = null;
-    _lastAttemptKey = null;
+    _resetRetry();
     _rejectWindowStart = null;
     _rejectCount = 0;
-    _retryTimer?.cancel();
+    _consentPromptTimer?.cancel();
+    _consentPromptTimer = null;
     final stored = _stored;
-    await _clear();
-    if (stored != null) {
-      unawaited(_revokeRemote(stored.token));
+    final prefs = _prefs;
+    _member = false;
+    _consent = null;
+    _backoff = null;
+    await prefs?.remove(_memberKey);
+    await prefs?.remove(_consentKey);
+    await prefs?.remove(_backoffKey);
+    await _clearToken();
+    if (stored != null && prefs != null) {
+      unawaited(_api.revoke(stored.token));
     }
   }
 
-  Future<void> _sync({bool force = false, bool dropOnFailure = false}) {
+  Future<void> _sync({bool force = false, bool interactive = false}) {
     final running = _inflight;
     if (running != null) {
       _resyncRequested = true;
       return running;
     }
-    final future = _doSync(force: force, dropOnFailure: dropOnFailure)
+    final future = _doSync(force: force, interactive: interactive)
         .catchError((Object e) {
           debugPrint('[DOH] 加速令牌同步异常: $e');
         })
@@ -188,214 +276,247 @@ class AccelDohAuthService {
     return future;
   }
 
-  Future<void> _doSync({
-    required bool force,
-    required bool dropOnFailure,
-  }) async {
+  Future<void> _doSync({required bool force, required bool interactive}) async {
     final epoch = _epoch;
     final user = _user;
-    final stored = _stored;
-    if (user == null) {
-      // 不知道是谁（启动早期或会话已失效）：没法续期，被拒时只能丢掉
-      if (dropOnFailure && stored != null) await _clear();
-      return;
-    }
+    // 不知道是谁（启动早期或会话已失效）：保持现状
+    if (user == null) return;
 
     if (user.trustLevel < minTrustLevel) {
+      await _setMember(false);
+      final stored = _stored;
       if (stored != null) {
         debugPrint('[DOH] 当前账号等级不足，停用加速令牌');
-        await _clear();
+        await _clearToken();
+        unawaited(_api.revoke(stored.token));
       }
       return;
     }
+    await _setMember(true);
 
-    final sameAccount = stored?.userId == user.id;
-    final upToDate =
-        stored != null &&
-        sameAccount &&
-        stored.username == user.username &&
-        stored.trustLevel == user.trustLevel &&
-        !stored.shouldRefresh;
-    if (!force && upToDate) {
-      _scheduleRefresh();
+    var stored = _stored;
+    if (stored != null && stored.userId != user.id) {
+      // 换了账号：旧账号的令牌马上作废
+      await _clearToken();
+      unawaited(_api.revoke(stored.token));
+      stored = null;
+    }
+
+    if (stored != null && stored.isValid) {
+      if (!force && !stored.shouldRefresh) {
+        _scheduleRefresh();
+        return;
+      }
+      if (!force && _inRetryBackoff) return;
+      final result = await _api.refresh(stored.token);
+      if (epoch != _epoch) return;
+      switch (result.outcome) {
+        case AccelDohIssueOutcome.issued:
+          _resetRetry();
+          await _saveToken(user.id, result);
+          return;
+        case AccelDohIssueOutcome.failed:
+          // 令牌还没过期，先接着用
+          _scheduleRetry();
+          return;
+        case AccelDohIssueOutcome.rejected:
+          // 续不了，下面重新走 Connect
+          await _clearToken();
+      }
+    } else if (stored != null) {
+      await _clearToken();
+    }
+
+    final consent = _consentFor(user);
+    if (consent == false && !interactive) return;
+    if (!interactive && _activeBackoff(user) != null) return;
+    if (!force && !interactive && _inRetryBackoff) return;
+    if (consent == null) {
+      _scheduleConsentPrompt();
       return;
     }
-
-    // 账号状态没变且还在退避期内就先不申请
-    final attemptKey = _attemptKeyOf(user);
-    final nextAttemptAt = _nextAttemptAt;
-    if (!force &&
-        attemptKey == _lastAttemptKey &&
-        nextAttemptAt != null &&
-        DateTime.now().isBefore(nextAttemptAt)) {
-      return;
-    }
-    _lastAttemptKey = attemptKey;
-
-    final result = await _requestToken(user);
-    if (epoch != _epoch) return;
-
-    switch (result.outcome) {
-      case _RequestOutcome.issued:
-        _failures = 0;
-        _nextAttemptAt = null;
-        _retryTimer?.cancel();
-        await _save(result.token!);
-        if (stored != null && !sameAccount) {
-          unawaited(_revokeRemote(stored.token));
-        }
-      case _RequestOutcome.denied:
-        _failures = 0;
-        _nextAttemptAt = DateTime.now().add(_deniedRetryDelay);
-        if (stored != null) await _clear();
-      case _RequestOutcome.failed:
-        final delay = _retryDelays[_failures.clamp(0, _retryDelays.length - 1)];
-        _failures++;
-        _nextAttemptAt = DateTime.now().add(delay);
-        _retryTimer?.cancel();
-        _retryTimer = Timer(delay, () => unawaited(_sync()));
-        // 别人的令牌或已被拒的令牌不能留着
-        if (stored != null && (dropOnFailure || !sameAccount)) {
-          await _clear();
-        }
-    }
+    await _connect(user, epoch, interactive: interactive);
   }
 
-  static String _attemptKeyOf(User user) =>
-      '${user.id}|${user.username}|${user.trustLevel}';
-
-  Future<_RequestResult> _requestToken(User user) async {
-    final baseUri = _baseUri;
-    if (baseUri == null) return const _RequestResult(_RequestOutcome.failed);
-    final client = _createClient();
+  /// 走一遍 Connect 授权换令牌
+  Future<void> _connect(
+    User user,
+    int epoch, {
+    required bool interactive,
+  }) async {
+    _connecting = true;
+    notifyListeners();
     try {
-      final request = await client
-          .postUrl(baseUri.replace(path: '/v1/token'))
-          .timeout(_requestTimeout);
-      request.headers.contentType = ContentType.json;
-      request.write(
-        jsonEncode({
-          'user_id': user.id,
-          'username': user.username,
-          'trust_level': user.trustLevel,
-        }),
-      );
-      final response = await request.close().timeout(_requestTimeout);
-      final body = await response
-          .transform(utf8.decoder)
-          .join()
-          .timeout(_requestTimeout);
-      final status = response.statusCode;
-      if (status == HttpStatus.unauthorized || status == HttpStatus.forbidden) {
-        debugPrint('[DOH] 加速服务端拒绝发放令牌: HTTP $status');
-        return const _RequestResult(_RequestOutcome.denied);
-      }
-      if (status != HttpStatus.ok) {
-        debugPrint('[DOH] 申请加速令牌失败: HTTP $status');
-        return const _RequestResult(_RequestOutcome.failed);
+      final authorizeUrl = await _api.startConnect();
+      if (epoch != _epoch) return;
+      if (authorizeUrl == null) {
+        _scheduleRetry();
+        return;
       }
 
-      final json = jsonDecode(body);
-      final token = json is Map ? json['token'] : null;
-      if (token is! String || !_tokenPattern.hasMatch(token)) {
-        debugPrint('[DOH] 加速令牌格式不对，忽略');
-        return const _RequestResult(_RequestOutcome.failed);
+      final connect = await _flow.fetchCode(authorizeUrl, silent: !interactive);
+      if (epoch != _epoch || _user?.id != user.id) return;
+      switch (connect.outcome) {
+        case AccelDohConnectOutcome.failed:
+          _scheduleRetry();
+          return;
+        case AccelDohConnectOutcome.unavailable:
+          debugPrint('[DOH] 此账号用不了 Connect，使用公共加速');
+          await _setBackoff(user, _BackoffReason.unavailable);
+          return;
+        case AccelDohConnectOutcome.code:
+          break;
       }
-      final expiresIn = json['expires_in'];
-      final lifetime = expiresIn is num && expiresIn > 0
-          ? Duration(seconds: expiresIn.toInt())
-          : _defaultLifetime;
-      final issuedAt = DateTime.now();
-      debugPrint('[DOH] 已拿到加速令牌，有效期 ${lifetime.inMinutes} 分钟');
-      return _RequestResult(
-        _RequestOutcome.issued,
-        _AccelDohToken(
-          token: token,
-          userId: user.id,
-          username: user.username,
-          trustLevel: user.trustLevel,
-          issuedAt: issuedAt,
-          expiresAt: issuedAt.add(lifetime),
-        ),
+
+      final result = await _api.exchangeCode(
+        code: connect.code!,
+        state: connect.state!,
       );
-    } catch (e) {
-      debugPrint('[DOH] 申请加速令牌失败: $e');
-      return const _RequestResult(_RequestOutcome.failed);
+      if (epoch != _epoch || _user?.id != user.id) {
+        // 等结果期间退出或换了号，这个令牌不能留
+        final token = result.token;
+        if (token != null) unawaited(_api.revoke(token));
+        return;
+      }
+      switch (result.outcome) {
+        case AccelDohIssueOutcome.issued:
+          _resetRetry();
+          await _clearBackoff();
+          await _saveToken(user.id, result);
+        case AccelDohIssueOutcome.rejected:
+          debugPrint('[DOH] 加速服务端拒绝了此账号，使用公共加速');
+          await _setBackoff(user, _BackoffReason.denied);
+        case AccelDohIssueOutcome.failed:
+          _scheduleRetry();
+      }
     } finally {
-      client.close(force: true);
+      _connecting = false;
+      notifyListeners();
     }
   }
 
-  /// 通知服务端作废令牌，尽力而为，失败不影响本地
-  Future<void> _revokeRemote(String token) async {
-    final baseUri = _baseUri;
-    if (baseUri == null) return;
-    final client = _createClient();
-    try {
-      final request = await client
-          .postUrl(baseUri.replace(path: '/v1/token/revoke'))
-          .timeout(_requestTimeout);
-      request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $token');
-      final response = await request.close().timeout(_requestTimeout);
-      await response.drain<void>().timeout(_requestTimeout);
-    } catch (e) {
-      debugPrint('[DOH] 作废加速令牌失败(忽略): $e');
-    } finally {
-      client.close(force: true);
-    }
-  }
-
-  /// 独立的 HttpClient：不走 App 的 Dio，不会带上 linux.do 的 cookie
-  HttpClient _createClient() {
-    final bootstrapIps = _bootstrapIps;
-    return HttpClient()
-      ..connectionTimeout = _connectTimeout
-      ..findProxy = ((_) => 'DIRECT')
-      ..connectionFactory = (uri, proxyHost, proxyPort) async =>
-          ConnectionTask.fromSocket(
-            _connectSecure(uri.host, uri.port, bootstrapIps),
-            () {},
-          );
-  }
-
-  /// 先按系统 DNS 连；解析不出或连不上时直连加速节点 IP（SNI 仍是加速域名）
-  static Future<Socket> _connectSecure(
-    String host,
-    int port,
-    List<String> bootstrapIps,
-  ) async {
-    final targets = <Object>[
-      host,
-      ...bootstrapIps
-          .map(InternetAddress.tryParse)
-          .whereType<InternetAddress>(),
-    ];
-    Object? lastError;
-    for (final target in targets) {
-      Socket? raw;
+  /// 没同意过的账号，过一会儿弹一次授权说明；现在弹不了就等下次检查
+  void _scheduleConsentPrompt() {
+    if (_consentPromptTimer != null || _consentPromptShowing) return;
+    _consentPromptTimer = Timer(consentPromptDelay, () async {
+      _consentPromptTimer = null;
+      final user = _user;
+      if (user == null ||
+          user.trustLevel < minTrustLevel ||
+          _token != null ||
+          _consentFor(user) != null) {
+        return;
+      }
+      _consentPromptShowing = true;
+      bool? answer;
       try {
-        raw = await Socket.connect(target, port, timeout: _connectTimeout);
-        return await SecureSocket.secure(
-          raw,
-          host: host,
-        ).timeout(_connectTimeout);
+        answer = await _flow.askConsent();
       } catch (e) {
-        raw?.destroy();
-        lastError = e;
+        debugPrint('[DOH] 弹出加速授权说明失败: $e');
+      } finally {
+        _consentPromptShowing = false;
       }
-    }
-    throw lastError ?? SocketException('无法连接 $host');
+      if (answer == null || _user?.id != user.id) return;
+      await _setConsent(user, answer);
+      if (answer) unawaited(_sync());
+    });
   }
 
-  Future<void> _save(_AccelDohToken value) async {
+  bool? _consentFor(User user) {
+    final consent = _consent;
+    if (consent == null || consent.userId != user.id) return null;
+    return consent.granted;
+  }
+
+  Future<void> _setConsent(User user, bool granted) async {
+    final consent = _AccelDohConsent(userId: user.id, granted: granted);
+    _consent = consent;
+    await _prefs?.setString(_consentKey, consent.encode());
+    notifyListeners();
+  }
+
+  Future<void> _setMember(bool value) async {
+    if (_member == value) return;
+    _member = value;
+    if (value) {
+      await _prefs?.setBool(_memberKey, true);
+    } else {
+      await _prefs?.remove(_memberKey);
+    }
+    notifyListeners();
+  }
+
+  /// 当前账号还在拒绝/不可用的冷却期内就返回那条记录
+  _AccelDohBackoff? _activeBackoff(User? user) {
+    final backoff = _backoff;
+    if (backoff == null || !DateTime.now().isBefore(backoff.until)) {
+      return null;
+    }
+    if (user != null && backoff.key != _backoffKeyOf(user)) return null;
+    return backoff;
+  }
+
+  Future<void> _setBackoff(User user, _BackoffReason reason) async {
+    final delay = reason == _BackoffReason.denied
+        ? _deniedRetryDelay
+        : _unavailableRetryDelay;
+    final backoff = _AccelDohBackoff(
+      key: _backoffKeyOf(user),
+      reason: reason,
+      until: DateTime.now().add(delay),
+    );
+    _backoff = backoff;
+    await _prefs?.setString(_backoffKey, backoff.encode());
+    _retryTimer?.cancel();
+    _retryTimer = Timer(delay, () => unawaited(_sync()));
+    notifyListeners();
+  }
+
+  Future<void> _clearBackoff() async {
+    if (_backoff == null) return;
+    _backoff = null;
+    await _prefs?.remove(_backoffKey);
+  }
+
+  /// 等级变了就重新判断，不沿用之前的拒绝记录
+  static String _backoffKeyOf(User user) => '${user.id}|${user.trustLevel}';
+
+  bool get _inRetryBackoff {
+    final next = _nextAttemptAt;
+    return next != null && DateTime.now().isBefore(next);
+  }
+
+  void _scheduleRetry() {
+    final delay = _retryDelays[_failures.clamp(0, _retryDelays.length - 1)];
+    _failures++;
+    _nextAttemptAt = DateTime.now().add(delay);
+    _retryTimer?.cancel();
+    _retryTimer = Timer(delay, () => unawaited(_sync()));
+  }
+
+  void _resetRetry() {
+    _failures = 0;
+    _nextAttemptAt = null;
+    _retryTimer?.cancel();
+  }
+
+  Future<void> _saveToken(int userId, AccelDohIssueResult result) async {
+    final issuedAt = DateTime.now();
+    final value = _AccelDohToken(
+      token: result.token!,
+      userId: userId,
+      issuedAt: issuedAt,
+      expiresAt: issuedAt.add(result.lifetime!),
+    );
     _stored = value;
-    await _prefs?.setString(_prefsKey, value.encode());
+    await _prefs?.setString(_tokenKey, value.encode());
     _publish();
   }
 
-  Future<void> _clear() async {
+  Future<void> _clearToken() async {
+    if (_stored == null && _token == null) return;
     _stored = null;
-    await _prefs?.remove(_prefsKey);
+    await _prefs?.remove(_tokenKey);
     _publish();
   }
 
@@ -403,13 +524,16 @@ class AccelDohAuthService {
   void _publish() {
     _expiryTimer?.cancel();
     final stored = _stored;
-    final now = DateTime.now();
-    final valid = stored != null && stored.expiresAt.isAfter(now);
-    tokenNotifier.value = valid ? stored.token : null;
+    final valid = stored != null && stored.isValid;
+    _token = valid ? stored.token : null;
     if (valid) {
-      _expiryTimer = Timer(stored.expiresAt.difference(now), _publish);
+      _expiryTimer = Timer(
+        stored.expiresAt.difference(DateTime.now()),
+        _publish,
+      );
     }
     _scheduleRefresh();
+    notifyListeners();
   }
 
   void _scheduleRefresh() {
@@ -422,31 +546,20 @@ class AccelDohAuthService {
   }
 }
 
-enum _RequestOutcome { issued, denied, failed }
-
-class _RequestResult {
-  const _RequestResult(this.outcome, [this.token]);
-
-  final _RequestOutcome outcome;
-  final _AccelDohToken? token;
-}
-
 class _AccelDohToken {
   const _AccelDohToken({
     required this.token,
     required this.userId,
-    required this.username,
-    required this.trustLevel,
     required this.issuedAt,
     required this.expiresAt,
   });
 
   final String token;
   final int userId;
-  final String username;
-  final int trustLevel;
   final DateTime issuedAt;
   final DateTime expiresAt;
+
+  bool get isValid => expiresAt.isAfter(DateTime.now());
 
   /// 有效期过半就续期
   DateTime get refreshAt => issuedAt.add(expiresAt.difference(issuedAt) ~/ 2);
@@ -456,41 +569,92 @@ class _AccelDohToken {
   String encode() => jsonEncode({
     'token': token,
     'user_id': userId,
-    'username': username,
-    'trust_level': trustLevel,
     'issued_at': issuedAt.millisecondsSinceEpoch,
     'expires_at': expiresAt.millisecondsSinceEpoch,
   });
 
   static _AccelDohToken? decode(String? raw) {
-    if (raw == null || raw.isEmpty) return null;
-    try {
-      final json = jsonDecode(raw);
-      if (json is! Map) return null;
-      final token = json['token'];
-      final userId = json['user_id'];
-      final username = json['username'];
-      final trustLevel = json['trust_level'];
-      final issuedAt = json['issued_at'];
-      final expiresAt = json['expires_at'];
-      if (token is! String ||
-          userId is! int ||
-          username is! String ||
-          trustLevel is! int ||
-          issuedAt is! int ||
-          expiresAt is! int) {
-        return null;
-      }
-      return _AccelDohToken(
-        token: token,
-        userId: userId,
-        username: username,
-        trustLevel: trustLevel,
-        issuedAt: DateTime.fromMillisecondsSinceEpoch(issuedAt),
-        expiresAt: DateTime.fromMillisecondsSinceEpoch(expiresAt),
-      );
-    } catch (_) {
+    final json = _decodeMap(raw);
+    if (json == null) return null;
+    final token = json['token'];
+    final userId = json['user_id'];
+    final issuedAt = json['issued_at'];
+    final expiresAt = json['expires_at'];
+    if (token is! String ||
+        userId is! int ||
+        issuedAt is! int ||
+        expiresAt is! int) {
       return null;
     }
+    return _AccelDohToken(
+      token: token,
+      userId: userId,
+      issuedAt: DateTime.fromMillisecondsSinceEpoch(issuedAt),
+      expiresAt: DateTime.fromMillisecondsSinceEpoch(expiresAt),
+    );
+  }
+}
+
+/// 用户对 Connect 授权的选择，按账号记
+class _AccelDohConsent {
+  const _AccelDohConsent({required this.userId, required this.granted});
+
+  final int userId;
+  final bool granted;
+
+  String encode() => jsonEncode({'user_id': userId, 'granted': granted});
+
+  static _AccelDohConsent? decode(String? raw) {
+    final json = _decodeMap(raw);
+    if (json == null) return null;
+    final userId = json['user_id'];
+    final granted = json['granted'];
+    if (userId is! int || granted is! bool) return null;
+    return _AccelDohConsent(userId: userId, granted: granted);
+  }
+}
+
+enum _BackoffReason { denied, unavailable }
+
+/// 被拒/用不了 Connect 的冷却记录，重启 App 后仍然有效
+class _AccelDohBackoff {
+  const _AccelDohBackoff({
+    required this.key,
+    required this.reason,
+    required this.until,
+  });
+
+  final String key;
+  final _BackoffReason reason;
+  final DateTime until;
+
+  String encode() => jsonEncode({
+    'key': key,
+    'reason': reason.name,
+    'until': until.millisecondsSinceEpoch,
+  });
+
+  static _AccelDohBackoff? decode(String? raw) {
+    final json = _decodeMap(raw);
+    if (json == null) return null;
+    final key = json['key'];
+    final reason = _BackoffReason.values.asNameMap()[json['reason']];
+    final until = json['until'];
+    if (key is! String || reason == null || until is! int) return null;
+    return _AccelDohBackoff(
+      key: key,
+      reason: reason,
+      until: DateTime.fromMillisecondsSinceEpoch(until),
+    );
+  }
+}
+
+Map<String, Object?>? _decodeMap(String? raw) {
+  if (raw == null || raw.isEmpty) return null;
+  try {
+    final json = jsonDecode(raw);
+    return json is Map<String, Object?> ? json : null;
+  } catch (_) {
+    return null;
   }
 }
