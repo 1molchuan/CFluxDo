@@ -335,7 +335,11 @@ class UpdateService {
 
   /// 解析更新信息
   UpdateInfo _parseUpdateInfo(Map<String, dynamic> data, String currentVersion) {
-    final remoteVersion = (data['tag_name'] as String).replaceAll('v', '');
+    // 只去掉前缀 v(上游 tag 习惯);不能 replaceAll,会吃掉 -dev 之类
+    // 预发布标识里的字母
+    final tagName = data['tag_name'] as String;
+    final remoteVersion =
+        tagName.startsWith('v') ? tagName.substring(1) : tagName;
     final releaseUrl = data['html_url'] as String;
     var releaseNotes = data['body'] as String? ?? '';
 
@@ -430,17 +434,38 @@ class UpdateService {
   /// - 正数: v1 > v2
   /// - 0: v1 == v2
   /// - 负数: v1 < v2
+  ///
+  /// 数字段不限段数(cfluxdo 曾用第 4 段表示基于同一上游版本的修订,
+  /// 0.2.28.1);`-` 之后是预发布标识(1.0.0-beta):数字段相同时无标识
+  /// 大于有标识,都有标识按字符串比较。非数字段按 0 处理,不抛异常
+  /// (1.0.0-beta 之前的版本在这里 int.parse 会炸,手动检查直接报错)。
   int _compareVersions(String v1, String v2) {
-    final parts1 = v1.split('.').map(int.parse).toList();
-    final parts2 = v2.split('.').map(int.parse).toList();
+    final (numbers1, pre1) = _splitVersion(v1);
+    final (numbers2, pre2) = _splitVersion(v2);
 
-    // 不限定段数:cfluxdo 用第 4 段表示基于同一上游版本的修订(0.2.28.1)
-    final length = parts1.length > parts2.length ? parts1.length : parts2.length;
+    final length =
+        numbers1.length > numbers2.length ? numbers1.length : numbers2.length;
     for (int i = 0; i < length; i++) {
-      final p1 = i < parts1.length ? parts1[i] : 0;
-      final p2 = i < parts2.length ? parts2[i] : 0;
+      final p1 = i < numbers1.length ? numbers1[i] : 0;
+      final p2 = i < numbers2.length ? numbers2[i] : 0;
       if (p1 != p2) return p1.compareTo(p2);
     }
-    return 0;
+    if (pre1 == null && pre2 == null) return 0;
+    if (pre1 == null) return 1;
+    if (pre2 == null) return -1;
+    return pre1.compareTo(pre2);
+  }
+
+  /// 拆成数字段与预发布标识;`+` 之后的构建号不参与比较。
+  (List<int>, String?) _splitVersion(String version) {
+    final plus = version.indexOf('+');
+    final core = plus == -1 ? version : version.substring(0, plus);
+    final dash = core.indexOf('-');
+    final numbers = (dash == -1 ? core : core.substring(0, dash))
+        .split('.')
+        .map((part) => int.tryParse(part) ?? 0)
+        .toList();
+    final pre = dash == -1 ? null : core.substring(dash + 1);
+    return (numbers, pre);
   }
 }

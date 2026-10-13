@@ -42,10 +42,10 @@ cd fluxdo
 dart run melos bootstrap                 # 初始化 workspace
 dart run tool/project_prep.dart app      # pub get、l10n 生成、代理证书同步，等价于 just sync
 dart tool/flutterw.dart build apk --release --target-platform android-arm64 \
-  --build-name 1.0.0 --build-number 2026101317
+  --build-name 1.0.0-beta --build-number 2026101320
 ```
 
-版本号约定：`--build-name` 是用户可见的版本号，`--build-number` 用「日期 + 两位序号」且只增不减。Git tag 与版本号一致，不带 `v` 前缀。
+版本号约定：`--build-name` 是用户可见的版本号，`--build-number` 用「日期 + 两位序号」且只增不减。Git tag 与版本号一致，不带 `v` 前缀。预发布版本带 `-beta` 一类后缀，GitHub Release 标为 Pre-release；App 内的更新检查只看正式版（Latest），不会推送预发布版本。
 
 子模块：
 
