@@ -8,30 +8,21 @@
             "name": "FluxDO",
             "request": "launch",
             "type": "dart",
-            "preLaunchTask": "Run Prepare (debug)",
-            "args": [
-                "--dart-define=cronetHttpNoPlay=true"
-            ]
+            "preLaunchTask": "Run Prepare (debug)"
         },
         {
             "name": "FluxDO (profile mode)",
             "request": "launch",
             "type": "dart",
             "flutterMode": "profile",
-            "preLaunchTask": "Run Prepare (profile)",
-            "args": [
-                "--dart-define=cronetHttpNoPlay=true"
-            ]
+            "preLaunchTask": "Run Prepare (profile)"
         },
         {
             "name": "FluxDO (release mode)",
             "request": "launch",
             "type": "dart",
             "flutterMode": "release",
-            "preLaunchTask": "Run Prepare (release)",
-            "args": [
-                "--dart-define=cronetHttpNoPlay=true"
-            ]
+            "preLaunchTask": "Run Prepare (release)"
         }
     ]
 }

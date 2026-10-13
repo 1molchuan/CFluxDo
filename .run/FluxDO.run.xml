@@ -1,6 +1,5 @@
 <component name="ProjectRunConfigurationManager">
   <configuration default="false" name="FluxDO" type="FlutterRunConfigurationType" factoryName="Flutter">
-    <option name="additionalArgs" value="--dart-define=cronetHttpNoPlay=true" />
     <option name="filePath" value="$PROJECT_DIR$/lib/main.dart" />
     <method v="2">
       <option name="RunConfigurationTask" enabled="true" run_configuration_name="Tooling -&gt; Run Prepare" run_configuration_type="DartCommandLineRunConfigurationType" />
