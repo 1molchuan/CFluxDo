@@ -1,174 +1,88 @@
-# FluxDO
+# cfluxdo
 
-> 一个真诚、友善、团结、专业的 [Linux.do](https://linux.do/) 第三方客户端
+> 面向国内网络环境的 [Linux.do](https://linux.do/) 第三方 Android 客户端，基于 [FluxDO](https://github.com/Lingyan000/fluxdo) 独立发行
 
-[![Telegram Channel](https://img.shields.io/badge/Telegram-Channel-26A5E4?logo=telegram&logoColor=white)](https://t.me/ldxfd)
-[![Telegram Group](https://img.shields.io/badge/Telegram-Group-26A5E4?logo=telegram&logoColor=white)](https://t.me/fluxdo_chat)
+[![GitHub Release](https://img.shields.io/github/v/release/1molchuan/fluxdo?style=for-the-badge&logo=github&label=GitHub%20Releases)](https://github.com/1molchuan/fluxdo/releases)
+[![Platform](https://img.shields.io/badge/platform-Android%20arm64-3DDC84?style=for-the-badge&logo=android&logoColor=white)](https://github.com/1molchuan/fluxdo/releases)
+[![License](https://img.shields.io/badge/license-GPL--3.0-blue?style=for-the-badge)](LICENSE)
 
-FluxDO 是为 [Linux.do](https://linux.do/) 社区打造的现代化移动和桌面客户端，基于 Flutter 开发，致力于为用户提供流畅、优雅的论坛浏览体验。
+cfluxdo 源自 FluxDO 0.2.28，已脱离 fork 关系独立维护。它保留了 FluxDO 的全部论坛功能与界面，重点解决国内网络下访问 linux.do 时遇到的 DNS 污染、频繁弹 Cloudflare 验证、无征兆掉登录等问题，并且只做 Android。
 
-## 下载
+## 下载安装
 
-<a href="https://github.com/lingyan000/fluxdo/releases"><img alt="Get it on GitHub" src="https://img.shields.io/github/v/release/lingyan000/fluxdo?style=for-the-badge&logo=github&label=GitHub%20Releases" /></a>
-<a href="altstore://source?url=https://lingyan000.github.io/fluxdo/source.json"><img alt="Add to AltStore" src="https://img.shields.io/badge/AltStore-Add_Source-0c6bff?style=for-the-badge&logo=apple" /></a>
+- 到 [Releases](https://github.com/1molchuan/fluxdo/releases) 下载 `cfluxdo-<版本>-arm64-v8a.apk`，旁边有对应的 `.sha256` 校验文件。
+- 只提供 arm64-v8a 一种架构，覆盖绝大多数 64 位 Android 手机。
+- 包名是 `com.github.molchuan.cfluxdo`，与官方 FluxDO 不同：两者可以并存，但不能互相覆盖安装，登录态和设置也互不相通。
+- 应用内「关于 → 检查更新」会从本仓库的 Releases 获取新版本。
 
-### AltStore 安装
+## 与 FluxDO 的差异
 
-1. 在 iOS 设备上安装 [AltStore](https://altstore.io/)
-2. 打开 AltStore，进入 **Browse** → **Sources** → 点击左上角 **+**
-3. 粘贴源地址：
-   ```
-   https://lingyan000.github.io/fluxdo/source.json
-   ```
-4. 在源中找到 FluxDO 并安装
+- **cfluxdo 加速**：内置自建的 DoH 加速线路并作为默认 DNS。linux.do 及其子域按加速服务端下发的域名表与签名节点直接连接，不再依赖国内公共 DNS。加速线路不可用时自动回退到其他 DoH 服务器和系统 DNS，不会因此打不开 App。
+- **弹盾与掉登录**：针对 Cloudflare 验证页、`cf_clearance` 与登录 Cookie `_t` 的轮换做了一系列修复，详见各版本的 Release 说明。
+- **仅 Android**：移除了 iOS、桌面、Web 的平台代码，以及 Cronet 网络引擎和 Firebase 崩溃上报。崩溃排查依靠应用内的日志导出。安装包比同版本上游小约 11 MB。
+- **上游补丁**：挑选上游尚未合并的 PR 一并接入，保留原作者署名。
 
-![FluxDO 预览](screenshots/preview.png)
+## 隐私
 
-## 特性
+- 发给 DoH 服务器的只有 DNS 查询本身，不附带 Cookie、令牌等任何账号信息。
+- 没有崩溃上报、统计或任何遥测 SDK。
+- 加速线路只负责 DNS 解析，论坛流量由手机直接连接 linux.do。
 
-### 核心功能
-- **跨平台支持**：Android、iOS、Windows、macOS、Linux
-- **Material Design 3**：现代化 UI 设计，支持动态取色
-- **深色模式**：自动适配系统主题
-- **完整论坛功能**：浏览话题、发帖回复、搜索、通知
-- **内容管理**：书签、浏览历史、关注列表
-- **徽章系统**：查看和展示社区徽章
-- **Markdown 编辑器**：支持富文本编辑和预览
-- **图片支持**：图片上传、查看、保存
-- **投票功能**：参与社区投票
+## 从源码构建
 
-### 技术特性
-- **安全连接**：集成 Rust 实现的 DOH (DNS over HTTPS) 代理
-- **性能优化**：图片缓存、懒加载、代码高亮
-- **实时通知**：MessageBus 实时消息推送
-- **智能渲染**：HTML 内容分块渲染，流畅滚动
+前置要求：
 
-## 快速开始
+- Flutter 3.44（Dart SDK ^3.10.4）、Android SDK、NDK 27.3
+- Rust 工具链、`cargo-ndk`、`aarch64-linux-android` target，用于编译 `core/doh_proxy`
+- `just`（可选，仅作为本地命令入口）
 
-### 前置要求
+```bash
+git clone --recurse-submodules https://github.com/1molchuan/fluxdo.git
+cd fluxdo
+dart run melos bootstrap                 # 初始化 workspace
+dart run tool/project_prep.dart app      # pub get、l10n 生成、代理证书同步，等价于 just sync
+dart tool/flutterw.dart build apk --release --target-platform android-arm64 \
+  --build-name 1.0.0 --build-number 2026101317
+```
 
-- Flutter SDK ^3.10.4
-- Rust 工具链（用于编译 DOH 代理）
-- Android Studio / Xcode（移动端开发）
+版本号约定：`--build-name` 是用户可见的版本号，`--build-number` 用「日期 + 两位序号」且只增不减。Git tag 与版本号一致，不带 `v` 前缀。
 
-### 安装步骤
+子模块：
 
-1. **克隆仓库**
-   ```bash
-   git clone https://github.com/Lingyan000/fluxdo.git
-   cd fluxdo
-   ```
+- `core/doh_proxy`：Rust 实现的 DoH 代理与本地网关，来自 [1molchuan/fluxdo_doh](https://github.com/1molchuan/fluxdo_doh) 的 `cfluxdo` 分支
+- `packages/fluxdo_render`：上游的渲染包
 
-2. **初始化工作区**
-   ```bash
-   melos bootstrap
-   ```
-   如果没有安装全局 `melos`，可改用 `dart run melos bootstrap`。
-   这一步只负责 workspace 依赖和链接初始化。
-
-3. **安装 `just`**
-   - Windows：`winget install --id Casey.Just --exact`
-   - Windows：`scoop install just`
-   - Windows：`choco install just`
-   - 通用：`cargo install just`
-
-4. **同步项目状态**
-   ```bash
-   just sync
-   ```
-   这一步会统一完成 `flutter pub get`、l10n 生成和代理证书资源同步。
-
-5. **运行应用**
-   ```bash
-   just run -- -d windows
-   just run -- -d macos
-   just run -- --dart-define=cronetHttpNoPlay=true
-   ```
-
-   如果你不想安装 `just`，也可以直接调用 Dart 入口：
-   ```bash
-   dart run tool/project_prep.dart app
-   dart run tool/flutterw.dart run -d windows
-   ```
-
-## 开发
-
-开发相关的工程化细节已经拆到独立文档，根 README 只保留最短路径。
-
-- [开发环境与日常命令](docs/development.md)
-- [发版与 iOS IPA](docs/release.md)
-- [Flatpak 打包说明](docs/flatpak.md)
+更多开发细节见 [docs/development.md](docs/development.md)。部分文档仍是上游多平台时期的内容，正在整理。
 
 ## 项目结构
 
 ```
 fluxdo/
+├── android/                 # Android 工程
 ├── lib/
-│   ├── config/              # 应用配置
-│   ├── models/              # 数据模型（话题、用户、通知等）
-│   ├── modules/             # 功能模块
-│   ├── pages/               # 页面组件
+│   ├── pages/               # 页面
 │   ├── providers/           # Riverpod 状态管理
-│   ├── services/            # 业务逻辑服务
-│   │   ├── network/         # 网络层（DOH、代理、适配器）
-│   │   └── ...
-│   ├── utils/               # 工具类
+│   ├── services/            # 业务逻辑
+│   │   └── network/         # 网络层：DoH、加速、本地网关、适配器
 │   ├── widgets/             # 可复用组件
 │   └── main.dart
 ├── core/
-│   └── doh_proxy/           # Rust DOH 代理实现
+│   └── doh_proxy/           # Rust DoH 代理（子模块）
 ├── packages/                # 本地依赖包
-├── scripts/
-│   └── ci/                  # CI / 打包链路内部脚本
 └── pubspec.yaml
 ```
 
-## 技术栈
-
-- **前端框架**：Flutter
-- **状态管理**：Riverpod
-- **网络请求**：Dio + Native Dio Adapter
-- **HTML 渲染**：flutter_widget_from_html
-- **代码高亮**：re_highlight + google_fonts (FiraCode)
-- **图片处理**：extended_image + cached_network_image
-- **本地存储**：shared_preferences + flutter_secure_storage
-- **网络代理**：Rust (DOH + ECH)
-
-## DOH 代理功能
-
-FluxDO 集成了基于 Rust 的 DOH (DNS over HTTPS) 代理，提供：
-
-- **DNS 加密查询**：防止 DNS 污染和劫持
-- **多服务器支持**：DNSPod、腾讯 DNS、阿里 DNS、Cloudflare、Canadian Shield、Google、Quad9
-- **ECH 支持**：加密 TLS 握手中的 SNI 字段（用户无感知）
-- **跨平台实现**：
-  - Android/iOS：FFI 调用
-  - Windows/macOS/Linux：独立进程
-
-详细文档请参考 [core/doh_proxy/README.md](https://github.com/Lingyan000/fluxdo_doh)
-
-## 关于 Linux.do
-
-[Linux.do](https://linux.do/) 是一个真诚、友善、团结、专业的技术社区，汇聚了众多热爱技术、乐于分享的开发者。FluxDO 作为第三方客户端，致力于为社区成员提供更好的移动和桌面端体验。
-
-**注意**：本项目为非官方客户端，与 Linux.do 官方无直接关联。
-
 ## 问题反馈
 
-如果您在使用过程中遇到问题或有建议，欢迎：
+- 提交 [Issue](https://github.com/1molchuan/fluxdo/issues)
 - 在 [Linux.do](https://linux.do/) 论坛发帖讨论
-- 提交 [Issue](https://github.com/Lingyan000/fluxdo/issues)
 
-## 开源协议
+反馈掉登录、弹盾类问题时，请附上「应用设置 → 日志」导出的日志，里面不含密码和 Cookie 原文。
+
+## 致谢与协议
+
+cfluxdo 基于 [Lingyan000/fluxdo](https://github.com/Lingyan000/fluxdo)，感谢 FluxDO 的作者与所有贡献者，也感谢 [Linux.do](https://linux.do/) 社区。
+
+本项目为非官方客户端，与 Linux.do 官方无直接关联。
 
 本项目基于 [GPL-3.0](LICENSE) 协议开源。
-
-## 致谢
-
-感谢 [Linux.do](https://linux.do/) 社区的所有成员，是你们的真诚、友善、团结、专业让这个社区充满活力。
-
-## 相关文档
-
-- [开发环境与日常命令](docs/development.md)
-- [Flatpak 打包说明](docs/flatpak.md)
-- [发版与 iOS IPA](docs/release.md)
