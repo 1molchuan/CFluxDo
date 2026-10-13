@@ -499,12 +499,50 @@ mixin _TopicsMixin on _DiscourseServiceBase {
 
   /// 获取话题 AI 摘要。
   ///
-  /// Discourse v2026.5.0 起，生成摘要改为 POST（aa3e44b32cf），传入
-  /// `stream=true` 后通过 MessageBus 频道推送增量结果。
+  /// 对齐 Discourse AI 当前 Web 行为：
+  /// - 普通打开先 GET，直接复用已有缓存摘要；
+  /// - 没有缓存（GET 404/405）时再 POST 触发生成；
+  /// - 重新生成时跳过缓存探测，POST `stream=true` +
+  ///   `skip_age_check=true`，并通过 MessageBus 接收增量结果。
+  ///
+  /// 旧版 Discourse 仅提供 GET 生成接口，因此 POST 404/405 时仍保留
+  /// GET + stream 参数的兼容回退。
   Stream<TopicSummary?> watchTopicSummary(
     int topicId, {
     bool skipAgeCheck = false,
   }) async* {
+    final endpoint = '/discourse-ai/summarization/t/$topicId';
+
+    // 官方前端在已有缓存时走 GET。这里即使调用方没有携带
+    // has_cached_summary，也先做一次轻量 GET：200 直接返回缓存，404/405
+    // 才进入生成路径，避免每次展开摘要都误触发 create/rate-limit。
+    if (!skipAgeCheck) {
+      try {
+        final response = await _dio.get(endpoint);
+        final responseData = response.data;
+        if (responseData is Map && responseData['ai_topic_summary'] is Map) {
+          yield TopicSummary.fromJson(
+            Map<String, dynamic>.from(
+              responseData['ai_topic_summary'] as Map,
+            ),
+          );
+          return;
+        }
+      } on DioException catch (e) {
+        final statusCode = e.response?.statusCode;
+        if (statusCode == 403) {
+          yield null;
+          return;
+        }
+        if (statusCode != 404 && statusCode != 405) {
+          debugPrint('[DiscourseService] load cached topic summary failed: $e');
+          rethrow;
+        }
+        // 404 = 当前没有缓存摘要；405 = 该版本不支持 GET show。
+        // 两者都继续走生成接口。
+      }
+    }
+
     final messageBus = MessageBusService();
     final channel = '/discourse-ai/summaries/topic/$topicId';
     final updates = StreamController<Map<String, dynamic>>();
@@ -516,6 +554,7 @@ mixin _TopicsMixin on _DiscourseServiceBase {
       }
     }
 
+    // 必须先订阅再 POST，避免服务端快速生成时丢掉首个流式分片。
     messageBus.subscribe(channel, onMessage);
 
     try {
@@ -527,7 +566,7 @@ mixin _TopicsMixin on _DiscourseServiceBase {
       late Response<dynamic> response;
       try {
         response = await _dio.post(
-          '/discourse-ai/summarization/t/$topicId',
+          endpoint,
           data: requestData,
           options: Options(contentType: Headers.formUrlEncodedContentType),
         );
@@ -537,9 +576,9 @@ mixin _TopicsMixin on _DiscourseServiceBase {
           rethrow;
         }
 
-        // 兼容 v2026.5.0 之前仅支持 GET 的 Discourse。
+        // 兼容尚未提供 POST create 路由的旧版 Discourse。
         response = await _dio.get(
-          '/discourse-ai/summarization/t/$topicId',
+          endpoint,
           queryParameters: requestData,
         );
       }

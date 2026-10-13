@@ -15,18 +15,36 @@ import '../../../../../l10n/s.dart';
 /// 话题 AI 摘要组件
 class TopicSummaryWidget extends ConsumerWidget {
   final int topicId;
+
   /// 跳转到当前话题的指定帖子
   final void Function(int postNumber)? onJumpToPost;
+
+  /// 由外层折叠组件统一选择普通加载/强制重生成 Provider。
+  ///
+  /// 为空时保持组件可独立使用，继续读取普通摘要 Provider。
+  final AsyncValue<TopicSummary?>? summaryAsyncOverride;
+
+  /// 过期摘要的重生成回调。
+  final VoidCallback? onRegenerate;
+
+  /// 当前请求失败后的重试回调。
+  final VoidCallback? onRetry;
 
   const TopicSummaryWidget({
     super.key,
     required this.topicId,
     this.onJumpToPost,
+    this.summaryAsyncOverride,
+    this.onRegenerate,
+    this.onRetry,
   });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final summaryAsync = ref.watch(topicSummaryProvider(topicId));
+    // 显式标注类型：override 可空，不标注时 `??` 会把 ref.watch 也推断成
+    // 可空的 AsyncValue，下面的 when 就编译不过。
+    final AsyncValue<TopicSummary?> summaryAsync =
+        summaryAsyncOverride ?? ref.watch(topicSummaryProvider(topicId));
     final theme = Theme.of(context);
 
     // 使用 AnimatedSize 和 AnimatedSwitcher 优化状态切换动画
@@ -57,7 +75,9 @@ class TopicSummaryWidget extends ConsumerWidget {
             child: InlineErrorView(
               error: error,
               message: S.current.topic_summaryLoadFailed,
-              onRetry: () => ref.invalidate(topicSummaryProvider(topicId)),
+              onRetry:
+                  onRetry ??
+                  () => ref.invalidate(topicSummaryProvider(topicId)),
             ),
           ),
           data: (summary) {
@@ -253,7 +273,7 @@ class TopicSummaryWidget extends ConsumerWidget {
                 // 刷新按钮
                 if (summary.canRegenerate && summary.outdated)
                   TextButton.icon(
-                    onPressed: () => _refreshSummary(ref),
+                    onPressed: onRegenerate ?? () => _refreshSummary(ref),
                     icon: const Icon(Symbols.refresh_rounded, size: 16),
                     label: Text(S.current.common_refresh),
                     style: TextButton.styleFrom(
@@ -269,7 +289,13 @@ class TopicSummaryWidget extends ConsumerWidget {
     );
   }
 
-  void _refreshSummary(WidgetRef ref) {
+  Future<void> _refreshSummary(WidgetRef ref) async {
+    // 独立使用时也必须真正触发 Discourse 的 regenerate 语义，而不是只
+    // invalidate 普通 Provider 后再次拿到旧缓存。折叠组件会传入
+    // onRegenerate，以便同时展示 MessageBus 流式结果。
+    await ref
+        .read(discourseServiceProvider)
+        .getTopicSummary(topicId, skipAgeCheck: true);
     ref.invalidate(topicSummaryProvider(topicId));
   }
 }
@@ -419,6 +445,8 @@ class _CollapsibleTopicSummaryState
     with SingleTickerProviderStateMixin {
   bool _isExpanded = false;
   bool _hasRequested = false; // 是否已触发过请求
+  bool _isRegenerating = false;
+  bool _finishRegenerationScheduled = false;
   late final AnimationController _controller;
   late final Animation<double> _animation;
 
@@ -450,15 +478,26 @@ class _CollapsibleTopicSummaryState
       return const SizedBox.shrink();
     }
 
-    // 只有在已请求后才 watch provider
-    final summaryAsync = _hasRequested
-        ? ref.watch(topicSummaryProvider(widget.topicId))
-        : null;
+    // 只有在已请求后才 watch provider。重生成使用独立 Provider，
+    // 明确带 skip_age_check=true，并让当前卡片直接消费同一条流式结果。
+    final summaryProvider = _isRegenerating
+        ? topicSummaryRegenerationProvider(widget.topicId)
+        : topicSummaryProvider(widget.topicId);
+    final summaryAsync = _hasRequested ? ref.watch(summaryProvider) : null;
+
+    if (_isRegenerating &&
+        summaryAsync?.hasValue == true &&
+        (summaryAsync?.value == null ||
+            summaryAsync?.value?.isStreaming == false)) {
+      _scheduleFinishRegeneration();
+    }
 
     final isLoading = summaryAsync?.isLoading == true ||
         summaryAsync?.value?.isStreaming == true;
     final isOutdated = summaryAsync?.value?.outdated == true;
-    final hasCachedSummary = topicDetail?.hasCachedSummary ?? false;
+    final hasCachedSummary =
+        (topicDetail?.hasCachedSummary ?? false) ||
+        (summaryAsync?.value?.summarizedText.isNotEmpty ?? false);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -547,12 +586,41 @@ class _CollapsibleTopicSummaryState
                   child: TopicSummaryWidget(
                     topicId: widget.topicId,
                     onJumpToPost: widget.onJumpToPost,
+                    summaryAsyncOverride: summaryAsync,
+                    onRegenerate: _startRegeneration,
+                    onRetry: () => ref.invalidate(summaryProvider),
                   ),
                 )
               : const SizedBox(width: double.infinity),
         ),
       ],
     );
+  }
+
+  void _startRegeneration() {
+    if (_isRegenerating) return;
+    // 清掉可能残留的 autoDispose 缓存后再订阅，保证每次点击都发起新的
+    // regenerate 请求。
+    ref.invalidate(topicSummaryRegenerationProvider(widget.topicId));
+    setState(() {
+      _isRegenerating = true;
+      _finishRegenerationScheduled = false;
+    });
+  }
+
+  void _scheduleFinishRegeneration() {
+    if (_finishRegenerationScheduled) return;
+    _finishRegenerationScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_isRegenerating) return;
+      // 服务端已经生成完成。丢弃普通 Provider 的旧缓存，切回后用 GET
+      // 读取刚写入的缓存摘要，后续 refresh/rebuild 不会重复强制生成。
+      ref.invalidate(topicSummaryProvider(widget.topicId));
+      setState(() {
+        _isRegenerating = false;
+        _finishRegenerationScheduled = false;
+      });
+    });
   }
 
   void _toggleExpand() {
