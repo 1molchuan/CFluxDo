@@ -71,7 +71,7 @@ class _PerfDiagnosticsPageState extends State<PerfDiagnosticsPage> {
   /// 分享或保存同一份文件（分享在 Linux 上不可用，入口已按平台隐藏）。
   Future<void> _deliver(XFile file, {required bool share}) async {
     if (share) {
-      await ShareUtils.shareFile(file, subject: 'FluxDO 性能诊断报告');
+      await ShareUtils.shareFile(file, subject: 'cfluxdo 性能诊断报告');
       return;
     }
     final outcome = await ShareUtils.saveFile(file);

@@ -897,7 +897,7 @@ class FrameJankMonitor {
         ? 0.0
         : sessionJanks / sessionFrames * 100;
     final semanticsEnabled = SemanticsBinding.instance.semanticsEnabled;
-    buf.writeln('FluxDO 性能诊断导出');
+    buf.writeln('cfluxdo 性能诊断导出');
     buf.writeln('应用版本: ${_buildFingerprint ?? '?'}');
     buf.writeln('导出时间: ${DateTime.now()}');
     if (elapsed != null) {

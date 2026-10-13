@@ -53,7 +53,7 @@ class UserApiKeyService {
   static const _keyPendingNonce = 'user_api_key_pending_nonce';
 
   static const String authRedirect = 'discourse://auth_redirect';
-  static const String applicationName = 'FluxDO';
+  static const String applicationName = 'cfluxdo';
   static const String scopes = 'one_time_password';
 
   /// 跨设备扫码 key 的 application_name。展示端靠它在
