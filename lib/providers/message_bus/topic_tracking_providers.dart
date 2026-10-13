@@ -4,7 +4,6 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../services/message_bus_service.dart';
 import '../../services/preloaded_data_service.dart';
-import '../../services/background/ios_background_fetch.dart';
 import '../discourse_providers.dart';
 import 'message_bus_service_provider.dart';
 
@@ -404,12 +403,6 @@ class MessageBusInitNotifier extends Notifier<void> {
       debugPrint('[MessageBusInit] 用户未登录，仅配置公开频道轮询域名');
       return;
     }
-
-    // 同步保存到 SharedPreferences 供 iOS 后台任务使用
-    saveBackgroundMessageBusConfig(
-      longPollingBaseUrl: preloaded.longPollingBaseUrl,
-      sharedSessionKey: preloaded.sharedSessionKey,
-    );
 
     final meta = metaAsync.value;
     if (meta == null) {

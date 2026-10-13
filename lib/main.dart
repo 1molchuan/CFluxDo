@@ -11,8 +11,6 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:native_animated_image/native_animated_image.dart'
     show NativeAnimatedImageProvider;
-import 'package:window_manager/window_manager.dart';
-import 'package:flutter_acrylic/flutter_acrylic.dart' as acrylic;
 import 'pages/topics_page.dart';
 import 'pages/data_management_page.dart';
 import 'providers/discourse_providers.dart';
@@ -76,7 +74,6 @@ import 'services/migration_service.dart';
 import 'services/navigation/app_route_observer.dart';
 import 'services/navigation/back_exit_guard.dart';
 import 'services/navigation/keyboard_focus_guard.dart';
-import 'services/window_state_service.dart';
 import 'services/webview_settings.dart';
 import 'services/windows_webview_environment_service.dart';
 import 'services/user_presence_service.dart';
@@ -100,9 +97,6 @@ import 'services/network/adapters/platform_adapter.dart';
 import 'providers/preferences_provider.dart';
 import 'providers/theme_provider.dart';
 import 'package:dynamic_color/dynamic_color.dart';
-import 'package:just_audio_media_kit/just_audio_media_kit.dart';
-import 'package:video_player_media_kit/video_player_media_kit.dart';
-import 'services/audio/just_audio_gst.dart';
 import 'widgets/preheat_gate.dart';
 import 'widgets/onboarding_gate.dart';
 import 'widgets/layout/adaptive_scaffold.dart';
@@ -163,26 +157,6 @@ Future<void> main() async {
   // Impeller 纹理上传并发,图密话题快滚 raster 尖峰的对症闸门,
   // 见 image_decode_gate.dart)。
   FluxdoWidgetsBinding.ensureInitialized();
-
-  // just_audio 不自带 Windows/Linux 实现,必须在创建 AudioPlayer 前注册
-  // 后端,否则会落回不存在的 MethodChannel 实现。两平台后端不同:
-  // - Windows: MediaKit(libmpv-2.dll 随 media_kit_libs_windows_video 打包,
-  //   与视频后端共用同一份 dll);
-  // - Linux: GStreamer 桥(见 just_audio_gst.dart 注释;音频不改走 mpv,
-  //   GStreamer 桥已稳定,换后端无收益)。
-  if (!kIsWeb && Platform.isLinux) {
-    JustAudioGst.registerWith();
-  } else {
-    JustAudioMediaKit.ensureInitialized(linux: false);
-  }
-
-  // video_player 官方无 Windows/Linux 后端,两平台桥接到 media_kit(libmpv),
-  // 必须先于任何 VideoPlayerController 创建。其余平台维持官方后端。
-  // Linux 运行期 dlopen libmpv.so.2 失败时,controller.initialize() 抛错,
-  // 走播放器的错误卡兜底(「用浏览器打开」),不影响其他功能。
-  if (!kIsWeb && (Platform.isWindows || Platform.isLinux)) {
-    VideoPlayerMediaKit.ensureInitialized(windows: true, linux: true);
-  }
 
   // Rust 动图管线的首帧(挂载瞬态的裸 RGBA 上传,不经 binding)注入
   // 同一个闸门,与标准路径统一错峰;播放中的后续帧不过闸。
@@ -278,11 +252,6 @@ Future<void> main() async {
     // 失败不阻塞启动，仅影响老 WebView 兼容性。
     WebViewSettings.preloadPolyfill(),
   ];
-  // 桌面平台初始化 window_manager 和 flutter_acrylic
-  if (Platform.isMacOS || Platform.isWindows || Platform.isLinux) {
-    futures.add(windowManager.ensureInitialized());
-    futures.add(acrylic.Window.initialize());
-  }
   final results = await Future.wait(futures);
   final prefs = results[0] as SharedPreferences;
   await AuthIssueNoticeService.instance.initialize(prefs);
@@ -300,54 +269,6 @@ Future<void> main() async {
   // Apple 平台依赖 native WKHTTPCookieStoreObserver 自动触发,
   // Android 由 WV onLoadStop 等 hook 主动调 notifyExternalChange()。
   CookieStoreObserver.instance.attach();
-
-  // 桌面平台：三端 runner 均隐藏启动（macOS 在 MainFlutterWindow 首次
-  // order 时隐藏，Windows/Linux 由 runner 创建隐藏窗口），正常冷启动都
-  // 走下方 else 分支：首帧光栅化后恢复窗口状态再显示，避免默认位置闪烁。
-  if (Platform.isMacOS || Platform.isWindows || Platform.isLinux) {
-    await acrylic.Window.setEffect(
-      effect: Platform.isMacOS
-          ? acrylic.WindowEffect.sidebar
-          : Platform.isWindows
-          ? acrylic.WindowEffect.mica
-          : acrylic.WindowEffect.disabled,
-    );
-    final isVisible = await windowManager.isVisible();
-    await windowManager.setPreventClose(true);
-    // 立即开始监听窗口事件，确保在 OnboardingPage/PreheatGate 等
-    // MainPage 尚未挂载的阶段也能正常响应窗口关闭
-    WindowStateService.instance.startListening();
-    if (isVisible) {
-      // 窗口已可见（热重启，或原生隐藏启动未生效的兜底路径）：
-      // macOS 走 restore() 读取并应用保存的窗口状态——attach() 只刷新
-      // 最大化缓存不读状态文件，曾导致 macOS 冷启动永远回到 XIB 默认
-      // 位置；Windows/Linux 可见说明状态已恢复过，attach 即可。
-      if (Platform.isMacOS) {
-        await WindowStateService.instance.restore(prefs);
-      } else {
-        await WindowStateService.instance.attach(prefs);
-      }
-      if (Platform.isLinux) {
-        await windowManager.focus();
-      }
-    } else {
-      // 冷启动：窗口保持隐藏，推迟到 Flutter 首帧光栅化后再恢复位置并显示，
-      // 避免 main() 后续初始化（迁移/网络栈/rhttp 等）期间露出空白窗口。
-      // Future.any 兜底：极端情况下首帧迟迟未到时也要把窗口显示出来。
-      unawaited(() async {
-        await Future.any([
-          WidgetsBinding.instance.waitUntilFirstFrameRasterized,
-          Future.delayed(const Duration(seconds: 3)),
-        ]);
-        await windowManager.waitUntilReadyToShow(null, () async {
-          await WindowStateService.instance.restore(prefs);
-          if (Platform.isLinux) {
-            await windowManager.focus();
-          }
-        });
-      }());
-    }
-  }
 
   // 数据迁移：在所有依赖 prefs 的网络相关服务启动之前执行
   await MigrationService.runAll(prefs);
@@ -819,27 +740,6 @@ class MainApp extends ConsumerWidget {
                 final iconBrightness = brightness == Brightness.light
                     ? Brightness.dark
                     : Brightness.light;
-                // 桌面平台：跟随应用主题明暗切换窗口效果
-                if (Platform.isMacOS ||
-                    Platform.isWindows ||
-                    Platform.isLinux) {
-                  final isDark = brightness == Brightness.dark;
-                  acrylic.Window.setEffect(
-                    // 透明模式下禁用系统窗口效果，避免桌面壁纸
-                    // 与用户背景图双重透出造成视觉混乱
-                    effect: resolvedTheme.transparent
-                        ? acrylic.WindowEffect.disabled
-                        : Platform.isMacOS
-                        ? acrylic.WindowEffect.sidebar
-                        : Platform.isWindows
-                        ? acrylic.WindowEffect.mica
-                        : acrylic.WindowEffect.disabled,
-                    dark: isDark,
-                  );
-                  if (Platform.isMacOS) {
-                    acrylic.Window.overrideMacOSBrightness(dark: isDark);
-                  }
-                }
                 Widget result = AnnotatedRegion<SystemUiOverlayStyle>(
                   value: SystemUiOverlayStyle(
                     statusBarColor: Colors.transparent,
@@ -995,9 +895,6 @@ class _MainPageState extends ConsumerState<MainPage>
     WidgetsBinding.instance.addObserver(this);
     UserPresenceService().setForeground(true, countAsActivity: true);
     HardwareKeyboard.instance.addHandler(_handlePresenceKeyEvent);
-    if (Platform.isMacOS || Platform.isWindows || Platform.isLinux) {
-      WindowStateService.instance.startListening();
-    }
 
     // 设置导航 context（用于 CF 验证弹窗）
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -1311,9 +1208,6 @@ class _MainPageState extends ConsumerState<MainPage>
 
   @override
   void dispose() {
-    if (Platform.isMacOS || Platform.isWindows || Platform.isLinux) {
-      WindowStateService.instance.stopListening();
-    }
     HardwareKeyboard.instance.removeHandler(_handlePresenceKeyEvent);
     WidgetsBinding.instance.removeObserver(this);
     _resumeDebounceTimer?.cancel();

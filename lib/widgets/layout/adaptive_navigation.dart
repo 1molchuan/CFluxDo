@@ -6,12 +6,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/physics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:m3e_ui/m3e_ui.dart';
-import 'package:window_manager/window_manager.dart';
 
 import '../../navigation/nav_action_bus.dart';
 import '../../providers/preferences_provider.dart';
 import '../../utils/blur_config.dart';
-import '../../utils/platform_utils.dart';
 
 /// 导航目标项配置
 class AdaptiveDestination {
@@ -66,7 +64,6 @@ class AdaptiveNavigationRail extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-    final isDesktop = PlatformUtils.isDesktop;
 
     final safeTopCount = topDestinationCount.clamp(0, destinations.length);
     final remainingAfterTop = destinations.length - safeTopCount;
@@ -166,15 +163,6 @@ class AdaptiveNavigationRail extends StatelessWidget {
         ),
       ),
     );
-
-    // 桌面平台：透明背景让窗口 acrylic 效果透出 + 拖动窗口
-    if (isDesktop) {
-      return GestureDetector(
-        behavior: HitTestBehavior.translucent,
-        onPanStart: (_) => windowManager.startDragging(),
-        child: rail,
-      );
-    }
 
     return rail;
   }
