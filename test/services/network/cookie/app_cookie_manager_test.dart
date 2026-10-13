@@ -188,4 +188,54 @@ void main() {
       }
     });
   });
+
+  group('AppCookieManager.classifySessionCookieDeletion', () {
+    SessionCookieDeletionPolicy classify({
+      String name = '_t',
+      int statusCode = 200,
+      bool loggedOutHeader = false,
+      bool notLoggedIn = false,
+    }) => AppCookieManager.classifySessionCookieDeletion(
+      name: name,
+      statusCode: statusCode,
+      hasLoggedOutHeader: loggedOutHeader,
+      hasNotLoggedInError: notLoggedIn,
+    );
+
+    test('4xx 或 not_logged_in 的删除指令照常执行', () {
+      expect(classify(statusCode: 403), SessionCookieDeletionPolicy.apply);
+      expect(
+        classify(statusCode: 403, loggedOutHeader: true),
+        SessionCookieDeletionPolicy.apply,
+      );
+      expect(
+        classify(statusCode: 200, notLoggedIn: true),
+        SessionCookieDeletionPolicy.apply,
+      );
+      expect(
+        classify(name: '_forum_session', statusCode: 404),
+        SessionCookieDeletionPolicy.apply,
+      );
+    });
+
+    test('2xx + discourse-logged-out 矛盾信号对两种会话 cookie 都拦下', () {
+      expect(
+        classify(loggedOutHeader: true),
+        SessionCookieDeletionPolicy.blockMixedSignal,
+      );
+      expect(
+        classify(name: '_forum_session', loggedOutHeader: true),
+        SessionCookieDeletionPolicy.blockMixedSignal,
+      );
+    });
+
+    test('2xx 无登出头删 _t 交 probe 判定，_forum_session 照常删', () {
+      expect(classify(), SessionCookieDeletionPolicy.deferToProbe);
+      expect(classify(statusCode: 302), SessionCookieDeletionPolicy.deferToProbe);
+      expect(
+        classify(name: '_forum_session'),
+        SessionCookieDeletionPolicy.apply,
+      );
+    });
+  });
 }

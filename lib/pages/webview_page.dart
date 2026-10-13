@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io' as io;
 
 import 'package:flutter/material.dart';
@@ -6,12 +7,14 @@ import 'package:flutter/services.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:m3e_ui/m3e_ui.dart';
+import '../constants.dart';
 import '../utils/frame_jank_monitor.dart';
 import '../utils/link_launcher.dart';
 import '../services/deep_link_service.dart';
 import '../services/toast_service.dart';
 import '../services/app_link_service.dart';
 import '../services/network/cookie/cookie_store_observer.dart';
+import '../services/network/cookie/session_token_lineage.dart';
 import '../services/network/cookie/webview_cookie_priming.dart';
 import '../services/webview_settings.dart';
 import '../services/windows_webview_environment_service.dart';
@@ -66,6 +69,10 @@ class _WebViewPageState extends ConsumerState<WebViewPage> {
   /// hybrid composition（Android）/HWND（Windows）实时回读造成卡顿。
   Uint8List? _webViewSnapshot;
 
+  /// 站内页面长时间停留时 XHR 会让 WebView 自己轮换 _t，而 jar 只在页面
+  /// 加载完成时跟一次。定期对账，避免两边分叉超过轮换窗口后 jar 的值被判死。
+  Timer? _sessionTokenReconcileTimer;
+  static const Duration _sessionTokenReconcileInterval = Duration(seconds: 60);
 
   @override
   void initState() {
@@ -75,13 +82,51 @@ class _WebViewPageState extends ConsumerState<WebViewPage> {
     // 可见 WebView(hybrid composition)在位期间会参与每帧合成,
     // 打点让诊断时间轴能对齐"WebView 页在前台"与掉帧段
     FrameJankMonitor.logEvent('WEBVIEW', 'WebViewPage mount');
+    _sessionTokenReconcileTimer = Timer.periodic(
+      _sessionTokenReconcileInterval,
+      (_) => _reconcileSessionToken('in_app_browser_tick'),
+    );
   }
 
   @override
   void dispose() {
     FrameJankMonitor.logEvent('WEBVIEW', 'WebViewPage dispose');
+    _sessionTokenReconcileTimer?.cancel();
+    _sessionTokenReconcileTimer = null;
+    // 关页前最后对一次账：页面里最后几次 XHR 的轮换结果要带回 jar
+    _reconcileSessionToken('in_app_browser_dispose');
     _controller?.dispose();
     super.dispose();
+  }
+
+  void _reconcileSessionToken(String reason) {
+    // 初始 url 或当前 url 之一在站内才有对账意义；reconcile 自己会按
+    // 站点域名再过滤一次，站外页面直接跳过。
+    final siteUrl = _siteUrlCandidate();
+    if (siteUrl == null) return;
+    // 站内页打开期间 WebView 的 _t 被服务端删掉（页内请求带了死值）时，
+    // 把 jar 里仍有效的值推过去，页面下一次请求就能恢复登录态。
+    unawaited(
+      SessionTokenLineage.instance
+          .reconcile(url: siteUrl, reason: reason, pushIfWebViewEmpty: true)
+          .catchError((Object e) {
+            debugPrint('[WebViewPage] _t 对账失败($reason): $e');
+            return SessionTokenReconcileOutcome.skipped;
+          }),
+    );
+  }
+
+  String? _siteUrlCandidate() {
+    final siteHost = Uri.parse(AppConstants.baseUrl).host.toLowerCase();
+    bool isSite(String url) {
+      final host = Uri.tryParse(url)?.host.toLowerCase();
+      if (host == null || host.isEmpty) return false;
+      return host == siteHost || host.endsWith('.$siteHost');
+    }
+
+    if (isSite(_currentUrl)) return _currentUrl;
+    if (isSite(widget.url)) return widget.url;
+    return null;
   }
 
   @override

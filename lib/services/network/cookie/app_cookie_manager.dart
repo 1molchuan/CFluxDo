@@ -11,6 +11,24 @@ import '../flux_request_spec.dart';
 import 'cookie_jar_service.dart';
 import 'raw_cookie_writer.dart';
 import 'session_cookie_sentinel.dart';
+import 'session_token_lineage.dart';
+
+/// 服务端下发会话 cookie 删除指令（value 为空 / del / 已过期）时的处理方式。
+enum SessionCookieDeletionPolicy {
+  /// 照常删除：4xx 响应，或响应体明确 `not_logged_in`。
+  apply,
+
+  /// 2xx/3xx + `discourse-logged-out` 的矛盾信号：拦下，交 probe 判定。
+  blockMixedSignal,
+
+  /// 2xx/3xx、没有登出头却删 `_t`：拦下不动 jar，当强信号交 probe 判定。
+  ///
+  /// Discourse 的 `refresh_session` 只在「带了 `_t` 却找不到用户」时删它，
+  /// 响应本身可以是任意业务端点的 200。以前这里直接删 jar、再把 WebView 的
+  /// `_t` 一并扫掉，没有任何 auth 信号——App 就无征兆地变成匿名，而 WebView
+  /// 里可能还活着的那枚候选也被清掉，恢复路径无从下手。
+  deferToProbe,
+}
 
 /// App-specific CookieManager.
 /// Avoids saving Set-Cookie into redirect target domains by default.
@@ -21,6 +39,30 @@ class AppCookieManager extends Interceptor {
   final CookieJar cookieJar;
 
   static const String skipCookieManagerExtraKey = 'skipCookieManager';
+
+  /// `_t` 的删除指令按 [SessionCookieDeletionPolicy.deferToProbe] 拦下时的
+  /// 回调（由 DiscourseService 注册，把它当强 auth 信号送去 probe）。
+  /// 参数是触发响应的请求与状态码。
+  static void Function(RequestOptions requestOptions, int? statusCode)?
+  sessionTokenDeletionObserver;
+
+  /// 判定会话 cookie 删除指令的处理方式。
+  @visibleForTesting
+  static SessionCookieDeletionPolicy classifySessionCookieDeletion({
+    required String name,
+    required int statusCode,
+    required bool hasLoggedOutHeader,
+    required bool hasNotLoggedInError,
+  }) {
+    if (statusCode >= 400 || hasNotLoggedInError) {
+      return SessionCookieDeletionPolicy.apply;
+    }
+    if (hasLoggedOutHeader) return SessionCookieDeletionPolicy.blockMixedSignal;
+    if (name == SessionTokenLineage.cookieName) {
+      return SessionCookieDeletionPolicy.deferToProbe;
+    }
+    return SessionCookieDeletionPolicy.apply;
+  }
 
   /// Whether to also save Set-Cookie to redirect target domains when
   /// followRedirects is false. Default false to avoid cross-domain pollution.
@@ -105,13 +147,12 @@ class AppCookieManager extends Interceptor {
     await service.enforceAuthCookiePolicy(reason: reason, names: authNames);
   }
 
-  Future<String?> _canonicalAuthSetCookieHeaderIfManaged(String name) async {
+  Future<CanonicalCookie?> _canonicalAuthCookieIfManaged(String name) async {
     if (!CookieJarService.hostOnlyCookieNames.contains(name)) return null;
     final service = CookieJarService();
     if (!service.isInitialized) return null;
     if (!identical(cookieJar, service.cookieJar)) return null;
-    final canonical = await service.getCanonicalCookie(name);
-    return canonical?.toSetCookieHeader();
+    return service.getCanonicalCookie(name);
   }
 
   /// Select cookies for a request.
@@ -556,10 +597,8 @@ class AppCookieManager extends Interceptor {
             cookie.value == 'del' || cookie.value.isEmpty || isExpired;
         final uri = response.requestOptions.uri;
 
-        // Mixed signal 保护：2xx/3xx + discourse-logged-out 但非 not_logged_in
-        // 时，拦截 session cookie 的删除指令。
-        // 这种矛盾信号（请求成功但 header 要求登出）不应直接删除 cookie，
-        // 由 _auth.dart 的 probe 机制决定是否真正登出。
+        // 2xx/3xx 下的会话 cookie 删除指令不直接执行，交 _auth.dart 的 probe
+        // 机制决定是否真正登出（口径见 SessionCookieDeletionPolicy）。
         if (isDeletion) {
           final statusCode = response.statusCode ?? 0;
           final hasLoggedOutHeader =
@@ -569,8 +608,14 @@ class AppCookieManager extends Interceptor {
           final hasNotLoggedInError =
               responseBody is Map &&
               responseBody['error_type'] == 'not_logged_in';
+          final policy = classifySessionCookieDeletion(
+            name: cookie.name,
+            statusCode: statusCode,
+            hasLoggedOutHeader: hasLoggedOutHeader,
+            hasNotLoggedInError: hasNotLoggedInError,
+          );
 
-          if (statusCode < 400 && hasLoggedOutHeader && !hasNotLoggedInError) {
+          if (policy == SessionCookieDeletionPolicy.blockMixedSignal) {
             debugPrint(
               '[CookieManager] ${cookie.name} DEL(blocked/mixed-signal) '
               'from ${response.requestOptions.method} ${uri.host}${uri.path} '
@@ -588,6 +633,48 @@ class AppCookieManager extends Interceptor {
               'url': uri.path,
               'fullUrl': uri.toString(),
             });
+            continue;
+          }
+
+          if (policy == SessionCookieDeletionPolicy.deferToProbe) {
+            final sentCookieHeader =
+                response.requestOptions.headers[HttpHeaders.cookieHeader]
+                    ?.toString() ??
+                '';
+            final sentHasT = RegExp(
+              r'(?:^|;\s*)_t=[^;]+',
+            ).hasMatch(sentCookieHeader);
+            debugPrint(
+              '[CookieManager] ${cookie.name} DEL(deferred-to-probe) '
+              'from ${response.requestOptions.method} ${uri.host}${uri.path} '
+              '(status=$statusCode, sentHasT=$sentHasT)',
+            );
+            LogWriter.instance.write({
+              'timestamp': DateTime.now().toIso8601String(),
+              'level': 'warning',
+              'type': 'cookie_change',
+              'event': 'token_cookie_delete_deferred_to_probe',
+              'message':
+                  '${cookie.name} 删除指令来自 $statusCode 响应且无登出头，不动 CookieJar，交 probe 判定',
+              'statusCode': statusCode,
+              'method': response.requestOptions.method,
+              'url': uri.path,
+              'fullUrl': uri.toString(),
+              'sentHasT': sentHasT,
+              'hasLoggedInHeader':
+                  response.requestOptions.headers['Discourse-Logged-In'] ==
+                  'true',
+              'pathB': response.requestOptions.extra[_viaExtraKey] ==
+                  _viaAdapter,
+            });
+            final observer = sessionTokenDeletionObserver;
+            if (observer != null) {
+              try {
+                observer(response.requestOptions, response.statusCode);
+              } catch (e) {
+                debugPrint('[CookieManager] _t 删除回调异常: $e');
+              }
+            }
             continue;
           }
         }
@@ -697,9 +784,21 @@ class AppCookieManager extends Interceptor {
         // 绝不从 Dio 侧回推它到 WebView(会丢 Partitioned 造非分区副本)。
         if (cookie.name == 'cf_clearance') continue;
         if (_intentForCookie(cookie) == SweepIntent.delete) continue;
+        final canonical = await _canonicalAuthCookieIfManaged(cookie.name);
         final rawSetCookie =
-            await _canonicalAuthSetCookieHeaderIfManaged(cookie.name) ??
-            filteredSetCookieHeaders[i];
+            canonical?.toSetCookieHeader() ?? filteredSetCookieHeaders[i];
+        if (CookieJarService.sessionCookieNames.contains(cookie.name)) {
+          // 会话 cookie 推送后读回校验（失败重试一次并记日志）：_t 推不进
+          // WebView 而无人知晓，就是两端分叉、最终掉登录的起点。
+          await SessionTokenLineage.instance.pushJarCookieToWebView(
+            url: resolvedUri.toString(),
+            name: cookie.name,
+            rawSetCookie: rawSetCookie,
+            expectedValue: canonical?.value ?? cookie.value,
+            reason: 'dio_response',
+          );
+          continue;
+        }
         await RawCookieWriter.instance.setRawCookie(
           resolvedUri.toString(),
           rawSetCookie,

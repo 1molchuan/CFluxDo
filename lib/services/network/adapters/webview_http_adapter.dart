@@ -12,6 +12,7 @@ import '../cookie/app_cookie_manager.dart';
 import '../cookie/boundary_sync_service.dart';
 import '../cookie/cookie_jar_service.dart';
 import '../cookie/session_cookie_sentinel.dart';
+import '../cookie/session_token_lineage.dart';
 import '../cookie/webview_cookie_priming.dart';
 import '../../webview_settings.dart';
 import '../../windows_webview_environment_service.dart';
@@ -477,6 +478,7 @@ document.close();
           excludeCookieNames: trustsWebViewSession
               ? null
               : CookieJarService.authCookieNames,
+          webViewSessionVerified: trustsWebViewSession,
         );
         cookieBackSyncWatch.stop();
         cookieBackSyncElapsed = cookieBackSyncWatch.elapsed;
@@ -1528,6 +1530,7 @@ document.close();
     bool force = false,
     int? requestGeneration,
     Set<String>? excludeCookieNames,
+    bool webViewSessionVerified = false,
   }) async {
     final controller = _controller;
     if (controller == null) return;
@@ -1551,12 +1554,12 @@ document.close();
       if (!force) return;
     }
 
-    final future = BoundarySyncService.instance.syncFromWebView(
-      currentUrl: currentUrl,
-      controller: controller,
-      cookieNames: CookieJarService.criticalCookieNames,
-      excludeCookieNames: excludeCookieNames,
+    final future = _runCriticalCookieBackSync(
+      currentUrl,
+      controller,
       requestGeneration: requestGeneration,
+      excludeCookieNames: excludeCookieNames,
+      webViewSessionVerified: webViewSessionVerified,
     );
 
     _activeCriticalCookieSync = future.whenComplete(() {
@@ -1565,6 +1568,41 @@ document.close();
     });
 
     await _activeCriticalCookieSync!;
+  }
+
+  Future<void> _runCriticalCookieBackSync(
+    String currentUrl,
+    InAppWebViewController controller, {
+    int? requestGeneration,
+    Set<String>? excludeCookieNames,
+    bool webViewSessionVerified = false,
+  }) async {
+    await BoundarySyncService.instance.syncFromWebView(
+      currentUrl: currentUrl,
+      controller: controller,
+      cookieNames: CookieJarService.criticalCookieNames,
+      excludeCookieNames: excludeCookieNames,
+      requestGeneration: requestGeneration,
+    );
+    if (!webViewSessionVerified) return;
+
+    // 服务端刚刚认可了 WebView 的登录态：WebView 里的 _t 若与 jar 不同，
+    // 由血缘对账决定是采纳（WebView 轮换到了新值，jar 落后）还是推回
+    // （jar 刚轮换、WebView 还拿着上一枚）。上面的普通回写对 _t 是非可信
+    // 写入，jar 里的值版本号更高时会被静默丢弃，这正是 jar 长期落后、
+    // 最终带着死 token 触发掉登录的根源。
+    try {
+      await SessionTokenLineage.instance.reconcile(
+        url: currentUrl,
+        reason: 'adapter_back_sync',
+        requestGeneration: requestGeneration,
+        webViewVerified: true,
+        // 别让一次正在探测的对账拖住适配器响应；下一个请求会再来。
+        lockTimeout: const Duration(seconds: 3),
+      );
+    } catch (e) {
+      debugPrint('[WebViewAdapter] _t 血缘对账失败: $e');
+    }
   }
 }
 

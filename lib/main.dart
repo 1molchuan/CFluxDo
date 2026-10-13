@@ -36,6 +36,7 @@ import 'services/network/system_proxy_service.dart';
 import 'services/network/cookie/cookie_devtools_extension.dart';
 import 'services/network/cookie/cookie_jar_service.dart';
 import 'services/network/cookie/cookie_store_observer.dart';
+import 'services/network/cookie/session_token_lineage.dart';
 import 'services/network/adapters/cronet_fallback_service.dart';
 import 'services/local_notification_service.dart';
 import 'services/data_management/cache_size_service.dart';
@@ -1324,12 +1325,23 @@ class _MainPageState extends ConsumerState<MainPage>
     // App 回到前台 — 停止后台保活 + 恢复所有频道 + 刷新通知。
     try {
       await BackgroundNotificationService().disable();
-      MessageBusService().exitBackgroundMode();
       if (Platform.isIOS) {
         // iOS 后台轮询任务在独立 isolate 写 cookie 文件，回前台时重载
         // 磁盘值，避免主 isolate 用旧缓存覆盖后台轮换的 token
         CookieJarService().reloadPersistedCookies();
       }
+      // 后台期间 WebView（站内页 / 适配器）可能自己轮换过 _t，而 jar 没跟上；
+      // 先对账再恢复 message-bus 等原生请求，避免用落后的值去碰服务端。
+      // WebView 没有 _t（后台被服务端删掉 / 存储被清）时直接把 jar 的推过去。
+      // 对账有上限时长，超时就按原流程继续。
+      try {
+        await SessionTokenLineage.instance
+            .reconcile(reason: 'app_resume', pushIfWebViewEmpty: true)
+            .timeout(const Duration(seconds: 5));
+      } catch (e) {
+        debugPrint('[MainPage] 回前台 _t 对账跳过: $e');
+      }
+      MessageBusService().exitBackgroundMode();
       if (!mounted) return;
       ref.invalidate(notificationListProvider);
       // 检查 DOH 代理是否在后台期间失效，若失效则自动重启

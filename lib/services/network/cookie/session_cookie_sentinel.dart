@@ -10,6 +10,7 @@ import 'cookie_full_info.dart';
 import 'cookie_jar_service.dart';
 import 'cookie_logger.dart';
 import 'raw_cookie_writer.dart';
+import 'session_token_lineage.dart';
 
 /// Cookie 变体清扫内核（"Sweep" 操作）。
 ///
@@ -171,6 +172,11 @@ class SessionCookieSentinel {
       try {
         final wvCookies = await _writer.getAllCookieInfos(url);
         namesToNuke.addAll(wvCookies.map((c) => c.name));
+        // 全量清空前把 WV 里的 _t 记进血缘候选环（可能比 jar 新）
+        _noteSessionTokenVariants(
+          SessionTokenLineage.cookieName,
+          wvCookies.where((c) => c.name == SessionTokenLineage.cookieName),
+        );
       } catch (e) {
         debugPrint('[Sentinel] nuclearReset wv lookup failed: $e');
       }
@@ -230,6 +236,14 @@ class SessionCookieSentinel {
         primingDuration: primingDuration,
         error: e,
       );
+    }
+  }
+
+  void _noteSessionTokenVariants(String name, Iterable<CookieFullInfo> variants) {
+    if (name != SessionTokenLineage.cookieName) return;
+    for (final variant in variants) {
+      if (variant.value.isEmpty) continue;
+      SessionTokenLineage.instance.noteWebViewCandidate(variant.value);
     }
   }
 
@@ -396,6 +410,17 @@ class SessionCookieSentinel {
         variantsAfter: variantsBefore,
         elapsedMs: stopwatch.elapsedMilliseconds,
       );
+      // 单变体 ≠ 与 jar 一致：WV 里唯一那枚 _t 可能是 WebView 自己轮换到
+      // 的新值，也可能是 jar 已经换掉的旧值。交给血缘对账判断方向；
+      // 不在 per-name 锁内等它（对账推回时还要拿这把锁做 delete sweep）。
+      if (name == SessionTokenLineage.cookieName) {
+        unawaited(
+          SessionTokenLineage.instance.reconcile(
+            url: url,
+            reason: 'sentinel_noop',
+          ),
+        );
+      }
       return result;
     }
 
@@ -409,6 +434,9 @@ class SessionCookieSentinel {
     final variants = allInfos
         .where((c) => c.name == name)
         .toList(growable: false);
+    // 即将被清掉的 _t 变体先记进血缘候选环：输掉的那枚可能恰恰是
+    // WebView 从服务端拿到的最新值，登出恢复路径还能拿它去探测。
+    _noteSessionTokenVariants(name, variants);
     final winnerResult = await _pickWinner(name, variants);
 
     // CHECK 3: generation (在副作用前)

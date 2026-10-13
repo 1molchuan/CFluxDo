@@ -11,6 +11,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../constants.dart';
 import 'network/cookie/boundary_sync_service.dart';
 import 'network/cookie/cookie_jar_service.dart';
+import 'network/cookie/session_token_lineage.dart';
 import 'local_notification_service.dart'; // 用于获取全局 navigatorKey
 import 'cf_challenge_logger.dart';
 import 'cf_clearance_refresh_service.dart';
@@ -703,6 +704,23 @@ class CfChallengeService {
     // 必须确保 WebView 中也没有旧的 cf_clearance，否则 CF 直接放行不显示盾。
     await cookieJarService.deleteCookie('cf_clearance');
     await cookieJarService.deleteWebViewCookie('cf_clearance');
+
+    // 验证 WebView 与 App 共用 CookieManager。过盾后它会带着 WebView 里的
+    // _t 去加载站内页：若 WebView 没有 _t（从未重灌）就先把 jar 的推过去；
+    // 若与 jar 不一致，只按血缘判断方向，不向服务端探测——探测请求此刻
+    // 自己也会被 CF 拦下。无论结果如何都不阻塞验证流程。
+    try {
+      await SessionTokenLineage.instance
+          .reconcile(
+            reason: 'cf_challenge_prepare',
+            allowProbe: false,
+            pushIfWebViewEmpty: true,
+            lockTimeout: const Duration(seconds: 3),
+          )
+          .timeout(const Duration(seconds: 5));
+    } catch (e) {
+      debugPrint('[CfChallenge] 过盾前 _t 对账跳过: $e');
+    }
     if (!overlayState.mounted) {
       debugPrint('[CfChallenge] Overlay no longer mounted');
       CfChallengeLogger.log('[VERIFY] Overlay not mounted');
@@ -1099,6 +1117,18 @@ class _CfChallengePageState extends State<CfChallengePage> {
       acceptValues: freshClearance != null && freshClearance.isNotEmpty
           ? {'cf_clearance': freshClearance}
           : null,
+    );
+    // 过盾后验证 WebView 会加载站内页，Discourse 可能借此轮换了 _t；
+    // 以前这里只同步 cf_clearance，WebView 里的新 _t 被丢下，jar 继续用旧值。
+    // 现在交给血缘对账（必要时探测服务端）。不 await：对账可能正等着
+    // 另一次对账的探测，而那个探测恰恰在等这次验证结束。
+    unawaited(
+      SessionTokenLineage.instance
+          .reconcile(url: widget.verifyUrl, reason: 'cf_challenge_passed')
+          .catchError((Object e) {
+            debugPrint('[CfChallenge] 过盾后 _t 对账失败: $e');
+            return SessionTokenReconcileOutcome.skipped;
+          }),
     );
   }
 
