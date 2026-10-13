@@ -99,7 +99,13 @@ android {
         }
     }
 
-    // 显式根据构建目标过滤 ABI，防止 Cronet 等原生库引入不需要的架构
+    // 只保留 App 实际使用的语言资源:App 文案走 slang,不受影响;
+    // 这里裁的是 androidx / ML Kit 等库自带的几十种语言 resources。
+    androidResources {
+        localeFilters += listOf("en", "zh", "zh-rCN", "zh-rTW", "zh-rHK")
+    }
+
+    // 显式根据构建目标过滤 ABI，防止第三方原生库引入不需要的架构
     val targetPlatform = project.findProperty("target-platform") as? String
     println("Target Platform: $targetPlatform")
     if (targetPlatform != null) {
@@ -118,7 +124,7 @@ android {
                 }
             }
             
-            // 强制排除非目标架构的 so 文件 (针对 Cronet 等不服从 abiFilters 的库)
+            // 强制排除非目标架构的 so 文件 (针对不服从 abiFilters 的预编译库)
             packaging {
                 jniLibs {
                     val allAbis = listOf("armeabi-v7a", "arm64-v8a", "x86_64", "x86")
@@ -139,6 +145,21 @@ kotlin {
 
 flutter {
     source = "../.."
+}
+
+// Flutter 插件会把 pub 包里 web 专用的 JS / wasm 资产一并打进 APK(约 4 MB),
+// Android 上没有任何代码会加载它们。flutter_assets 是在 mergeAssets 之后才由
+// copyFlutterAssets<Variant> 拷进输出目录的,AGP 的 ignoreAssetsPattern 管不到,
+// 必须直接挂在这个 Copy 任务上。AssetManifest 仍会列出这些路径,无害。
+tasks.matching { it.name.startsWith("copyFlutterAssets") }.configureEach {
+    (this as? Copy)?.exclude(
+        "**/packages/flutter_avif_web/**",          // avif wasm 解码器
+        "**/packages/pro_image_editor/lib/web/**",  // web worker + sourcemap
+        "**/packages/media_kit/assets/web/**",      // hls.js
+        "**/packages/flutter_inappwebview_web/**",
+        "**/packages/wakelock_plus/**",             // no_sleep.js
+        "**/packages/fluttertoast/**",              // toastify.js / css
+    )
 }
 
 dependencies {

@@ -84,6 +84,8 @@ subprojects {
         // 5. quickjs_engine 0.1.1 的 CMake 漏链 NDK liblog,bridge 源码却用
         //    __android_log_print → arm64 release 链接 undefined symbol。
         //    经 gradle 给 CMake 注入链接参数补 -llog,不改 pub 缓存内容。
+        //    同时补 16 KB 页对齐:它是 APK 里唯一仍按 4 KB 对齐的 so,
+        //    Google Play 2025-11 起硬性要求 16 KB 兼容。
         if (project.name == "quickjs_engine") {
             extensions.findByName("android")?.let { androidExt ->
                 try {
@@ -100,8 +102,11 @@ subprojects {
                     val arguments = cmake.javaClass
                         .getMethod("getArguments")
                         .invoke(cmake) as MutableList<String>
-                    arguments.add("-DCMAKE_SHARED_LINKER_FLAGS=-llog")
-                    logger.lifecycle("Patched quickjs_engine: link NDK liblog")
+                    arguments.add(
+                        "-DCMAKE_SHARED_LINKER_FLAGS=-llog -Wl,-z,max-page-size=16384"
+                    )
+                    arguments.add("-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON")
+                    logger.lifecycle("Patched quickjs_engine: link NDK liblog + 16KB page align")
                 } catch (e: Exception) {
                     logger.warn("quickjs_engine liblog patch failed: $e")
                 }
