@@ -6,15 +6,6 @@ version: 0.2.28+2026090421
 environment:
   sdk: ^3.10.4
 
-# sqlite3(经 sqflite_common_ffi 引入)的 build hook 默认在构建期从 GitHub
-# 下载预编译库,Flatpak 离线沙箱内必然失败;指向 vendored amalgamation
-# 改为源码编译,五端统一版本与编译选项。详见 third_party/sqlite3/README.md。
-hooks:
-  user_defines:
-    sqlite3:
-      source: source
-      path: third_party/sqlite3/sqlite3.c
-
 workspace:
   - packages/ai_model_manager
   - packages/app_icons
@@ -205,12 +196,6 @@ dependency_overrides:
   # super_clipboard 0.9.1 要求 device_info_plus <12.0.0，
   # 但实际 12.x 接口兼容，强制使用项目版本
   device_info_plus: 12.3.0
-  flutter_inappwebview_linux:
-    path: packages/flutter_inappwebview_linux
-  # Windows 插件析构存在悬垂 this 回调 UAF(CF 验证 WebView 销毁时闪退),
-  # vendored 版本带 aliveGuard 修复
-  flutter_inappwebview_windows:
-    path: packages/flutter_inappwebview_windows
   # 锁定 flutter_rust_bridge 版本，与 rhttp 插件的 codegen 版本保持一致。
   # rhttp_plus 已同步 upstream 0.18.0，生成代码基于 2.12.0。
   flutter_rust_bridge: 2.12.0
@@ -225,12 +210,6 @@ melos:
   useRootAsPackage: true
 
 flutter:
-  # 关闭 SwiftPM：Flutter 3.44 生成的 FlutterGeneratedPluginSwiftPackage 把
-  # macOS deployment target 写死 10.15，未读 Runner 的 11.0，导致 gal 等要求
-  # macOS 11.0 的插件 SPM 构建失败。CocoaPods 链路无此 bug。
-  # 待 Flutter 上游修复后移除（CocoaPods registry 2026-12-02 起转只读）。
-  config:
-    enable-swift-package-manager: false
   uses-material-design: true
   shaders:
     - shaders/progressive_top_blur.frag

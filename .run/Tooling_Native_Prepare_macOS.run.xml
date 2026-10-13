@@ -1,7 +1,0 @@
-<component name="ProjectRunConfigurationManager">
-  <configuration default="false" name="Tooling -&gt; Native Prepare (macOS)" type="DartCommandLineRunConfigurationType" factoryName="Dart Command Line Application">
-    <option name="filePath" value="$PROJECT_DIR$/tool/project_tasks.dart" />
-    <option name="arguments" value="native:prepare macos --debug" />
-    <method v="2" />
-  </configuration>
-</component>
