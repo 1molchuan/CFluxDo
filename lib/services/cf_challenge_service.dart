@@ -1625,13 +1625,41 @@ class _CfChallengePageState extends State<CfChallengePage> {
 
   /// 轮询检测 cf_clearance 变化（兜底 JS 回调被重定向吞掉的场景）
   bool _polling = false;
+
+  /// 轮询首次见到的新值及其出现时间：同一值稳定满 [_pollSettleGrace] 才收口
+  String? _pollPendingClearance;
+  DateTime? _pollPendingSince;
+
+  /// 新值出现后的定稿等待。挑战脚本拿到放行响应后还要跳转/补最后一步,这时
+  /// 立刻关掉 WebView 会拿到一枚对 Dio 无效的半成品 clearance(2026-10-13
+  /// 实测:放行响应 0.6 秒后轮询抢先收口、没有 beforeunload,重试仍 403)。
+  /// 正常流程里 JS 导航回调会先于轮询收口,这段等待只影响兜底路径。
+  static const _pollSettleGrace = Duration(milliseconds: 1500);
+
   Future<void> _pollCfClearance() async {
     if (_hasPopped || _finishingFromVerifyResponse || _polling) return;
     _polling = true;
     try {
       final cookieValue = await _readCookieValue('cf_clearance');
       if (_hasPopped || _finishingFromVerifyResponse) return;
-      if (!_isFreshClearance(cookieValue)) return;
+      if (!_isFreshClearance(cookieValue)) {
+        _pollPendingClearance = null;
+        _pollPendingSince = null;
+        return;
+      }
+
+      final now = DateTime.now();
+      if (_pollPendingClearance != cookieValue) {
+        // 首次见到(或中途换了值):记下来,等下一拍确认它没再变
+        _pollPendingClearance = cookieValue;
+        _pollPendingSince = now;
+        CfChallengeLogger.log(
+          '[VERIFY] Polling saw new cf_clearance (${cookieValue!.length} chars), '
+          'waiting for it to settle',
+        );
+        return;
+      }
+      if (now.difference(_pollPendingSince!) < _pollSettleGrace) return;
 
       debugPrint(
         '[CfChallenge] ✓ 轮询检测到新 cf_clearance (${cookieValue!.length} chars)',

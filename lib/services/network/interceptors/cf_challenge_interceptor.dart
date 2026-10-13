@@ -405,7 +405,7 @@ class CfChallengeInterceptor extends Interceptor {
       // 再转前台展示验证。
       // (Windows 曾因插件析构竞态崩溃 0xc0000005 禁用过静默后台验证;
       // vendored 插件的 aliveGuard/TextureBridge 修复落地后恢复。)
-      final result = isSilent
+      var result = isSilent
           ? await cfService.showManualVerify(null, false)
           : await cfService.showVerifySilentFirst();
 
@@ -414,9 +414,15 @@ class CfChallengeInterceptor extends Interceptor {
       // N 次失败(实测:启动时五个首屏请求同时撞盾,cookie 同步慢一拍,
       // 计数瞬间打满阈值 → 进冷却 + 弹切兼容询问,而 9 秒后一切自愈,
       // 用户全程无感却被弹窗打断)。
-      final verifyRound = cfService.verifyRound;
+      var verifyRound = cfService.verifyRound;
 
-      if (result == true) {
+      // 验证「成功」但铸出的 clearance 重试仍被撞时,用户可见请求再给一轮验证
+      // 机会(只一轮)。实测(2026-10-13,元宇宙「我的服务」开启失败)这类
+      // clearance 多是挑战流程被提前收口的半成品,下一轮验证就能铸出有效值;
+      // 以前这里直接熔断 60s 冷却,用户连点几次全是「获取授权链接失败」。
+      var reverified = false;
+
+      while (result == true) {
         final syncOk = await _syncCookiesOnce();
         if (!syncOk) {
           cfService.startCooldown(round: verifyRound);
@@ -473,6 +479,30 @@ class CfChallengeInterceptor extends Interceptor {
           final retryStillBlockedByCf =
               e is DioException &&
               CfChallengeService.isCfChallengeError(e.response);
+
+          if (retryStillBlockedByCf &&
+              !isSilent &&
+              !reverified &&
+              !cfService.isInCooldown) {
+            reverified = true;
+            // 刚铸出的值已确认对 Dio 无效：登记为已撞,放开换届,下一轮验证
+            // 铸出的新值才能过 sync 闸门进 jar。
+            CfClearanceAuthority.instance.noteIncumbentChallenged(
+              CfClearanceAuthority.extractFromCookieHeader(
+                retryOptions.headers['Cookie']?.toString() ??
+                    retryOptions.headers['cookie']?.toString(),
+              ),
+            );
+            CfChallengeLogger.log(
+              '[INTERCEPTOR] Verified clearance rejected on retry '
+              '(${e.response?.statusCode}), '
+              're-verifying once: $requestMethod $requestUrl',
+              level: 'warning',
+            );
+            result = await cfService.showVerifySilentFirst();
+            verifyRound = cfService.verifyRound;
+            continue;
+          }
 
           // 验证拿到新 clearance 后，原生链路仍被 CF 拒绝，说明问题不只是
           // Cookie，而是当前原生网络身份未被信任。仅对用户可见请求询问一次，
