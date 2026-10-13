@@ -41,8 +41,6 @@ class BoundarySyncService {
     bool allowLowConfidenceSessionCookies = false,
   }) async {
     final url = currentUrl ?? AppConstants.baseUrl;
-    final uri = Uri.parse(url);
-    final host = uri.host;
 
     if (io.Platform.isWindows && controller != null) {
       return _jar.readCookieValueFromController(
@@ -52,6 +50,44 @@ class BoundarySyncService {
       );
     }
 
+    final selected = await _selectCookieFromWebView(
+      url: url,
+      name: name,
+      allowLowConfidenceSessionCookies: allowLowConfidenceSessionCookies,
+    );
+    return selected?.value?.toString();
+  }
+
+  /// 读取 WebView 里某枚 cookie 的过期时间，不写 jar。
+  ///
+  /// 给了 [expectedValue] 时只看值相同的那枚（采纳 WebView 的 `_t` 时要带上
+  /// 它自己的过期时间，不能误拿别的变体的）。会话 cookie（无过期时间）、
+  /// 找不到匹配项、Windows 控制器路径都返回 null，由调用方兜底。
+  Future<DateTime?> readCookieExpiresFromWebView({
+    String? currentUrl,
+    required String name,
+    String? expectedValue,
+    bool allowLowConfidenceSessionCookies = false,
+  }) async {
+    final selected = await _selectCookieFromWebView(
+      url: currentUrl ?? AppConstants.baseUrl,
+      name: name,
+      allowLowConfidenceSessionCookies: allowLowConfidenceSessionCookies,
+      expectedValue: expectedValue,
+    );
+    final expiresMs = selected?.expiresDate;
+    if (expiresMs == null) return null;
+    return DateTime.fromMillisecondsSinceEpoch(expiresMs);
+  }
+
+  /// 从 WebView 读出 [name] 的最佳一枚（会话 cookie 按 host-only 优先规则选）。
+  Future<Cookie?> _selectCookieFromWebView({
+    required String url,
+    required String name,
+    required bool allowLowConfidenceSessionCookies,
+    String? expectedValue,
+  }) async {
+    final host = Uri.parse(url).host;
     final webViewCookies = await _strategy.readCookiesFromWebView(
       _jar.webViewCookieManager,
       url,
@@ -60,6 +96,7 @@ class BoundarySyncService {
     for (final cookie in webViewCookies) {
       final value = cookie.value?.toString() ?? '';
       if (cookie.name != name || value.isEmpty) continue;
+      if (expectedValue != null && value != expectedValue) continue;
       if (CookieJarService.sessionCookieNames.contains(cookie.name) &&
           _isLowConfidenceWebViewCookie(cookie) &&
           !allowLowConfidenceSessionCookies) {
@@ -69,10 +106,9 @@ class BoundarySyncService {
     }
     if (matches.isEmpty) return null;
 
-    final selected = CookieJarService.sessionCookieNames.contains(name)
+    return CookieJarService.sessionCookieNames.contains(name)
         ? _selectBestSessionCookie(matches, host)
         : matches.first;
-    return selected?.value?.toString();
   }
 
   /// 读取 WebView 当前持有的全部 cf_clearance 候选值（去重，不写 jar）。
@@ -346,6 +382,12 @@ class BoundarySyncService {
 
         if (wc.expiresDate != null) {
           cookie.expires = DateTime.fromMillisecondsSinceEpoch(wc.expiresDate!);
+        } else if (trusted && wc.name == '_t') {
+          // 服务端发的 _t 一定带 Expires；WebView 里没过期时间的 _t 只可能是
+          // 我们自己从内存态 jar 推过去的。可信写回时补上过期时间，否则它在
+          // jar 里仍是会话 cookie、不落盘，冷启动又会丢。只对可信写入做，
+          // 泛读路径不能靠补一个更晚的过期时间盖过 jar 里的权威值。
+          cookie.expires = await _jar.resolveSessionTokenExpiryFor(null);
         }
 
         if (isSessionCookie &&

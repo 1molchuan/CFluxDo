@@ -401,12 +401,20 @@ class SessionTokenLineage {
     }
 
     if (adoptWebView) {
-      await _jar.setCookie(
-        cookieName,
-        webViewValue,
-        httpOnly: true,
-        trusted: true,
-      );
+      // 带上 WebView 里这枚值自己的过期时间。jar 只落盘带过期时间的 cookie，
+      // 丢了它，采纳的值只活在内存里，下次冷启动 jar 为空就直接判未登录。
+      DateTime? webViewExpires;
+      try {
+        webViewExpires = await _boundary.readCookieExpiresFromWebView(
+          currentUrl: AppConstants.baseUrl,
+          name: cookieName,
+          expectedValue: webViewValue,
+          allowLowConfidenceSessionCookies: true,
+        );
+      } catch (e) {
+        debugPrint('[TokenLineage] 读取 WebView _t 过期时间失败($reason): $e');
+      }
+      await _jar.setSessionTokenTrusted(webViewValue, expires: webViewExpires);
       final afterJar = await _jar.getTToken();
       final ok = afterJar == webViewValue;
       if (ok) {

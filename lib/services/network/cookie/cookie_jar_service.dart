@@ -616,6 +616,55 @@ class CookieJarService {
   /// 获取 _t token
   Future<String?> getTToken() => getCookieValue('_t');
 
+  /// 采纳 / 恢复 `_t` 时拿不到服务端给的过期时间，按 Discourse 默认
+  /// `maximum_session_age`（60 天）兜底。
+  ///
+  /// jar 只把带过期时间的 cookie 落盘，会话 cookie 只留在内存；而 WebView
+  /// 会把会话 cookie 跨重启保留。采纳 WebView 的 `_t` 时若丢了过期时间，
+  /// 这枚值就只活在内存里：下次冷启动 jar 为空、WebView 却还有值，
+  /// 登录态检查直接判未登录——刚修好的会话一重启又掉。
+  static const Duration sessionTokenFallbackLifetime = Duration(days: 60);
+
+  /// 为可信写入的 `_t` 决定过期时间：候选值自带的 → jar 里原值的 →
+  /// 兜底 [sessionTokenFallbackLifetime]。只接受仍在未来的时间，已过期的
+  /// 一律视为缺失。纯函数，便于测试。
+  static DateTime resolveSessionTokenExpiry({
+    DateTime? candidate,
+    DateTime? existing,
+    DateTime? now,
+  }) {
+    final base = now ?? DateTime.now();
+    if (candidate != null && candidate.isAfter(base)) return candidate;
+    if (existing != null && existing.isAfter(base)) return existing;
+    return base.add(sessionTokenFallbackLifetime);
+  }
+
+  /// 读出 jar 里当前 `_t` 的过期时间后调用 [resolveSessionTokenExpiry]。
+  Future<DateTime> resolveSessionTokenExpiryFor(DateTime? candidate) async {
+    DateTime? existing;
+    try {
+      existing = (await getCanonicalCookie('_t'))?.expiresAt;
+    } catch (e) {
+      debugPrint('[CookieJar] 读取 _t 过期时间失败: $e');
+    }
+    return resolveSessionTokenExpiry(candidate: candidate, existing: existing);
+  }
+
+  /// 可信写入 `_t`，并保证它带过期时间（能落盘）。
+  ///
+  /// 所有「采纳 / 恢复」路径写 `_t` 都应走这里，不要直接 [setCookie]：
+  /// 后者不带 [expires] 时写出的是会话 cookie，不会落盘。
+  Future<void> setSessionTokenTrusted(String value, {DateTime? expires}) async {
+    final resolved = await resolveSessionTokenExpiryFor(expires);
+    await setCookie(
+      '_t',
+      value,
+      httpOnly: true,
+      trusted: true,
+      expires: resolved,
+    );
+  }
+
   /// 获取 _t 的诊断信息
   Future<Map<String, dynamic>> getTTokenDiagnostics() async {
     if (!_initialized) await initialize();

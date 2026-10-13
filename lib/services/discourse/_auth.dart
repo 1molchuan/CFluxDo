@@ -776,12 +776,8 @@ mixin _AuthMixin on _DiscourseServiceBase {
         return null;
       }
     } else {
-      await _cookieJar.setCookie(
-        '_t',
-        candidateTToken,
-        httpOnly: true,
-        trusted: true,
-      );
+      // 血缘环里的候选只有值没有过期时间，让 jar 补上（否则不落盘）。
+      await _cookieJar.setSessionTokenTrusted(candidateTToken);
     }
 
     final afterJarTToken = await _cookieJar.getTToken();
@@ -964,12 +960,8 @@ mixin _AuthMixin on _DiscourseServiceBase {
       return null;
     }
 
-    await _cookieJar.setCookie(
-      '_t',
-      candidateTTokenValue,
-      httpOnly: true,
-      trusted: true,
-    );
+    // 上一枚值只有值没有过期时间，让 jar 补上（否则不落盘，冷启动又丢）。
+    await _cookieJar.setSessionTokenTrusted(candidateTTokenValue);
     final afterJarTToken = await _cookieJar.getTToken();
     if (!_hasTokenValue(afterJarTToken) ||
         afterJarTToken != candidateTTokenValue) {
@@ -1709,11 +1701,23 @@ mixin _AuthMixin on _DiscourseServiceBase {
   /// 避免本地有 cookie 但服务端已撤销 session 的"假在线"状态。
   /// 网络异常时保守返回 true（保留本地状态）。
   Future<bool> isLoggedIn() async {
-    final tToken = await _cookieJar.getTToken();
-    if (tToken == null || tToken.isEmpty) return false;
-
     final username = await _storage.read(key: DiscourseService._usernameKey);
     if (username == null || username.isEmpty) return false;
+
+    final storedTToken = await _cookieJar.getTToken();
+    final String tToken;
+    if (_hasTokenValue(storedTToken)) {
+      tToken = storedTToken!;
+    } else {
+      // 登出会连用户名一起删，所以「用户名还在、jar 没 _t」是 jar 异常丢值
+      // （会话 cookie 没落盘、文件损坏等），不是用户登出。WebView 会把会话
+      // cookie 跨重启保留，先看它手里有没有活会话，再决定是否判未登录。
+      final recovered = await _recoverStartupTokenFromWebView(
+        storedUsername: username,
+      );
+      if (!_hasTokenValue(recovered)) return false;
+      tToken = recovered!;
+    }
 
     // 服务端验证
     try {
@@ -1741,7 +1745,7 @@ mixin _AuthMixin on _DiscourseServiceBase {
         'level': 'warning',
         'type': 'auth',
         'event': 'auth_session_check_failed',
-        'message': '登录态检查返回 200 但无 current_user，执行登出',
+        'message': '登录态检查返回 200 但无 current_user，先走恢复链再决定是否登出',
         'statusCode': response.statusCode,
         'memHasToken': _tToken != null && _tToken!.isNotEmpty,
         'memTLen': _tokenLength(_tToken),
@@ -1751,8 +1755,12 @@ mixin _AuthMixin on _DiscourseServiceBase {
         'jarTHash': _safeTokenHash(tToken),
         ..._sentTDiagnostics(response.requestOptions),
       });
-      await logout(callApi: false, refreshPreload: false);
-      return false;
+      return _recoverOrLogoutAfterStartupCheck(
+        triggerInfo: 'GET /session/current.json → ${response.statusCode} 无 current_user',
+        signalRequestOptions: response.requestOptions,
+        storedUsername: username,
+        jarTToken: tToken,
+      );
     } on DioException catch (e) {
       final status = e.response?.statusCode;
       // 404 = 无用户 / 401/403 + 登出信号 = 明确拒绝；
@@ -1764,7 +1772,7 @@ mixin _AuthMixin on _DiscourseServiceBase {
           'level': 'warning',
           'type': 'auth',
           'event': 'auth_session_check_failed',
-          'message': '登录态检查被服务端拒绝，执行登出',
+          'message': '登录态检查被服务端拒绝，先走恢复链再决定是否登出',
           'statusCode': status,
           'errorType': e.type.toString(),
           'memHasToken': _tToken != null && _tToken!.isNotEmpty,
@@ -1775,8 +1783,12 @@ mixin _AuthMixin on _DiscourseServiceBase {
           'jarTHash': _safeTokenHash(tToken),
           ..._sentTDiagnostics(e.response?.requestOptions ?? e.requestOptions),
         });
-        await logout(callApi: false, refreshPreload: false);
-        return false;
+        return _recoverOrLogoutAfterStartupCheck(
+          triggerInfo: 'GET /session/current.json → $status',
+          signalRequestOptions: e.response?.requestOptions ?? e.requestOptions,
+          storedUsername: username,
+          jarTToken: tToken,
+        );
       }
       if (status != null) {
         LogWriter.instance.write({
@@ -1799,6 +1811,197 @@ mixin _AuthMixin on _DiscourseServiceBase {
       _username = username;
       return true;
     }
+  }
+
+  /// 启动登录态检查被服务端明确拒绝后，走与 auth 信号相同的恢复链再决定
+  /// 是否登出：WebView 候选 `_t` → 上一枚值 → User API Key，都不行才被动
+  /// 登出并留下 logout_passive 日志。
+  ///
+  /// 以前这里直接 logout：jar 里的 `_t` 在 WebView 轮换后已经过期，而
+  /// WebView 里那枚活值还没来得及对账回 jar，冷启动就把本来能救回来的会话
+  /// 丢掉了，表现就是「无征兆掉登录、重登立刻恢复」。
+  Future<bool> _recoverOrLogoutAfterStartupCheck({
+    required String triggerInfo,
+    required RequestOptions signalRequestOptions,
+    required String storedUsername,
+    required String jarTToken,
+  }) async {
+    final verdict = await _probeSession(
+      source: 'startup_session_check',
+      triggerInfo: triggerInfo,
+      signalRequestOptions: signalRequestOptions,
+    );
+    if (verdict == true) {
+      // 恢复链可能已经换掉了 jar 里的 _t，以 jar 为准同步内存。
+      final liveToken = await _cookieJar.getTToken();
+      _tToken = _hasTokenValue(liveToken) ? liveToken : jarTToken;
+      if (_username == null || _username!.isEmpty) {
+        _username = storedUsername;
+      }
+      return true;
+    }
+    if (verdict == false) {
+      // probe 已确认失效并执行了被动登出（含提示）。
+      return false;
+    }
+    // 再探测无结论（网关 / 网络 / 撞盾）：保守保留本地状态，
+    // 后续请求的 auth 信号会继续走 strike 机制。
+    LogWriter.instance.write({
+      'timestamp': DateTime.now().toIso8601String(),
+      'level': 'info',
+      'type': 'auth',
+      'event': 'auth_session_check_inconclusive',
+      'message': '登录态检查被拒绝后再探测无结论，保留本地登录态',
+      'trigger': triggerInfo,
+    });
+    _tToken = jarTToken;
+    _username = storedUsername;
+    return true;
+  }
+
+  /// 冷启动时 jar 没有 `_t` 但用户名还在：从 WebView 找回会话。
+  ///
+  /// 顺序：WebView 当前 `_t`（探测通过才标记两端一致；探测无结论时也先
+  /// 采纳，交给随后的登录态检查和 strike 机制裁决，与「网络异常保守保留
+  /// 本地状态」一致）→ User API Key 自愈 → 都不行返回 null。
+  ///
+  /// WebView 的值被服务端明确拒绝、自愈也失败时，按被动登出收尾（提示 +
+  /// logout_passive 日志），让用户知道会话已失效，而不是悄悄变成匿名态。
+  /// WebView 根本没有 `_t` 时沿用旧行为：静默判未登录。
+  Future<String?> _recoverStartupTokenFromWebView({
+    required String storedUsername,
+  }) async {
+    const source = 'startup_jar_token_missing';
+    final boundary = BoundarySyncService.instance;
+
+    String? webViewTToken;
+    String? webViewForumSession;
+    try {
+      webViewTToken = await boundary.readCookieValueFromWebView(
+        currentUrl: AppConstants.baseUrl,
+        name: '_t',
+        allowLowConfidenceSessionCookies: true,
+      );
+      if (_hasTokenValue(webViewTToken)) {
+        webViewForumSession = await boundary.readCookieValueFromWebView(
+          currentUrl: AppConstants.baseUrl,
+          name: '_forum_session',
+          allowLowConfidenceSessionCookies: true,
+        );
+      }
+    } catch (e) {
+      debugPrint('[Auth] 启动恢复读取 WebView session 失败: $e');
+      webViewTToken = null;
+    }
+
+    var webViewRejected = false;
+    if (_hasTokenValue(webViewTToken)) {
+      final candidate = webViewTToken!;
+      final cookies = <String, String>{
+        '_t': candidate,
+        if (_hasTokenValue(webViewForumSession))
+          '_forum_session': webViewForumSession!,
+      };
+      final probeResult = await _probeCandidateSessionDetailed(cookies);
+      final verified = probeResult.user != null;
+      if (verified || !probeResult.conclusive) {
+        String? afterJarTToken;
+        try {
+          // 可信写回：WebView 里这枚 _t 若没有过期时间，syncFromWebView 会
+          // 补上，保证落盘。
+          await boundary.syncFromWebView(
+            currentUrl: AppConstants.baseUrl,
+            cookieNames: cookies.keys.toSet(),
+            acceptValues: cookies,
+            allowLowConfidenceSessionCookies: true,
+            trusted: true,
+          );
+          afterJarTToken = await _cookieJar.getTToken();
+        } catch (e) {
+          debugPrint('[Auth] 启动恢复写回 WebView session 失败: $e');
+        }
+        if (afterJarTToken == candidate) {
+          if (verified) {
+            _clearRejectedSessionCandidate();
+            SessionTokenLineage.instance.markAgreed(candidate);
+          }
+          LogWriter.instance.write({
+            'timestamp': DateTime.now().toIso8601String(),
+            'level': verified ? 'info' : 'warning',
+            'type': 'auth',
+            'event': verified
+                ? 'auth_startup_session_recovered_from_webview'
+                : 'auth_startup_session_adopted_unverified',
+            'message': verified
+                ? 'jar 没有 _t 但 WebView 持有有效会话，已可信写回 jar'
+                : 'jar 没有 _t，WebView 的 _t 探测无结论，先采纳交给后续检查裁决',
+            'source': source,
+            'webViewTLen': _tokenLength(candidate),
+            'webViewTHash': _safeTokenHash(candidate),
+            'hasForumSession': cookies.containsKey('_forum_session'),
+          });
+          return afterJarTToken;
+        }
+        LogWriter.instance.write({
+          'timestamp': DateTime.now().toIso8601String(),
+          'level': 'warning',
+          'type': 'auth',
+          'event': 'auth_startup_session_recover_write_failed',
+          'message': 'WebView 的 _t 写入 CookieJar 后读回不符，继续尝试自愈',
+          'source': source,
+          'verified': verified,
+          'webViewTLen': _tokenLength(candidate),
+          'webViewTHash': _safeTokenHash(candidate),
+          'afterJarTLen': _tokenLength(afterJarTToken),
+          'afterJarTHash': _safeTokenHash(afterJarTToken),
+        });
+      } else {
+        webViewRejected = true;
+        _markRejectedSessionCandidate(candidate);
+        LogWriter.instance.write({
+          'timestamp': DateTime.now().toIso8601String(),
+          'level': 'warning',
+          'type': 'auth',
+          'event': 'auth_startup_webview_token_rejected',
+          'message': 'jar 没有 _t，WebView 的 _t 被服务端明确拒绝',
+          'source': source,
+          'webViewTLen': _tokenLength(candidate),
+          'webViewTHash': _safeTokenHash(candidate),
+        });
+      }
+    }
+
+    final healedUser = await _recoverViaUserApiKeySelfHeal(
+      source: source,
+      triggerInfo: 'startup jar _t missing',
+    );
+    if (healedUser != null) {
+      currentUserNotifier.value = healedUser;
+      final healedTToken = await _cookieJar.getTToken();
+      if (_hasTokenValue(healedTToken)) return healedTToken;
+    }
+
+    if (webViewRejected) {
+      // 两端都是死值：会话确实已失效，按被动登出收尾，不要悄悄变匿名。
+      await _handleAuthInvalid(
+        S.current.auth_loginExpiredRelogin,
+        source: 'startup_webview_token_rejected',
+        triggerInfo: 'startup jar _t missing, WebView _t rejected',
+      );
+      return null;
+    }
+
+    LogWriter.instance.write({
+      'timestamp': DateTime.now().toIso8601String(),
+      'level': 'warning',
+      'type': 'auth',
+      'event': 'auth_startup_jar_token_missing',
+      'message': 'jar 没有 _t 且 WebView 也没有可用会话，按未登录处理',
+      'source': source,
+      'webViewHasT': _hasTokenValue(webViewTToken),
+      'storedUsernameLen': storedUsername.length,
+    });
+    return null;
   }
 
   /// 仅设置 token，不触发状态广播（登录流程中先设置 token，等数据就绪后再广播）
