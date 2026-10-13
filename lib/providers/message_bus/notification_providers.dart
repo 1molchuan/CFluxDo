@@ -66,6 +66,25 @@ class NotificationCountNotifier extends Notifier<NotificationCountState> {
     _liveUpdateReceived = true;
     state = const NotificationCountState();
   }
+
+  /// 本地标记单条通知已读后递减计数(同样视为实时事实)。
+  ///
+  /// 对齐 Discourse 的三个计数口径:`unread` 只算普通通知,`highPriority`
+  /// 只算高优先级(私信/@ 等),`allUnread` 是两者之和;按通知自身的
+  /// 优先级只减对应那一项,全部不低于 0。之前点开通知只更新了快捷面板
+  /// 列表,角标要等下一条 MessageBus 推送才会变。
+  void markRead({required bool highPriority}) {
+    _liveUpdateReceived = true;
+    state = state.copyWith(
+      allUnread: state.allUnread > 0 ? state.allUnread - 1 : 0,
+      unread: !highPriority && state.unread > 0
+          ? state.unread - 1
+          : state.unread,
+      highPriority: highPriority && state.highPriority > 0
+          ? state.highPriority - 1
+          : state.highPriority,
+    );
+  }
 }
 
 final notificationCountStateProvider =

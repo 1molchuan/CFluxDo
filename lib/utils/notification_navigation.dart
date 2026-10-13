@@ -4,6 +4,7 @@ import 'package:app_icons/app_icons.dart';
 import '../l10n/s.dart';
 import '../models/notification.dart';
 import '../providers/discourse_providers.dart';
+import '../providers/message_bus/notification_providers.dart';
 import '../pages/badge_page.dart';
 import '../pages/chat/channel/chat_channel_page.dart';
 import '../pages/topic_detail_page/topic_detail_page.dart';
@@ -110,8 +111,13 @@ Widget? _notificationTargetPage(
   }
 }
 
-/// 标记已读的副作用(快捷面板本地态 + 服务端),点击与弹窗内翻页共用
-void _markNotificationRead(
+/// 本地同步单条通知已读:快捷面板列表、通知历史页列表、角标计数一起更新,
+/// 不等服务端回包。之前只更新快捷面板,点开通知后角标和历史页的未读态
+/// 要等下一条 MessageBus 推送或手动刷新才变(移植自上游 PR #250)。
+///
+/// 历史页的 provider 是 autoDispose,只在已加载时更新,避免 read 触发
+/// 一次多余的列表请求。
+void syncNotificationReadLocally(
   ProviderContainer container,
   DiscourseNotification notification,
 ) {
@@ -119,6 +125,23 @@ void _markNotificationRead(
   container
       .read(recentNotificationsProvider.notifier)
       .markAsRead(notification.id);
+  if (container.exists(notificationListProvider)) {
+    container
+        .read(notificationListProvider.notifier)
+        .markAsRead(notification.id);
+  }
+  container
+      .read(notificationCountStateProvider.notifier)
+      .markRead(highPriority: notification.highPriority);
+}
+
+/// 标记已读的副作用(本地态 + 服务端),点击与弹窗内翻页共用
+void _markNotificationRead(
+  ProviderContainer container,
+  DiscourseNotification notification,
+) {
+  if (notification.read) return;
+  syncNotificationReadLocally(container, notification);
   container
       .read(discourseServiceProvider)
       .markNotificationRead(notification.id)
