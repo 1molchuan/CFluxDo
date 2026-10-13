@@ -7,8 +7,7 @@ plugins {
     id("kotlin-android")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
-    // cfluxdo:不接入上游的 Firebase 项目(google-services.json 绑定上游包名,
-    // 崩溃也不应上报到上游),去掉 google-services / crashlytics 插件。
+    // cfluxdo:不接入 Firebase / Crashlytics,崩溃排查走应用内日志导出。
 }
 
 fun Properties.readNonBlank(name: String): String? =
@@ -144,9 +143,6 @@ flutter {
 
 dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
-    implementation(platform("com.google.firebase:firebase-bom:33.14.0"))
-    implementation("com.google.firebase:firebase-crashlytics-ndk")
-    implementation("com.google.firebase:firebase-analytics")
     implementation("org.json:json:20240303")
     implementation("androidx.webkit:webkit:1.15.0")
     // 媒体转码(压缩到 4MB):Transformer 走系统 MediaCodec 硬编

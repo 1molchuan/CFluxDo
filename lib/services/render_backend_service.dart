@@ -13,7 +13,7 @@ import 'package:flutter/services.dart';
 /// 2. **启动快照同步** —— 偏好写入后同步一份到只含单个 boolean 的小文件，
 ///    让下次冷启动的 `provideFlutterEngine` 不必解析整个偏好文件。
 ///
-/// 该能力**不依赖 Crashlytics 开关**：纯本地判断、零网络请求，所有用户都
+/// 该能力**不依赖任何采集开关**：纯本地判断、零网络请求，所有用户都
 /// 应当被提醒。
 class RenderBackendService {
   const RenderBackendService._();

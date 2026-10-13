@@ -304,15 +304,6 @@ List<SettingsGroup> buildPreferencesGroups(BuildContext context) {
         title: l10n.preferences_advanced,
         icon: Symbols.bug_report_rounded,
         items: [
-          SwitchModel(
-            id: 'crashlytics',
-            title: l10n.preferences_crashlytics,
-            subtitle: l10n.preferences_crashlyticsDesc,
-            icon: Symbols.bug_report_rounded,
-            getValue: (ref) => ref.watch(preferencesProvider).crashlytics,
-            onChanged: (ref, v) =>
-                ref.read(preferencesProvider.notifier).setCrashlytics(v),
-          ),
           // 渲染后端兼容模式：Release 版无法通过
           // --impeller-backend=opengles 固定 Impeller 后端，因此改用
           // --enable-impeller=false 强制 Skia/OpenGL ES，绕开部分 Mali

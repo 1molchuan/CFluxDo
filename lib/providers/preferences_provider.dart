@@ -9,7 +9,6 @@ import '../models/topic_card_style.dart';
 import '../navigation/nav_action_bus.dart';
 import '../services/network/request_scheduler_config.dart';
 import '../services/cf_challenge_service.dart';
-import '../services/crash_context_reporter.dart';
 import '../services/render_backend_service.dart';
 import '../utils/blocked_user_filter.dart';
 import '../widgets/topic/topic_card_layout.dart';
@@ -134,9 +133,6 @@ class AppPreferences {
   /// 本地内容屏蔽用户名的归一化集合，匹配时使用。
   late final Set<String> normalizedBlockedUsernames =
       BlockedUserFilter.normalizedUsernames(blockedUsernames);
-
-  /// 崩溃日志上报（仅 Android）
-  final bool crashlytics;
 
   /// Skia/OpenGL ES 渲染兼容模式（仅 Android，下次冷启动生效）
   ///
@@ -303,7 +299,6 @@ class AppPreferences {
     this.topicFilterWholeWord = false,
     this.blockedUsernames = const [],
     this.showFilterHint = true,
-    required this.crashlytics,
     required this.renderGlesBackend,
     required this.portraitLock,
     required this.fullscreenSwipeBack,
@@ -366,7 +361,6 @@ class AppPreferences {
     bool? topicFilterWholeWord,
     List<String>? blockedUsernames,
     bool? showFilterHint,
-    bool? crashlytics,
     bool? renderGlesBackend,
     bool? portraitLock,
     bool? fullscreenSwipeBack,
@@ -430,7 +424,6 @@ class AppPreferences {
       topicFilterWholeWord: topicFilterWholeWord ?? this.topicFilterWholeWord,
       blockedUsernames: blockedUsernames ?? this.blockedUsernames,
       showFilterHint: showFilterHint ?? this.showFilterHint,
-      crashlytics: crashlytics ?? this.crashlytics,
       renderGlesBackend: renderGlesBackend ?? this.renderGlesBackend,
       portraitLock: portraitLock ?? this.portraitLock,
       fullscreenSwipeBack: fullscreenSwipeBack ?? this.fullscreenSwipeBack,
@@ -520,8 +513,6 @@ class PreferencesNotifier extends StateNotifier<AppPreferences> {
   static const String _topicFilterWholeWordKey = 'pref_topic_filter_whole_word';
   static const String _blockedUsernamesKey = 'pref_blocked_usernames';
   static const String _showFilterHintKey = 'pref_show_filter_hint';
-  static const String _crashlyticsKey = 'pref_crashlytics';
-
   /// 渲染兼容模式的键**不带 `pref_` 前缀**：Android 原生侧在引擎创建前
   /// 直接读 `FlutterSharedPreferences` 文件里的 `flutter.renderer_gles`，
   /// 这是跨 Dart/native 的持久化契约。改这里必须同步
@@ -587,10 +578,6 @@ class PreferencesNotifier extends StateNotifier<AppPreferences> {
   static const String _editorToolbarToolsKey = 'pref_editor_toolbar_tools';
   static const String _topicCardStyleKey = 'pref_topic_card_style';
 
-  static const _crashlyticsChannel = MethodChannel(
-    'com.github.lingyan000.fluxdo/crashlytics',
-  );
-
   PreferencesNotifier(this._prefs)
     : super(
         AppPreferences(
@@ -612,7 +599,6 @@ class PreferencesNotifier extends StateNotifier<AppPreferences> {
           blockedUsernames:
               _prefs.getStringList(_blockedUsernamesKey) ?? const [],
           showFilterHint: _prefs.getBool(_showFilterHintKey) ?? true,
-          crashlytics: _prefs.getBool(_crashlyticsKey) ?? true,
           renderGlesBackend:
               _prefs.getBool(_renderGlesBackendKey) ?? false,
           portraitLock: _prefs.getBool(_portraitLockKey) ?? false,
@@ -795,18 +781,6 @@ class PreferencesNotifier extends StateNotifier<AppPreferences> {
     if (state.showFilterHint == enabled) return;
     state = state.copyWith(showFilterHint: enabled);
     await _prefs.setBool(_showFilterHintKey, enabled);
-  }
-
-  Future<void> setCrashlytics(bool enabled) async {
-    state = state.copyWith(crashlytics: enabled);
-    await _prefs.setBool(_crashlyticsKey, enabled);
-    if (Platform.isAndroid) {
-      await _crashlyticsChannel.invokeMethod('setCrashlyticsEnabled', {
-        'enabled': enabled,
-      });
-    }
-    // 关闭采集时导航上下文同步停掉
-    CrashContextReporter.setEnabled(Platform.isAndroid && enabled);
   }
 
   /// 切换渲染兼容模式。

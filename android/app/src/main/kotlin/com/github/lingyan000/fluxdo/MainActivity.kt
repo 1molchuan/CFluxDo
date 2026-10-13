@@ -81,7 +81,6 @@ class MainActivity : FlutterActivity() {
     }
 
     private val CHANNEL = "com.github.lingyan000.fluxdo/browser"
-    private val CRASHLYTICS_CHANNEL = "com.github.lingyan000.fluxdo/crashlytics"
     private val RENDER_BACKEND_CHANNEL = "com.github.lingyan000.fluxdo/render_backend"
     private val ICON_CHANNEL = "com.github.lingyan000.fluxdo/app_icon"
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -217,28 +216,7 @@ class MainActivity : FlutterActivity() {
             }
         }
 
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CRASHLYTICS_CHANNEL).setMethodCallHandler { call, result ->
-            when (call.method) {
-                "setCrashlyticsEnabled" -> {
-                    val enable = call.argument<Boolean>("enabled") ?: false
-                    FluxdoApplication.setCrashlytics(enable)
-                    result.success(null)
-                }
-                // 崩溃/ANR 现场的页面上下文:线上事件的 customKeys 一直是空的,
-                // ANR 主线程栈又全是 framework 帧,没有这个就不知道用户当时在哪。
-                "setCrashContext" -> {
-                    FluxdoApplication.setCrashContext(
-                        call.argument<String>("route"),
-                        call.argument<String>("routeTrail"),
-                    )
-                    result.success(null)
-                }
-                else -> result.notImplemented()
-            }
-        }
-
-        // 渲染崩溃自动识别。与 Crashlytics 无关：纯本地判断、零网络，
-        // 所有用户都需要被提醒，不能挂在采集开关下。
+        // 渲染崩溃自动识别:纯本地判断、零网络,所有用户都需要被提醒。
         MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger, RENDER_BACKEND_CHANNEL
         ).setMethodCallHandler { call, result ->

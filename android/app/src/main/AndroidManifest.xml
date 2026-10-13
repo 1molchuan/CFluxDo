@@ -128,9 +128,6 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity-alias>
-        <!-- 禁用 Firebase 自动采集，由用户手动开启 -->
-        <meta-data android:name="firebase_crashlytics_collection_enabled" android:value="false" />
-        <meta-data android:name="firebase_analytics_collection_enabled" android:value="false" />
         <!-- HCPP (Hybrid Composition++):平台视图(帖内 iframe WebView 等)
              在屏期间,经典 HC 会把整个 Flutter UI 的合成从专用 raster 线程
              搬到平台主线程(官方文档明言 "Flutter performance suffers /

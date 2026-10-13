@@ -15,10 +15,9 @@ import android.util.Log
  * 「Skia/OpenGL ES 渲染兼容模式」开关(见 [MainActivity.provideFlutterEngine]),
  * 但用户不可能知道崩溃与这个开关有关 —— 必须由应用主动识别并提示。
  *
- * 与 [AnrTraceReporter] 的区别:那个是**上报**(依赖 Crashlytics 开关,只服务
- * 开发者);这个是**本地判断**(不依赖任何采集开关、零网络,服务所有用户)。
- * 两者都读 [ActivityManager.getHistoricalProcessExitReasons],但用途正交,
- * 各自维护自己的"已处理时间戳",互不干扰。
+ * 这是**本地判断**(不依赖任何采集开关、零网络,服务所有用户),
+ * 读 [ActivityManager.getHistoricalProcessExitReasons] 并维护自己的
+ * "已处理时间戳"。
  *
  * ## 判定分级
  *

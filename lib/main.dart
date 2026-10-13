@@ -20,7 +20,6 @@ import 'widgets/ai/builtin_presets_factory.dart';
 import 'providers/message_bus_providers.dart';
 import 'providers/chat/chat_notification_alert_provider.dart';
 import 'services/auth_issue_notice_service.dart';
-import 'services/crash_context_reporter.dart';
 import 'providers/app_state_refresher.dart';
 import 'services/highlighter_service.dart';
 import 'widgets/common/notification_icon_button.dart';
@@ -272,21 +271,12 @@ Future<void> main() async {
   // 数据迁移：在所有依赖 prefs 的网络相关服务启动之前执行
   await MigrationService.runAll(prefs);
 
-  // 阶段 2：依赖 prefs 的步骤并行
-  final crashlyticsEnabled = prefs.getBool('pref_crashlytics') ?? true;
+  // 阶段 2：依赖 prefs 的步骤
   final developerMode = prefs.getBool('developer_mode') ?? false;
   CfChallengeLogger.setEnabled(developerMode);
   // 开发者模式下 debug 级日志落盘（高频追踪信息）
   AppLogger.setVerbose(developerMode);
-  await Future.wait([
-    ProxySettingsService.instance.initialize(prefs),
-    if (Platform.isAndroid)
-      MethodChannel(
-        'com.github.lingyan000.fluxdo/crashlytics',
-      ).invokeMethod('setCrashlyticsEnabled', {'enabled': crashlyticsEnabled}),
-  ]);
-  // 跟随同一开关:关闭时导航上下文也不再上报
-  CrashContextReporter.setEnabled(Platform.isAndroid && crashlyticsEnabled);
+  await ProxySettingsService.instance.initialize(prefs);
   // rhttp (Rust reqwest) 初始化：在 ProxySettingsService 之后、NetworkSettingsService 之前
   await RhttpSettingsService.instance.initialize(prefs);
   // WebView 适配器设置
@@ -701,9 +691,6 @@ class MainApp extends ConsumerWidget {
                 keyboardFocusGuard,
                 JankNavObserver(),
                 EscFallbackObserver(),
-                // 崩溃/ANR 现场带上当前页面与最近导航轨迹(Crashlytics
-                // custom keys);未开启崩溃采集时内部 no-op。
-                CrashContextNavObserver(),
               ],
               title: 'FluxDO',
               locale: TranslationProvider.of(context).flutterLocale,
@@ -1015,13 +1002,8 @@ class _MainPageState extends ConsumerState<MainPage>
     await _autoCheckUpdate();
     if (!mounted) return;
 
-    // 一次性数据收集告知（仅 Android）
     if (Platform.isAndroid) {
-      await _showCrashlyticsNotice();
-      if (!mounted) return;
-
       // 疑似 Mali/Vulkan 渲染崩溃时建议开启兼容模式。
-      // 放在数据收集告知之后：那个是必须先看到的一次性声明。
       await _maybeSuggestRenderCompatMode();
       if (!mounted) return;
     }
@@ -1081,27 +1063,6 @@ class _MainPageState extends ConsumerState<MainPage>
       // 明确拒绝（含点遮罩关闭）后不再自动弹窗
       await RenderBackendService.dismissSuggestion();
     }
-  }
-
-  Future<void> _showCrashlyticsNotice() async {
-    final prefs = ref.read(sharedPreferencesProvider);
-    if (prefs.getBool('crashlytics_notice_shown') ?? false) return;
-    await prefs.setBool('crashlytics_notice_shown', true);
-    if (!mounted) return;
-    await showAppDialog<void>(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        title: Text(S.current.preferences_enableCrashlyticsTitle),
-        content: Text(S.current.preferences_enableCrashlyticsContent),
-        actions: [
-          FilledButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text(S.current.common_confirm),
-          ),
-        ],
-      ),
-    );
   }
 
   void _onDestinationSelected(int index) {
