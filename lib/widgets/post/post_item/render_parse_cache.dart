@@ -99,6 +99,13 @@ class RenderParseCache {
     return parsed;
   }
 
+  /// 是否已有与当前内容签名匹配的短帖解析产物。只探测、不触碰 LRU
+  /// 顺序:空闲预热据此跳过已解析的帖子,不为探测付解析成本。
+  static bool hasShortPost(Post post) {
+    final cached = _short[post.id];
+    return cached != null && cached.signature == signatureOf(post);
+  }
+
   /// 长帖解析产物;非长帖(不足分块)返回 null。
   /// [build] 由调用方提供(preprocess + chunk 切分),仅 miss 时执行。
   static LongPostParseData? longPost(
