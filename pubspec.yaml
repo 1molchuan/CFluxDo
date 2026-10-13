@@ -1,7 +1,7 @@
 name: fluxdo
-description: "A new Flutter project."
+description: "cfluxdo：基于 FluxDO 的 Linux.do 第三方 Android 客户端"
 publish_to: 'none'
-version: 0.2.28+2026090421
+version: 1.0.0+2026101317
 
 environment:
   sdk: ^3.10.4
