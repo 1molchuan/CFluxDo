@@ -15,6 +15,7 @@ import '../services/discourse/discourse_service.dart';
 import '../services/emoji_handler.dart';
 import '../services/log/log_writer.dart';
 import '../services/migration_service.dart';
+import '../services/startup_progress.dart';
 import '../utils/dialog_utils.dart';
 import '../widgets/common/ambient_background.dart';
 import '../widgets/common/error_view.dart';
@@ -221,6 +222,9 @@ class _PreheatLoadingState extends State<_PreheatLoading> {
                 ),
                 const SizedBox(height: 56),
                 const LoadingSpinner(size: 40),
+                const SizedBox(height: 24),
+                // 预加载当前阶段与异常原因:让用户知道卡在哪一步、为什么慢
+                const _StartupStatus(),
               ],
             ),
           ),
@@ -271,6 +275,145 @@ class _PreheatLoadingState extends State<_PreheatLoading> {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// 启动页上的预加载状态行:当前阶段 + 绕路原因 + 已等待时长。
+///
+/// 正常路径只显示「正在连接」一行;一旦走了内置浏览器、重试、撞盾、回退,
+/// 就用醒目颜色把原因写出来,用户反馈「连接很久」时也能直接说出卡在哪一步。
+class _StartupStatus extends StatefulWidget {
+  const _StartupStatus();
+
+  @override
+  State<_StartupStatus> createState() => _StartupStatusState();
+}
+
+class _StartupStatusState extends State<_StartupStatus> {
+  /// 等待超过这个时长才显示秒数,正常几秒内完成的启动不打扰用户
+  static const _elapsedVisibleAfter = Duration(seconds: 5);
+
+  Timer? _tickTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _tickTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _tickTimer?.cancel();
+    super.dispose();
+  }
+
+  String _stageText(BuildContext context, StartupProgress p) {
+    final l10n = context.l10n;
+    switch (p.stage) {
+      case StartupStage.connecting:
+        return l10n.preheat_stageConnecting;
+      case StartupStage.retrying:
+        return l10n.preheat_stageRetrying(
+          p.attempt ?? 1,
+          p.detail ?? l10n.preheat_detailConnectionError,
+        );
+      case StartupStage.cfChallenge:
+        return l10n.preheat_stageCfChallenge(
+          p.detail ?? l10n.preheat_detailConnectionError,
+        );
+      case StartupStage.webViewLoading:
+        return l10n.preheat_stageWebViewLoading;
+      case StartupStage.webViewSnapshot:
+        return l10n.preheat_stageWebViewSnapshot;
+      case StartupStage.webViewBootstrap:
+        return l10n.preheat_stageWebViewBootstrap;
+    }
+  }
+
+  String? _reasonText(BuildContext context, StartupProgress p) {
+    final l10n = context.l10n;
+    switch (p.reason) {
+      case null:
+        return null;
+      case StartupDetourReason.noClearance:
+        return l10n.preheat_reasonNoClearance;
+      case StartupDetourReason.clearanceRejected:
+        return l10n.preheat_reasonClearanceRejected;
+      case StartupDetourReason.clearanceExpiring:
+        return l10n.preheat_reasonClearanceExpiring;
+      case StartupDetourReason.nativeFailed:
+        return l10n.preheat_reasonNativeFailed(
+          p.reasonDetail ?? l10n.preheat_detailConnectionError,
+        );
+      case StartupDetourReason.webViewNoData:
+        return l10n.preheat_reasonWebViewNoData;
+      case StartupDetourReason.webViewTimeout:
+        return l10n.preheat_reasonWebViewTimeout;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final reporter = StartupProgressReporter.instance;
+
+    return ValueListenableBuilder<StartupProgress?>(
+      valueListenable: reporter.progress,
+      builder: (context, progress, _) {
+        final startedAt = reporter.startedAt;
+        final elapsed = startedAt == null
+            ? Duration.zero
+            : DateTime.now().difference(startedAt);
+        final showElapsed = elapsed >= _elapsedVisibleAfter;
+        final reason = progress == null ? null : _reasonText(context, progress);
+        // 没有单独原因行的异常阶段(重试、撞盾、回退、超时)把阶段行本身标红
+        final stageHighlighted =
+            progress != null && progress.isAbnormal && reason == null;
+
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (progress != null)
+                Text(
+                  _stageText(context, progress),
+                  textAlign: TextAlign.center,
+                  maxLines: 3,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: stageHighlighted
+                        ? colorScheme.error
+                        : colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              if (reason != null) ...[
+                const SizedBox(height: 6),
+                Text(
+                  reason,
+                  textAlign: TextAlign.center,
+                  maxLines: 3,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: colorScheme.error,
+                  ),
+                ),
+              ],
+              if (showElapsed) ...[
+                const SizedBox(height: 6),
+                Text(
+                  context.l10n.preheat_elapsedSeconds(elapsed.inSeconds),
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        );
+      },
     );
   }
 }

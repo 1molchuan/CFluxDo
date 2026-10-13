@@ -98,6 +98,7 @@ class TransientRetryPolicy implements RecoveryPolicy {
       Duration(seconds: 4),
     ],
     this.isChallengeResponse,
+    this.onRetry,
   });
 
   /// 第 N 次重放前的等待时长(指数退避)。
@@ -105,6 +106,10 @@ class TransientRetryPolicy implements RecoveryPolicy {
 
   /// 判定"这个 5xx 其实是 CF 挑战"的钩子,语义同 [RateLimitPolicy]。
   final bool Function(Response<dynamic>? response)? isChallengeResponse;
+
+  /// 决定重放时的通知钩子:启动页用它把「正在第 N 次重试」显示给用户。
+  /// 只是旁观,抛错不影响重放。
+  final void Function(AttemptOutcome outcome, Duration delay)? onRetry;
 
   static const _idempotentMethods = {'GET', 'HEAD', 'OPTIONS'};
   static const _retryableStatuses = {502, 503, 504};
@@ -130,7 +135,16 @@ class TransientRetryPolicy implements RecoveryPolicy {
   @override
   Future<RecoveryDecision> decide(AttemptOutcome outcome) async {
     final index = outcome.attemptIndex.clamp(0, delays.length - 1);
-    return RecoveryDecision.retry(delay: delays[index]);
+    final delay = delays[index];
+    final notify = onRetry;
+    if (notify != null) {
+      try {
+        notify(outcome, delay);
+      } catch (_) {
+        // 旁观钩子出错不能影响重放
+      }
+    }
+    return RecoveryDecision.retry(delay: delay);
   }
 
   static bool _isTransientNetworkError(DioException err) {

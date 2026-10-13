@@ -17,6 +17,7 @@ import 'network/cookie/boundary_sync_service.dart';
 import 'network/cookie/cookie_jar_service.dart';
 import 'network/cookie/webview_cookie_priming.dart';
 import 'preloaded_data_service.dart';
+import 'startup_progress.dart';
 import 'webview_session_cookie_refresh_service.dart';
 import 'webview_settings.dart';
 import 'windows_webview_environment_service.dart';
@@ -117,6 +118,13 @@ class BrowserTrustCoordinator {
 
   BrowserTrustPreloadPath? get lastPreloadPath => _lastPreloadPath;
 
+  /// 最近一次 [_isNativePreloadTrusted] 判定为不可信的原因;可信时为 null。
+  /// 只用于启动页向用户解释为什么没走直连。
+  StartupDetourReason? _nativeUntrustedReason;
+
+  /// 启动页进度发布者,预加载各阶段往这里写。
+  StartupProgressReporter get _progress => StartupProgressReporter.instance;
+
   void setNavigatorContext(BuildContext context) {
     _navigatorContext = context;
     DiscourseService().setNavigatorContext(context);
@@ -174,10 +182,13 @@ class BrowserTrustCoordinator {
     }
 
     late final Future<void> future;
+    _progress.begin();
     future = _ensurePreloadedInternal(reason: reason).whenComplete(() {
       if (identical(_activePreload, future)) {
         _activePreload = null;
       }
+      // 无论成功失败都清掉启动页状态,避免下次手动重试时先显示旧阶段
+      _progress.clear();
     });
     _activePreload = future;
     return future;
@@ -274,6 +285,7 @@ class BrowserTrustCoordinator {
     if (nativeTrusted) {
       _lastPreloadPath = BrowserTrustPreloadPath.native;
       _log('preload path=native reason=$reason');
+      _progress.set(StartupStage.connecting);
       try {
         await _preload.ensureLoaded();
         _log('native preload success reason=$reason');
@@ -284,7 +296,17 @@ class BrowserTrustCoordinator {
           'trusted native preload failed, switching to startup WebView: $e',
           level: 'warning',
         );
+        _progress.set(
+          StartupStage.webViewLoading,
+          reason: StartupDetourReason.nativeFailed,
+          detail: describeStartupFailure(e),
+        );
       }
+    } else {
+      _progress.set(
+        StartupStage.webViewLoading,
+        reason: _nativeUntrustedReason ?? StartupDetourReason.noClearance,
+      );
     }
 
     _log('preload path=startup_webview reason=$reason');
@@ -315,6 +337,13 @@ class BrowserTrustCoordinator {
     _log(
       'startup WebView preload unavailable, fallback native reason=$reason',
       level: 'warning',
+    );
+    // 回退直连:原因行换成「内置浏览器没拿到数据 / 超时」,阶段回到直连
+    _progress.set(
+      StartupStage.connecting,
+      reason: hydrateResult == null
+          ? StartupDetourReason.webViewTimeout
+          : StartupDetourReason.webViewNoData,
     );
     await _preload.ensureLoaded();
     _log('fallback native preload success reason=$reason');
@@ -590,6 +619,7 @@ class BrowserTrustCoordinator {
       await _syncCookiesFromController(c);
       if (cancellation.isCancelled) return false;
 
+      _progress.set(StartupStage.webViewSnapshot);
       final html = await _readPreloadedSnapshot(c, cancellation: cancellation);
       if (cancellation.isCancelled) return false;
       final hydrated =
@@ -606,6 +636,7 @@ class BrowserTrustCoordinator {
       if (tToken != null && tToken.isNotEmpty) {
         if (cancellation.isCancelled) return false;
         _log('startup WebView session bootstrap begin reason=$reason');
+        _progress.set(StartupStage.webViewBootstrap);
         final bootstrapResult = await WebViewSessionCookieRefreshService
             .instance
             .runOnController(
@@ -718,11 +749,13 @@ class BrowserTrustCoordinator {
   }
 
   Future<bool> _isNativePreloadTrusted() async {
+    _nativeUntrustedReason = null;
     if (_clearanceRecentlyRejected) {
       _log(
         'native trust check: untrusted, clearance recently rejected by server',
         level: 'warning',
       );
+      _nativeUntrustedReason = StartupDetourReason.clearanceRejected;
       return false;
     }
     if (!_jar.isInitialized) {
@@ -731,6 +764,7 @@ class BrowserTrustCoordinator {
     final clearance = await _jar.getCanonicalCookie('cf_clearance');
     if (clearance == null || clearance.value.isEmpty) {
       _log('native trust check: untrusted, no cf_clearance');
+      _nativeUntrustedReason = StartupDetourReason.noClearance;
       return false;
     }
     if (!CookieJarService.matchesAppHost(clearance.domain)) {
@@ -738,6 +772,7 @@ class BrowserTrustCoordinator {
         'native trust check: untrusted, domain=${clearance.domain}',
         level: 'warning',
       );
+      _nativeUntrustedReason = StartupDetourReason.noClearance;
       return false;
     }
     final expiresAt = clearance.expiresAt?.toLocal();
@@ -750,6 +785,9 @@ class BrowserTrustCoordinator {
     _log(
       'native trust check: trusted=$trusted ttl=${ttl.inSeconds}s expires=${expiresAt.toIso8601String()}',
     );
+    if (!trusted) {
+      _nativeUntrustedReason = StartupDetourReason.clearanceExpiring;
+    }
     return trusted;
   }
 

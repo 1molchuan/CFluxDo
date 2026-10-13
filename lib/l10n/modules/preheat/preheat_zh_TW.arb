@@ -5,6 +5,61 @@
   "preheat_networkSettings": "網路設定",
   "preheat_retryConnection": "重試連線",
   "preheat_userSkipped": "使用者跳過預載入",
+  "preheat_stageConnecting": "正在連線 linux.do…",
+  "preheat_stageRetrying": "連線失敗，正在第 {attempt} 次重試（{detail}）…",
+  "@preheat_stageRetrying": {
+    "placeholders": {
+      "attempt": {
+        "type": "int"
+      },
+      "detail": {
+        "type": "String"
+      }
+    }
+  },
+  "preheat_stageCfChallenge": "遇到 Cloudflare 驗證（{detail}），正在處理…",
+  "@preheat_stageCfChallenge": {
+    "placeholders": {
+      "detail": {
+        "type": "String"
+      }
+    }
+  },
+  "preheat_stageWebViewLoading": "內建瀏覽器正在載入首頁…",
+  "preheat_stageWebViewSnapshot": "正在等待內建瀏覽器交出頁面資料…",
+  "preheat_stageWebViewBootstrap": "正在同步登入工作階段…",
+  "preheat_reasonWebViewNoData": "內建瀏覽器沒有取得頁面資料，已改回直連",
+  "preheat_reasonWebViewTimeout": "內建瀏覽器逾時，已改回直連",
+  "preheat_reasonNoClearance": "本地沒有 Cloudflare 通行憑證，改用內建瀏覽器取得",
+  "preheat_reasonClearanceRejected": "Cloudflare 通行憑證剛被伺服器拒絕，改用內建瀏覽器重新取得",
+  "preheat_reasonClearanceExpiring": "Cloudflare 通行憑證即將過期，改用內建瀏覽器更新",
+  "preheat_reasonNativeFailed": "直連失敗（{detail}），改用內建瀏覽器",
+  "@preheat_reasonNativeFailed": {
+    "placeholders": {
+      "detail": {
+        "type": "String"
+      }
+    }
+  },
+  "preheat_detailTimeout": "逾時",
+  "preheat_detailConnectionError": "無法建立連線",
+  "preheat_detailHttp": "HTTP {code}",
+  "@preheat_detailHttp": {
+    "placeholders": {
+      "code": {
+        "type": "int"
+      }
+    }
+  },
+  "preheat_detailParseFailed": "首頁資料解析失敗",
+  "preheat_elapsedSeconds": "已等待 {seconds} 秒",
+  "@preheat_elapsedSeconds": {
+    "placeholders": {
+      "seconds": {
+        "type": "int"
+      }
+    }
+  },
   "table_rowCount": "共 {count} 行",
   "@table_rowCount": {
     "placeholders": {

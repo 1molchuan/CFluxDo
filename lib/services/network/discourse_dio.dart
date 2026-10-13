@@ -6,6 +6,8 @@ import 'cookie/app_cookie_manager.dart';
 import 'cookie/cookie_jar_service.dart';
 import '../cf_challenge_service.dart';
 import 'cookie/csrf_token_service.dart';
+import 'flux_request_spec.dart';
+import '../startup_progress.dart';
 import 'interceptors/cf_challenge_interceptor.dart';
 import 'interceptors/request_scheduler_interceptor.dart';
 import 'interceptors/session_guard_interceptor.dart';
@@ -15,6 +17,7 @@ import 'interceptors/redirect_interceptor.dart';
 import 'interceptors/request_header_interceptor.dart';
 import 'recovery/policies.dart';
 import 'recovery/recovery_coordinator.dart';
+import 'recovery/recovery_policy.dart';
 import 'recovery/session_heal_policy.dart';
 
 /// 统一封装的 Dio 工厂
@@ -94,6 +97,7 @@ class DiscourseDio {
             ),
             TransientRetryPolicy(
               isChallengeResponse: CfChallengeService.isCfChallengeError,
+              onRetry: _reportStartupRetry,
             ),
           ],
         ),
@@ -129,5 +133,20 @@ class DiscourseDio {
     }
 
     return dio;
+  }
+
+  /// 启动预加载的首页请求(`preload-home`)进入瞬态重试时,把「第几次重试、
+  /// 为什么」告诉启动页;其他请求不关心。
+  static void _reportStartupRetry(AttemptOutcome outcome, Duration delay) {
+    final err = outcome.error;
+    if (err == null) return;
+    if (err.requestOptions.spec.requestTag != 'preload-home') return;
+    final reporter = StartupProgressReporter.instance;
+    if (!reporter.isActive) return;
+    reporter.set(
+      StartupStage.retrying,
+      attempt: outcome.attemptIndex + 1,
+      detail: describeStartupFailure(err),
+    );
   }
 }

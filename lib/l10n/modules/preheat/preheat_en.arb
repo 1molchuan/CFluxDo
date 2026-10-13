@@ -5,6 +5,61 @@
   "preheat_networkSettings": "Network settings",
   "preheat_retryConnection": "Retry connection",
   "preheat_userSkipped": "User skipped preload",
+  "preheat_stageConnecting": "Connecting to linux.do…",
+  "preheat_stageRetrying": "Connection failed, retry {attempt} ({detail})…",
+  "@preheat_stageRetrying": {
+    "placeholders": {
+      "attempt": {
+        "type": "int"
+      },
+      "detail": {
+        "type": "String"
+      }
+    }
+  },
+  "preheat_stageCfChallenge": "Cloudflare challenge ({detail}), handling…",
+  "@preheat_stageCfChallenge": {
+    "placeholders": {
+      "detail": {
+        "type": "String"
+      }
+    }
+  },
+  "preheat_stageWebViewLoading": "Built-in browser is loading the home page…",
+  "preheat_stageWebViewSnapshot": "Waiting for the built-in browser to hand over page data…",
+  "preheat_stageWebViewBootstrap": "Syncing login session…",
+  "preheat_reasonWebViewNoData": "Built-in browser returned no page data, switched back to direct connection",
+  "preheat_reasonWebViewTimeout": "Built-in browser timed out, switched back to direct connection",
+  "preheat_reasonNoClearance": "No local Cloudflare clearance, fetching it via the built-in browser",
+  "preheat_reasonClearanceRejected": "Cloudflare clearance was just rejected by the server, refetching via the built-in browser",
+  "preheat_reasonClearanceExpiring": "Cloudflare clearance is about to expire, renewing via the built-in browser",
+  "preheat_reasonNativeFailed": "Direct connection failed ({detail}), using the built-in browser",
+  "@preheat_reasonNativeFailed": {
+    "placeholders": {
+      "detail": {
+        "type": "String"
+      }
+    }
+  },
+  "preheat_detailTimeout": "timeout",
+  "preheat_detailConnectionError": "unable to connect",
+  "preheat_detailHttp": "HTTP {code}",
+  "@preheat_detailHttp": {
+    "placeholders": {
+      "code": {
+        "type": "int"
+      }
+    }
+  },
+  "preheat_detailParseFailed": "home page data could not be parsed",
+  "preheat_elapsedSeconds": "Waited {seconds} s",
+  "@preheat_elapsedSeconds": {
+    "placeholders": {
+      "seconds": {
+        "type": "int"
+      }
+    }
+  },
   "table_rowCount": "{count} rows",
   "@table_rowCount": {
     "placeholders": {

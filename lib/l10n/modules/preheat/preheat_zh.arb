@@ -5,6 +5,61 @@
   "preheat_networkSettings": "网络设置",
   "preheat_retryConnection": "重试连接",
   "preheat_userSkipped": "用户跳过预加载",
+  "preheat_stageConnecting": "正在连接 linux.do…",
+  "preheat_stageRetrying": "连接失败，正在第 {attempt} 次重试（{detail}）…",
+  "@preheat_stageRetrying": {
+    "placeholders": {
+      "attempt": {
+        "type": "int"
+      },
+      "detail": {
+        "type": "String"
+      }
+    }
+  },
+  "preheat_stageCfChallenge": "遇到 Cloudflare 验证（{detail}），正在处理…",
+  "@preheat_stageCfChallenge": {
+    "placeholders": {
+      "detail": {
+        "type": "String"
+      }
+    }
+  },
+  "preheat_stageWebViewLoading": "内置浏览器正在加载首页…",
+  "preheat_stageWebViewSnapshot": "正在等待内置浏览器交出页面数据…",
+  "preheat_stageWebViewBootstrap": "正在同步登录会话…",
+  "preheat_reasonWebViewNoData": "内置浏览器没有拿到页面数据，已改回直连",
+  "preheat_reasonWebViewTimeout": "内置浏览器超时，已改回直连",
+  "preheat_reasonNoClearance": "本地没有 Cloudflare 通行凭据，改用内置浏览器获取",
+  "preheat_reasonClearanceRejected": "Cloudflare 通行凭据刚被服务端拒绝，改用内置浏览器重新获取",
+  "preheat_reasonClearanceExpiring": "Cloudflare 通行凭据即将过期，改用内置浏览器更新",
+  "preheat_reasonNativeFailed": "直连失败（{detail}），改用内置浏览器",
+  "@preheat_reasonNativeFailed": {
+    "placeholders": {
+      "detail": {
+        "type": "String"
+      }
+    }
+  },
+  "preheat_detailTimeout": "超时",
+  "preheat_detailConnectionError": "无法建立连接",
+  "preheat_detailHttp": "HTTP {code}",
+  "@preheat_detailHttp": {
+    "placeholders": {
+      "code": {
+        "type": "int"
+      }
+    }
+  },
+  "preheat_detailParseFailed": "首页数据解析失败",
+  "preheat_elapsedSeconds": "已等待 {seconds} 秒",
+  "@preheat_elapsedSeconds": {
+    "placeholders": {
+      "seconds": {
+        "type": "int"
+      }
+    }
+  },
   "table_rowCount": "共 {count} 行",
   "@table_rowCount": {
     "placeholders": {
