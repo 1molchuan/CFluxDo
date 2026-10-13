@@ -3,7 +3,6 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fluxdo/services/log/log_writer.dart';
-import 'package:fluxdo/services/network/adapters/cronet_fallback_service.dart';
 import 'package:fluxdo/services/network/health/network_health_controller.dart';
 import 'package:fluxdo/services/network/request_scheduler_config.dart';
 import 'package:fluxdo/services/network/webview/webview_adapter_settings_service.dart';
@@ -45,19 +44,6 @@ void main() {
       expect(snapshot.webViewCompatSession, isTrue);
       expect(snapshot.isDegraded, isTrue);
       expect(snapshot.summary(), contains('compat=session'));
-    });
-
-    test('Cronet 强制降级后，快照带出降级标记', () async {
-      final cronet = CronetFallbackService.instance;
-      await cronet.setForceFallback(true);
-      addTearDown(() => cronet.setForceFallback(false));
-
-      final snapshot = NetworkHealthController.instance.snapshot();
-
-      expect(snapshot.cronetFallenBack, isTrue);
-      expect(snapshot.cronetForceFallback, isTrue);
-      expect(snapshot.isDegraded, isTrue);
-      expect(snapshot.summary(), contains('cronet=forced'));
     });
 
     test('调度器配置变化即时反映（无缓存）', () {
@@ -111,7 +97,6 @@ void main() {
         'engine',
         'engineReason',
         'shield',
-        'cronetFallenBack',
         'webViewCompatSession',
         'hasCsrfToken',
         'csrfInFailureCooldown',

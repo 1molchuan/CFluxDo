@@ -3,7 +3,6 @@ import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:dio/io.dart';
 import 'package:flutter/foundation.dart';
-import 'package:native_dio_adapter/native_dio_adapter.dart';
 
 import '../doh/network_settings_service.dart';
 import '../proxy/proxy_settings_service.dart';
@@ -12,7 +11,6 @@ import '../system_proxy_service.dart';
 import '../flux_request_spec.dart';
 import '../webview/webview_adapter_settings_service.dart';
 import 'adapter_log_metadata.dart';
-import 'cronet_fallback_service.dart';
 import 'network_http_adapter.dart';
 import '../../../l10n/s.dart';
 import 'rhttp_adapter.dart';
@@ -21,7 +19,7 @@ import 'webview_http_adapter.dart';
 /// 当前使用的适配器类型
 enum AdapterType {
   webview, // WebView 适配器（仅 Windows 显式兜底）
-  native, // Native/IO 适配器（Cronet/Cupertino/Dio IO）
+  native, // Dart IO 适配器（dart:io HttpClient 直连）
   network, // Network 适配器（通过代理）
   rhttp, // rhttp 引擎（Rust reqwest）
 }
@@ -31,7 +29,6 @@ enum AdapterReason {
   rhttp, // rhttp 已启用且满足使用条件
   gateway, // DoH 直连模式（Native + URL 改写到本地代理）
   proxy, // 本地代理（MITM）转发
-  fallback, // Cronet 已降级，走备用适配器
   native, // 默认直连
 }
 
@@ -85,15 +82,9 @@ String getAdapterDisplayName(AdapterType type) {
 HttpClientAdapter createExternalHttpAdapter() {
   final settings = NetworkSettingsService.instance;
   final proxySettings = ProxySettingsService.instance;
-  final fallbackService = CronetFallbackService.instance;
   final rhttpSettings = RhttpSettingsService.instance;
 
-  final adapter = _DynamicAdapter(
-    settings,
-    proxySettings,
-    fallbackService,
-    rhttpSettings,
-  );
+  final adapter = _DynamicAdapter(settings, proxySettings, rhttpSettings);
   return _GatewayAdapterWrapper(adapter);
 }
 
@@ -101,7 +92,6 @@ HttpClientAdapter createExternalHttpAdapter() {
 void configurePlatformAdapter(Dio dio, {bool preferWebViewFallback = false}) {
   final settings = NetworkSettingsService.instance;
   final proxySettings = ProxySettingsService.instance;
-  final fallbackService = CronetFallbackService.instance;
   final rhttpSettings = RhttpSettingsService.instance;
 
   if (Platform.isWindows && preferWebViewFallback) {
@@ -110,17 +100,15 @@ void configurePlatformAdapter(Dio dio, {bool preferWebViewFallback = false}) {
   }
 
   // 所有平台默认使用主链路动态适配；
-  // Windows 主链路为 Dio IO 适配器，WebView 仅保留显式兜底入口。
+  // 主链路为 Dio IO 适配器，WebView 仅保留显式兜底入口。
   dio.httpClientAdapter = _DynamicAdapter(
     settings,
     proxySettings,
-    fallbackService,
     rhttpSettings,
   );
   _currentAdapterType = _resolveAdapterType(
     settings,
     proxySettings,
-    fallbackService,
     rhttpSettings,
   );
 
@@ -152,28 +140,20 @@ void _configureWebViewAdapter(Dio dio) {
 AdapterType _resolveAdapterType(
   NetworkSettingsService settings,
   ProxySettingsService proxySettings,
-  CronetFallbackService fallbackService,
   RhttpSettingsService rhttpSettings,
 ) {
-  return _resolveEffective(
-    settings,
-    proxySettings,
-    fallbackService,
-    rhttpSettings,
-  ).type;
+  return _resolveEffective(settings, proxySettings, rhttpSettings).type;
 }
 
 AdapterType _resolveAdapterTypeForRequest(
   RequestOptions options,
   NetworkSettingsService settings,
   ProxySettingsService proxySettings,
-  CronetFallbackService fallbackService,
   RhttpSettingsService rhttpSettings,
 ) {
   return _resolveEffective(
     settings,
     proxySettings,
-    fallbackService,
     rhttpSettings,
     requestOptions: options,
   ).type;
@@ -187,7 +167,6 @@ EffectiveAdapter resolveEffectiveAdapter() {
   return _resolveEffective(
     NetworkSettingsService.instance,
     ProxySettingsService.instance,
-    CronetFallbackService.instance,
     RhttpSettingsService.instance,
   );
 }
@@ -195,7 +174,6 @@ EffectiveAdapter resolveEffectiveAdapter() {
 EffectiveAdapter _resolveEffective(
   NetworkSettingsService settings,
   ProxySettingsService proxySettings,
-  CronetFallbackService fallbackService,
   RhttpSettingsService rhttpSettings, {
   RequestOptions? requestOptions,
 }) {
@@ -204,17 +182,14 @@ EffectiveAdapter _resolveEffective(
       (requestOptions == null || requestAllowsRhttpAdapter(requestOptions))) {
     return const EffectiveAdapter(AdapterType.rhttp, AdapterReason.rhttp);
   }
-  // Gateway 模式：NativeAdapter 直连 + 拦截器改写 URL 到 localhost 代理
+  // Gateway 模式：Dart IO 直连 + 拦截器改写 URL 到 localhost 代理
   // 比 MITM 少一层 TLS，作为 rhttp 不可用时的次优方案
-  if (settings.isGatewayMode && !fallbackService.hasFallenBack) {
+  if (settings.isGatewayMode) {
     return const EffectiveAdapter(AdapterType.native, AdapterReason.gateway);
   }
-  // MITM 代理模式（Cronet 降级、或 gateway 不可用时的 fallback）
-  if (settings.shouldRunLocalProxy || fallbackService.hasFallenBack) {
-    final reason = fallbackService.hasFallenBack
-        ? AdapterReason.fallback
-        : AdapterReason.proxy;
-    return EffectiveAdapter(AdapterType.network, reason);
+  // MITM 代理模式（gateway 不可用时的 fallback）
+  if (settings.shouldRunLocalProxy) {
+    return const EffectiveAdapter(AdapterType.network, AdapterReason.proxy);
   }
   return const EffectiveAdapter(AdapterType.native, AdapterReason.native);
 }
@@ -224,53 +199,33 @@ bool requestAllowsRhttpAdapter(RequestOptions options) {
   return !options.spec.skipRhttpAdapter;
 }
 
-/// 创建当前平台对应的 NativeAdapter
+/// 创建 Dart IO 适配器（dart:io HttpClient）。
+///
+/// Android 下默认链路是 gateway 模式：请求被改写成明文 HTTP 送到 127.0.0.1
+/// 的 Rust 网关，TLS 在 Rust 侧完成，这里只需要一个可靠的本地 HTTP 客户端。
 HttpClientAdapter _createNativeAdapter() {
-  if (Platform.isWindows) {
-    debugPrint('[DIO] Dynamic adapter -> IOHttpClientAdapter');
-    // 与 RhttpAdapter 一致:跟随注册表系统代理,保持与 WebView2 同一出口
-    // (cf_clearance 绑 IP,出口不一致会导致 CF 验证无限循环)。
-    // findProxy 每个请求求值,系统代理开关变化即时生效。
-    return IOHttpClientAdapter(
-      createHttpClient: () {
-        final client = HttpClient();
-        client.findProxy = (uri) {
-          // Gateway 模式会把 https URL 改写为明文 http 指向本地 DoH 网关
-          // (127.0.0.1:port)。这类回环请求绝不能再进系统代理,否则明文
-          // HTTP 会被代理直接送到 CF,触发 Always-Use-HTTPS 301 死循环。
-          if (_isLoopbackHost(uri.host)) return 'DIRECT';
-          final proxy = SystemProxyService.instance.effectiveProxyUrl;
-          if (proxy == null) return 'DIRECT';
-          final u = Uri.tryParse(proxy);
-          // dart:io HttpClient 不支持 SOCKS 代理,该场景保持直连。
-          if (u == null || u.scheme.startsWith('socks')) return 'DIRECT';
-          return 'PROXY ${u.host}:${u.port}';
-        };
-        return client;
-      },
-    );
-  }
-  if (kDebugMode && (Platform.isMacOS || Platform.isIOS)) {
-    // 调试模式下使用默认适配器（IOHttpClientAdapter），避免 NativeAdapter 热重启崩溃
-    debugPrint('[DIO] Dynamic adapter -> IOHttpClientAdapter (debug mode)');
-    return IOHttpClientAdapter();
-  }
-  if (Platform.isMacOS && _macOSNeedsNativeFallback) {
-    // objective_c 原生库编译产物的 LC_BUILD_VERSION minos 可能与构建机器一致，
-    // 在低版本 macOS 上 dlopen 时 dyld 无法处理 __DATA_CONST 段保护，
-    // 触发 SIGBUS 崩溃 (KERN_PROTECTION_FAILURE in map_images_nolock)。
-    // 参见 https://github.com/dart-lang/native/issues/3011
-    debugPrint('[DIO] Dynamic adapter -> IOHttpClientAdapter (macOS < 14)');
-    return IOHttpClientAdapter();
-  }
-  if (Platform.isIOS || Platform.isMacOS) {
-    // Release 模式: URLSession 默认会自动管理 Cookie（httpShouldSetCookies=true），
-    // 会与 AppCookieManager 拦截器冲突。禁用 URLSession 的 Cookie 自动管理。
-    final config = URLSessionConfiguration.ephemeralSessionConfiguration();
-    config.httpShouldSetCookies = false;
-    return NativeAdapter(createCupertinoConfiguration: () => config);
-  }
-  return NativeAdapter();
+  debugPrint('[DIO] Dynamic adapter -> IOHttpClientAdapter');
+  // 与 RhttpAdapter 一致:跟随系统代理（目前仅 Windows 实现，其它平台恒为
+  // null 即直连），保持与 WebView 同一出口（cf_clearance 绑 IP，出口不一致
+  // 会导致 CF 验证无限循环）。findProxy 每个请求求值，代理开关变化即时生效。
+  return IOHttpClientAdapter(
+    createHttpClient: () {
+      final client = HttpClient();
+      client.findProxy = (uri) {
+        // Gateway 模式会把 https URL 改写为明文 http 指向本地 DoH 网关
+        // (127.0.0.1:port)。这类回环请求绝不能再进系统代理,否则明文
+        // HTTP 会被代理直接送到 CF,触发 Always-Use-HTTPS 301 死循环。
+        if (_isLoopbackHost(uri.host)) return 'DIRECT';
+        final proxy = SystemProxyService.instance.effectiveProxyUrl;
+        if (proxy == null) return 'DIRECT';
+        final u = Uri.tryParse(proxy);
+        // dart:io HttpClient 不支持 SOCKS 代理,该场景保持直连。
+        if (u == null || u.scheme.startsWith('socks')) return 'DIRECT';
+        return 'PROXY ${u.host}:${u.port}';
+      };
+      return client;
+    },
+  );
 }
 
 /// 回环地址判定:本地网关/本地代理的请求必须直连,不跟随系统代理。
@@ -279,22 +234,6 @@ bool _isLoopbackHost(String host) {
   final address = InternetAddress.tryParse(host);
   return address?.isLoopback ?? false;
 }
-
-/// macOS 版本 < 14 时需要降级为 IO 适配器。
-/// objective_c 框架在构建时 minos 可能被设为构建机器的 OS 版本，
-/// 导致在低版本 macOS 上 dlopen 崩溃 (dart-lang/native#3011)。
-final bool _macOSNeedsNativeFallback = () {
-  if (!Platform.isMacOS) return false;
-  try {
-    // Platform.operatingSystemVersion 格式: "Version 14.5 (Build 23F79)"
-    final ver = Platform.operatingSystemVersion;
-    final match = RegExp(r'Version (\d+)\.').firstMatch(ver);
-    if (match != null) {
-      return int.parse(match.group(1)!) < 14;
-    }
-  } catch (_) {}
-  return false;
-}();
 
 /// Gateway 适配器包装器：在传输层透明改写 URL
 ///
@@ -491,27 +430,18 @@ String _requestHeaderValueToString(Object? value) {
 
 /// 动态适配器：每次请求时根据设置 version 变化自动切换底层适配器
 ///
-/// Android 上在 rhttp ↔ network ↔ native（Cronet）之间切换；
-/// iOS/macOS 在 rhttp ↔ network ↔ native（Cupertino）之间切换；
-/// Windows 在 rhttp ↔ network ↔ native（Dio IO）之间切换。
+/// 在 rhttp ↔ network ↔ native（Dart IO）之间切换。
 class _DynamicAdapter implements HttpClientAdapter {
-  _DynamicAdapter(
-    this._settings,
-    this._proxySettings,
-    this._fallbackService,
-    this._rhttpSettings,
-  );
+  _DynamicAdapter(this._settings, this._proxySettings, this._rhttpSettings);
 
   final NetworkSettingsService _settings;
   final ProxySettingsService _proxySettings;
-  final CronetFallbackService _fallbackService;
   final RhttpSettingsService _rhttpSettings;
 
   final Map<AdapterType, HttpClientAdapter> _delegates = {};
   int _settingsVersion = -1;
   int _proxyVersion = -1;
   int _rhttpVersion = -1;
-  bool _hasFallenBack = false;
   bool _closed = false;
 
   @override
@@ -529,7 +459,6 @@ class _DynamicAdapter implements HttpClientAdapter {
       options,
       _settings,
       _proxySettings,
-      _fallbackService,
       _rhttpSettings,
     );
     final delegate = _ensureDelegate(desiredType);
@@ -542,16 +471,14 @@ class _DynamicAdapter implements HttpClientAdapter {
     final settingsVersion = _settings.version;
     final proxyVersion = _proxySettings.version;
     final rhttpVersion = _rhttpSettings.version;
-    final hasFallenBack = _fallbackService.hasFallenBack;
 
     final configChanged =
         _settingsVersion != settingsVersion ||
         _proxyVersion != proxyVersion ||
-        _rhttpVersion != rhttpVersion ||
-        _hasFallenBack != hasFallenBack;
+        _rhttpVersion != rhttpVersion;
 
     if (configChanged) {
-      // 不要强杀旧 delegate，避免进行中的 Cronet/rhttp 请求触发 native 崩溃。
+      // 不要强杀旧 delegate，避免进行中的 rhttp 请求触发 native 崩溃。
       for (final delegate in _delegates.values) {
         delegate.close(force: false);
       }
@@ -584,7 +511,6 @@ class _DynamicAdapter implements HttpClientAdapter {
     _settingsVersion = settingsVersion;
     _proxyVersion = proxyVersion;
     _rhttpVersion = rhttpVersion;
-    _hasFallenBack = hasFallenBack;
     _delegates[desiredType] = delegate;
     return delegate;
   }

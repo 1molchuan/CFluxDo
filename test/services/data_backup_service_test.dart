@@ -63,7 +63,6 @@ void main() {
         'bg_shared_session_key',
         'one_time_password',
         // 设备/运行态
-        'cronet_has_fallen_back',
         'vpn_suppressed_doh',
         'per_device_cert_installed',
         'cert_use_per_device',

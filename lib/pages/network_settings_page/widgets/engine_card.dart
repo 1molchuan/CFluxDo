@@ -1,28 +1,23 @@
 import 'dart:io';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:app_icons/app_icons.dart';
-import 'package:flutter/services.dart';
 import 'package:m3e_ui/m3e_ui.dart';
 
 import '../../../l10n/s.dart';
-import '../../../services/network/adapters/cronet_fallback_service.dart';
 import '../../../services/network/adapters/platform_adapter.dart';
 import '../../../services/network/doh/network_settings_service.dart';
 import '../../../services/network/doh/webview_mitm_policy.dart';
 import '../../../services/network/proxy/proxy_settings_service.dart';
 import '../../../services/network/rhttp/rhttp_settings_service.dart';
 import '../../../services/network/webview/webview_adapter_settings_service.dart';
-import '../../../services/toast_service.dart';
-import '../../../utils/dialog_utils.dart';
 import 'doh_settings_card.dart' show ensureWindowsCertTrusted;
 
 /// 网络引擎卡片（预设单选 + 自定义展开）
 ///
 /// 顶部用预设 chips（标准 / 高性能 / 兼容 / 自定义）单选，常用场景一键切换；
-/// 复杂开关（rhttp 模式、WebView、Android 降级）收进「自定义」展开区。
-/// 「当前生效引擎」压成一行，降级等异常即时可见。
+/// 复杂开关（rhttp 模式、WebView）收进「自定义」展开区。
+/// 「当前生效引擎」压成一行，会话级兼容通道等异常即时可见。
 class EngineCard extends StatefulWidget {
   const EngineCard({super.key});
 
@@ -40,7 +35,6 @@ class _EngineCardState extends State<EngineCard> {
     final theme = Theme.of(context);
     final rhttp = RhttpSettingsService.instance;
     final webview = WebViewAdapterSettingsService.instance;
-    final fallbackService = CronetFallbackService.instance;
 
     return AnimatedBuilder(
       animation: Listenable.merge([
@@ -50,7 +44,6 @@ class _EngineCardState extends State<EngineCard> {
         ProxySettingsService.instance.notifier,
         webview.notifier,
         webview.effectiveNotifier,
-        fallbackService,
       ]),
       builder: (context, _) {
         final rhttpSettings = rhttp.current;
@@ -80,7 +73,7 @@ class _EngineCardState extends State<EngineCard> {
               ),
               _divider(theme),
               // 当前生效引擎（压一行）
-              _buildCurrentEngineRow(theme, fallbackService),
+              _buildCurrentEngineRow(theme),
               // 自定义展开区
               AnimatedCrossFade(
                 duration: const Duration(milliseconds: 200),
@@ -94,7 +87,6 @@ class _EngineCardState extends State<EngineCard> {
                   rhttpSettings,
                   webview,
                   webviewEnabled,
-                  fallbackService,
                 ),
               ),
             ],
@@ -216,21 +208,16 @@ class _EngineCardState extends State<EngineCard> {
 
   // ---- 当前生效引擎（一行）----
 
-  Widget _buildCurrentEngineRow(
-    ThemeData theme,
-    CronetFallbackService fallbackService,
-  ) {
+  Widget _buildCurrentEngineRow(ThemeData theme) {
     final effective = resolveEffectiveAdapter();
     final engineName = getAdapterDisplayName(effective.type);
-    final isFallback = effective.reason == AdapterReason.fallback;
     final webviewSettings = WebViewAdapterSettingsService.instance;
     final webviewEnabled = webviewSettings.effectiveEnabled;
     final sessionFallback = webviewSettings.sessionFallbackEnabled;
-    final showReset = isFallback && Platform.isAndroid && !sessionFallback;
 
     // WebView 在最外层分流：主站 API 走 WebView，其余走推算出的引擎。
     // 它不参与 resolveEffectiveAdapter()，所以开启时要单独显示分流，
-    // 否则「兼容」预设会错误地只显示 native/Cronet。
+    // 否则「兼容」预设会错误地只显示 native。
     final IconData icon;
     final Color iconColor;
     final InlineSpan span;
@@ -245,9 +232,7 @@ class _EngineCardState extends State<EngineCard> {
       );
     } else {
       icon = _engineIcon(effective.type);
-      iconColor = isFallback
-          ? theme.colorScheme.error
-          : theme.colorScheme.primary;
+      iconColor = theme.colorScheme.primary;
       span = TextSpan(
         children: [
           TextSpan(
@@ -259,9 +244,7 @@ class _EngineCardState extends State<EngineCard> {
           TextSpan(
             text: engineName,
             style: theme.textTheme.bodySmall?.copyWith(
-              color: isFallback
-                  ? theme.colorScheme.error
-                  : theme.colorScheme.onSurface,
+              color: theme.colorScheme.onSurface,
               fontWeight: FontWeight.w600,
             ),
           ),
@@ -276,7 +259,7 @@ class _EngineCardState extends State<EngineCard> {
     }
 
     return Padding(
-      padding: EdgeInsets.fromLTRB(16, 10, showReset ? 4 : 16, 10),
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
       child: Row(
         children: [
           Icon(icon, size: 18, color: iconColor),
@@ -288,13 +271,6 @@ class _EngineCardState extends State<EngineCard> {
               overflow: TextOverflow.ellipsis,
             ),
           ),
-          if (showReset)
-            IconButton(
-              tooltip: context.l10n.networkAdapter_resetFallback,
-              icon: const Icon(Symbols.refresh_rounded, size: 20),
-              visualDensity: VisualDensity.compact,
-              onPressed: () => _resetFallbackState(fallbackService),
-            ),
           if (sessionFallback)
             IconButton(
               tooltip: S.current.cf_sessionCompatDisable,
@@ -315,7 +291,6 @@ class _EngineCardState extends State<EngineCard> {
     RhttpSettings rhttpSettings,
     WebViewAdapterSettingsService webview,
     bool webviewEnabled,
-    CronetFallbackService fallbackService,
   ) {
     final l10n = context.l10n;
     final rhttpEnabled = rhttpSettings.enabled;
@@ -388,73 +363,8 @@ class _EngineCardState extends State<EngineCard> {
           value: webviewEnabled,
           onChanged: (value) => _setWebViewEnabled(value, webview),
         ),
-        // Android：Cronet 降级控制
-        if (Platform.isAndroid)
-          ..._buildFallbackControls(theme, fallbackService),
       ],
     );
-  }
-
-  /// Android Cronet 降级控制
-  List<Widget> _buildFallbackControls(
-    ThemeData theme,
-    CronetFallbackService fallbackService,
-  ) {
-    final l10n = context.l10n;
-    final hasFallenBack = fallbackService.hasFallenBack;
-    final forceFallback = fallbackService.forceFallback;
-    final failureReason = fallbackService.fallbackReason;
-    final autoFellBack = hasFallenBack && !forceFallback;
-
-    return [
-      _divider(theme),
-      SwitchListTile(
-        secondary: const Icon(Symbols.swap_horiz_rounded),
-        title: Text(l10n.networkAdapter_forceFallback),
-        subtitle: Text(l10n.networkAdapter_forceFallbackDesc),
-        value: forceFallback,
-        onChanged: (value) async {
-          await fallbackService.setForceFallback(value);
-          ToastService.showSuccess(S.current.networkAdapter_settingSaved);
-        },
-      ),
-      if (autoFellBack) ...[
-        ListTile(
-          leading: Icon(Symbols.info_rounded, color: theme.colorScheme.error),
-          title: Text(l10n.networkAdapter_autoFallback),
-          subtitle: Text(l10n.networkAdapter_autoFallbackDesc),
-          dense: true,
-        ),
-        if (failureReason != null)
-          ListTile(
-            leading: const Icon(Symbols.bug_report_rounded),
-            title: Text(l10n.networkAdapter_viewReason),
-            trailing: const Icon(Symbols.chevron_right_rounded, size: 20),
-            dense: true,
-            onTap: () => _showFailureReasonDialog(failureReason),
-          ),
-        ListTile(
-          leading: const Icon(Symbols.refresh_rounded),
-          title: Text(l10n.networkAdapter_resetFallback),
-          subtitle: Text(l10n.networkAdapter_resetFallbackDesc),
-          trailing: const Icon(Symbols.chevron_right_rounded, size: 20),
-          dense: true,
-          onTap: () => _resetFallbackState(fallbackService),
-        ),
-      ],
-      if (kDebugMode && !hasFallenBack)
-        ListTile(
-          leading: Icon(
-            Symbols.science_rounded,
-            color: theme.colorScheme.tertiary,
-          ),
-          title: Text(l10n.networkAdapter_simulateError),
-          subtitle: Text(l10n.networkAdapter_simulateErrorDesc),
-          trailing: const Icon(Symbols.chevron_right_rounded, size: 20),
-          dense: true,
-          onTap: () => _simulateCronetError(fallbackService),
-        ),
-    ];
   }
 
   // ---- 小组件 / 映射 ----
@@ -506,95 +416,7 @@ class _EngineCardState extends State<EngineCard> {
       AdapterReason.rhttp => l10n.engineStatus_reasonRhttp,
       AdapterReason.gateway => l10n.engineStatus_reasonGateway,
       AdapterReason.proxy => l10n.engineStatus_reasonProxy,
-      AdapterReason.fallback => l10n.engineStatus_reasonFallback,
       AdapterReason.native => l10n.engineStatus_reasonNative,
     };
-  }
-
-  // ---- 降级对话框 ----
-
-  Future<void> _showFailureReasonDialog(String reason) async {
-    await showAppDialog(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: Text(dialogContext.l10n.networkAdapter_degradeReason),
-        content: SingleChildScrollView(
-          child: SelectableText(
-            reason,
-            style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: Text(dialogContext.l10n.common_close),
-          ),
-          FilledButton(
-            onPressed: () {
-              Clipboard.setData(ClipboardData(text: reason));
-              ToastService.showSuccess(S.current.common_copiedToClipboard);
-            },
-            child: Text(dialogContext.l10n.common_copy),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _resetFallbackState(
-    CronetFallbackService fallbackService,
-  ) async {
-    final confirm = await showAppDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: Text(dialogContext.l10n.networkAdapter_resetFallback),
-        content: Text(dialogContext.l10n.networkAdapter_resetFallbackDesc),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: Text(dialogContext.l10n.common_cancel),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(dialogContext, true),
-            child: Text(dialogContext.l10n.common_reset),
-          ),
-        ],
-      ),
-    );
-
-    if (confirm == true) {
-      await fallbackService.reset();
-      ToastService.showSuccess(S.current.networkAdapter_resetSuccess);
-    }
-  }
-
-  Future<void> _simulateCronetError(
-    CronetFallbackService fallbackService,
-  ) async {
-    final confirm = await showAppDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: Text(dialogContext.l10n.networkAdapter_simulateError),
-        content: Text(dialogContext.l10n.networkAdapter_simulateErrorDesc),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: Text(dialogContext.l10n.common_cancel),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: Theme.of(dialogContext).colorScheme.tertiary,
-            ),
-            onPressed: () => Navigator.pop(dialogContext, true),
-            child: Text(dialogContext.l10n.common_confirm),
-          ),
-        ],
-      ),
-    );
-
-    if (confirm == true) {
-      await fallbackService.simulateCronetError();
-      ToastService.showInfo(S.current.networkAdapter_simulateSuccess);
-    }
   }
 }

@@ -13,7 +13,6 @@ import 'interceptors/error_interceptor.dart';
 import 'interceptors/network_log_interceptor.dart';
 import 'interceptors/redirect_interceptor.dart';
 import 'interceptors/request_header_interceptor.dart';
-import 'recovery/engine_fallback_policy.dart';
 import 'recovery/policies.dart';
 import 'recovery/recovery_coordinator.dart';
 import 'recovery/session_heal_policy.dart';
@@ -70,14 +69,14 @@ class DiscourseDio {
     // 4. 恢复协调器:全项目唯一的重放引擎
     //
     // 策略顺序即失败归属(首个 canHandle 者独占决策权):
-    //   会话自愈 → 引擎降级 → 限流等待 → 瞬态重试
+    //   会话自愈 → 限流等待 → 瞬态重试
     //
     // 必须注册在 AppCookieManager **之前**:dio 5.11 三相全 FIFO,先注册者
     // 先看到响应。服务端拒绝时常带 Set-Cookie 清 _t,自愈判定要读的是那条
     // 删除指令**落库前**的 jar 快照——顺序颠倒会让它误判"真登出"跳过自愈。
     // 契约测试: test/services/network/recovery/session_heal_test.dart
     //
-    // 取代 dio_smart_retry + SelfHealingInterceptor + CronetFallbackInterceptor。
+    // 取代 dio_smart_retry + SelfHealingInterceptor。
     // 与 dio_smart_retry 的行为差异是刻意的:
     // - 5xx 只对幂等方法重放,POST 重放会造成重复发帖;
     // - 429 区分挑战型(交 CF 盾)与真限流,并尊重 Retry-After;
@@ -90,7 +89,6 @@ class DiscourseDio {
           dio: dio,
           policies: [
             if (cookiesEnabled) SessionSelfHealPolicy(),
-            const EngineFallbackPolicy(),
             RateLimitPolicy(
               isChallengeResponse: CfChallengeService.isCfChallengeError,
             ),

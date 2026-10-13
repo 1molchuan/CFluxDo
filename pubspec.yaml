@@ -30,7 +30,6 @@ dependencies:
   dio: ^5.11.0
   http: ^1.6.0
   cookie_jar: ^4.0.8
-  native_dio_adapter: ^1.6.0
   flutter_secure_storage: ^10.3.1
   flutter_inappwebview: ^6.2.0-beta.3
   # 编辑器 1:1 预览:跑 Discourse 官方 markdown-it cook bundle(QuickJS,走 FFI)
@@ -112,7 +111,6 @@ dependencies:
   # MediaCompatService 本地副本文件名(sha1(url),确定性、重启可复用)
   crypto: ^3.0.7
   hive_ce: ^2.19.3
-  cronet_http: ^1.8.0
   package_info_plus: ^8.1.2
   pro_image_editor: ^11.18.4
   flutter_image_compress: ^2.4.0

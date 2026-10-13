@@ -6,7 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
 import '../../constants.dart';
-import '../network/adapters/cronet_fallback_service.dart';
+import '../network/adapters/platform_adapter.dart';
 import '../network/doh/network_settings_service.dart';
 import '../network/health/network_health_controller.dart';
 import '../network/proxy/proxy_settings_service.dart';
@@ -186,9 +186,8 @@ class LoggerUtils {
   static List<String> _getNetworkConfigLines() {
     final lines = <String>[];
 
-    // 适配器
-    final cronet = CronetFallbackService.instance;
-    lines.add('适配器: ${cronet.hasFallenBack ? 'Dart IO' : 'Cronet'}');
+    // 适配器（最近一次请求实际走的引擎）
+    lines.add('适配器: ${getCurrentAdapterType()?.name ?? 'unknown'}');
 
     // DOH 配置
     final doh = NetworkSettingsService.instance.current;
@@ -216,8 +215,7 @@ class LoggerUtils {
   static Map<String, dynamic> _getNetworkConfigMap() {
     final map = <String, dynamic>{};
 
-    final cronet = CronetFallbackService.instance;
-    map['adapter'] = cronet.hasFallenBack ? 'Dart IO' : 'Cronet';
+    map['adapter'] = getCurrentAdapterType()?.name ?? 'unknown';
 
     final doh = NetworkSettingsService.instance.current;
     map['dohEnabled'] = doh.dohEnabled;

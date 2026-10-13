@@ -35,7 +35,6 @@ import 'services/network/cookie/cookie_devtools_extension.dart';
 import 'services/network/cookie/cookie_jar_service.dart';
 import 'services/network/cookie/cookie_store_observer.dart';
 import 'services/network/cookie/session_token_lineage.dart';
-import 'services/network/adapters/cronet_fallback_service.dart';
 import 'services/local_notification_service.dart';
 import 'services/data_management/cache_size_service.dart';
 import 'services/discourse_cache_manager.dart';
@@ -280,7 +279,6 @@ Future<void> main() async {
   // 开发者模式下 debug 级日志落盘（高频追踪信息）
   AppLogger.setVerbose(developerMode);
   await Future.wait([
-    CronetFallbackService.instance.initialize(prefs),
     ProxySettingsService.instance.initialize(prefs),
     if (Platform.isAndroid)
       MethodChannel(
