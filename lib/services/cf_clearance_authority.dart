@@ -110,7 +110,8 @@ class CfClearanceAuthority {
     }
 
     // 3. 在位值过期/临期：自然换届窗口，放行（新铸值无缝继位）。
-    final expires = current?.expiresAt?.toLocal();
+    // 只做时刻比较,与 DateTime 的 UTC/本地标记无关,不需要 toLocal
+    final expires = current?.expiresAt;
     if (expires != null) {
       final now = DateTime.now();
       if (!expires.isAfter(now)) return CfClearanceReplaceDecision.allow;

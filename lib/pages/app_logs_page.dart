@@ -18,6 +18,7 @@ import 'package:m3e_ui/m3e_ui.dart';
 import '../widgets/post/reply_sheet.dart';
 import '../l10n/s.dart';
 import '../utils/dialog_utils.dart';
+import '../utils/time_utils.dart';
 
 /// 日志类型筛选（公开供调试工具等入口预设初始筛选）
 enum LogTypeFilter {
@@ -691,9 +692,8 @@ class _AppLogsPageState extends State<AppLogsPage> {
   /// 行内时间戳：HH:mm:ss（等宽对齐）
   String _formatTime(String? timestamp) {
     if (timestamp == null) return '';
-    final time = DateTime.tryParse(timestamp);
-    if (time == null) return '';
-    final local = time.toLocal();
+    final local = TimeUtils.parseUtcTime(timestamp);
+    if (local == null) return '';
     return '${local.hour.toString().padLeft(2, '0')}:'
         '${local.minute.toString().padLeft(2, '0')}:'
         '${local.second.toString().padLeft(2, '0')}';
@@ -703,9 +703,7 @@ class _AppLogsPageState extends State<AppLogsPage> {
   String _formatDate(DateTime local) => '${local.month}-${local.day}';
 
   static DateTime? _entryLocalTime(Map<String, dynamic> entry) {
-    final raw = entry['timestamp']?.toString();
-    if (raw == null) return null;
-    return DateTime.tryParse(raw)?.toLocal();
+    return TimeUtils.parseUtcTime(entry['timestamp']?.toString());
   }
 
   static bool _sameDay(DateTime? a, DateTime? b) {

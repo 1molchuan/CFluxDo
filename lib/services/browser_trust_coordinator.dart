@@ -775,7 +775,7 @@ class BrowserTrustCoordinator {
       _nativeUntrustedReason = StartupDetourReason.noClearance;
       return false;
     }
-    final expiresAt = clearance.expiresAt?.toLocal();
+    final expiresAt = clearance.expiresAt;
     if (expiresAt == null) {
       _log('native trust check: trusted, no expires');
       return true;
@@ -814,7 +814,7 @@ class BrowserTrustCoordinator {
       );
       return false;
     }
-    final expiresAt = clearance.expiresAt?.toLocal();
+    final expiresAt = clearance.expiresAt;
     if (expiresAt == null) {
       _log('request gate trust check: trusted, no expires');
       return true;

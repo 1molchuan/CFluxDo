@@ -719,7 +719,7 @@ document.close();
     final cookie = await CookieJarService().getCanonicalCookie(_cookieName);
     if (cookie == null || cookie.value.isEmpty) return null;
     if (!CookieJarService.matchesAppHost(cookie.domain)) return null;
-    final expiresAt = cookie.expiresAt?.toLocal();
+    final expiresAt = cookie.expiresAt;
     if (expiresAt != null && !expiresAt.isAfter(DateTime.now())) {
       return null;
     }

@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/topic.dart';
 import '../storage/bookmark_cache_dao.dart';
 import '../utils/bookmark_name_utils.dart';
+import '../utils/time_utils.dart';
 
 /// 单条书签的展示态：从 [BookmarkCacheEntry] 反序列化出 [Topic]，并保留
 /// 对账所需的书签自身 `updated_at`。
@@ -76,13 +77,15 @@ BookmarkPageParseResult parseBookmarkPage(Map<String, dynamic> rawResponse) {
     final topic = Topic.fromJson(normalized, userMap: userMap);
     final bookmarkId = normalized['_bookmark_id'] as int?;
     final topicId = normalized['id'] as int?;
-    final updatedAtRaw = normalized['_bookmark_updated_at'] as String?;
-    if (bookmarkId == null || topicId == null || updatedAtRaw == null) {
-      // 容错：缺关键字段就只显示，不写缓存（避免存进去后续对账无法识别）。
+    final updatedAt = TimeUtils.parseUtcTime(
+      normalized['_bookmark_updated_at'] as String?,
+    );
+    if (bookmarkId == null || topicId == null || updatedAt == null) {
+      // 容错：缺关键字段或时间格式异常就只显示，不写缓存（避免存进去后续
+      // 对账无法识别;此前 DateTime.parse 遇到坏格式会让整页书签列表抛异常）。
       topics.add(topic);
       continue;
     }
-    final updatedAt = DateTime.parse(updatedAtRaw);
     topics.add(topic);
     entries.add(
       BookmarkCacheEntry(
