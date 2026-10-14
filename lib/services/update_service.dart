@@ -161,39 +161,19 @@ class UpdateService {
     return packageInfo.version;
   }
 
-  /// 获取设备 CPU 架构
-  ///
-  /// 返回 GitHub Release 中使用的架构名称：
-  /// - arm64-v8a
-  /// - armeabi-v7a
-  /// - x86_64
-  Future<String?> getDeviceArchitecture() async {
-    if (!Platform.isAndroid) return null;
+  /// 发行包只出这一种 ABI(见 README 构建说明)
+  static const String releaseAbi = 'arm64-v8a';
+
+  /// 当前设备能否装发行包:supportedAbis 里有 arm64-v8a 即可(64 位 ARM
+  /// 设备都满足;此前的多架构优先级映射对只出一种包的发行没有意义)
+  Future<bool> deviceSupportsReleaseAbi() async {
+    if (!Platform.isAndroid) return false;
 
     try {
-      final deviceInfo = DeviceInfoPlugin();
-      final androidInfo = await deviceInfo.androidInfo;
-      final abis = androidInfo.supportedAbis;
-
-      if (abis.isEmpty) return null;
-
-      // 按优先级匹配架构
-      final architectureMap = {
-        'arm64-v8a': 'arm64-v8a',
-        'armeabi-v7a': 'armeabi-v7a',
-        'x86_64': 'x86_64',
-        'x86': 'x86_64', // x86 设备通常兼容 x86_64
-      };
-
-      for (final abi in abis) {
-        if (architectureMap.containsKey(abi)) {
-          return architectureMap[abi];
-        }
-      }
-
-      return null;
+      final androidInfo = await DeviceInfoPlugin().androidInfo;
+      return androidInfo.supportedAbis.contains(releaseAbi);
     } catch (e) {
-      return null;
+      return false;
     }
   }
 
@@ -230,48 +210,21 @@ class UpdateService {
       }
     }
 
-    // 获取存储的 ETag
-    final storedEtag = _prefs?.getString(_etagKey);
-
     try {
-      final response = await _dio.get(
-        _apiUrl,
-        options: Options(
-          responseType: ResponseType.json,
-          headers: {
-            'User-Agent': 'FluxDO-App',
-            'Accept': 'application/vnd.github.v3+json',
-            if (storedEtag != null) 'If-None-Match': storedEtag,
-          },
-          validateStatus: (status) =>
-              status != null && (status == 200 || status == 304),
-        ),
-      );
-
-      // 304 Not Modified - 使用缓存
-      if (response.statusCode == 304) {
-        final cachedInfo =
-            _getCachedUpdateInfo(currentVersion, ignoreExpiry: true);
-        if (cachedInfo != null) {
-          // 更新缓存时间
-          await _prefs?.setInt(
-              _cacheTimeKey, DateTime.now().millisecondsSinceEpoch);
-          return cachedInfo;
-        }
+      final storedEtag = _prefs?.getString(_etagKey);
+      var updateInfo =
+          await _fetchUpdateInfo(currentVersion, etag: storedEtag);
+      if (updateInfo == null && storedEtag != null) {
+        // 304 但本地缓存已不在(缓存解析失败、备份恢复只带回了 ETag):
+        // 此前这里会把 304 的空 body 当 Release JSON 解析直接抛类型错误,
+        // 且 ETag 不清,之后每次手动检查都同样失败。改为丢掉 ETag 全量再取。
+        await _prefs?.remove(_etagKey);
+        updateInfo = await _fetchUpdateInfo(currentVersion, etag: null);
       }
-
-      // 保存 ETag
-      final newEtag = response.headers.value('etag');
-      if (newEtag != null) {
-        await _prefs?.setString(_etagKey, newEtag);
+      if (updateInfo == null) {
+        // 不带 If-None-Match 服务端不会回 304,到这里只能是异常情况
+        throw Exception('GitHub returned 304 without a cached release');
       }
-
-      final data = response.data as Map<String, dynamic>;
-      final updateInfo = _parseUpdateInfo(data, currentVersion);
-
-      // 缓存结果
-      await _cacheUpdateInfo(updateInfo);
-
       return updateInfo;
     } on DioException catch (e) {
       // 403/429 速率限制时尝试使用缓存
@@ -285,6 +238,55 @@ class UpdateService {
       }
       rethrow;
     }
+  }
+
+  /// 请求一次 Release 接口。
+  ///
+  /// 304 → 返回本地缓存(可能为 null,由调用方决定是否重取);
+  /// 200 → 解析并落缓存,**之后**才保存 ETag。顺序不能反:先存 ETag 再解析,
+  /// 解析一旦失败就留下一个指向空缓存的 ETag,下次 304 只能报错。
+  Future<UpdateInfo?> _fetchUpdateInfo(
+    String currentVersion, {
+    required String? etag,
+  }) async {
+    final response = await _dio.get(
+      _apiUrl,
+      options: Options(
+        responseType: ResponseType.json,
+        headers: {
+          'User-Agent': 'FluxDO-App',
+          'Accept': 'application/vnd.github.v3+json',
+          if (etag != null) 'If-None-Match': etag,
+        },
+        validateStatus: (status) =>
+            status != null && (status == 200 || status == 304),
+      ),
+    );
+
+    if (response.statusCode == 304) {
+      final cachedInfo =
+          _getCachedUpdateInfo(currentVersion, ignoreExpiry: true);
+      if (cachedInfo != null) {
+        // 内容未变,只续一下缓存时间
+        await _prefs?.setInt(
+            _cacheTimeKey, DateTime.now().millisecondsSinceEpoch);
+      }
+      return cachedInfo;
+    }
+
+    final data = response.data;
+    if (data is! Map) {
+      throw Exception('Unexpected GitHub release payload');
+    }
+    final updateInfo =
+        _parseUpdateInfo(Map<String, dynamic>.from(data), currentVersion);
+    await _cacheUpdateInfo(updateInfo);
+
+    final newEtag = response.headers.value('etag');
+    if (newEtag != null) {
+      await _prefs?.setString(_etagKey, newEtag);
+    }
+    return updateInfo;
   }
 
   /// 从缓存获取更新信息
@@ -387,7 +389,7 @@ class UpdateService {
       if (!name.endsWith('.apk')) continue;
 
       // 从文件名中提取架构
-      // 例如：fluxdo-0.1.11-arm64-v8a.apk
+      // 例如：cfluxdo-1.0.0-beta.2-arm64-v8a.apk
       final architecture = _extractArchitecture(name);
       if (architecture == null) continue;
 
@@ -403,24 +405,16 @@ class UpdateService {
     return apkAssets;
   }
 
-  /// 从 APK 文件名中提取架构
-  String? _extractArchitecture(String fileName) {
-    const architectures = ['arm64-v8a', 'armeabi-v7a', 'x86_64'];
-    for (final arch in architectures) {
-      if (fileName.contains(arch)) {
-        return arch;
-      }
-    }
-    return null;
-  }
+  /// 从 APK 文件名中识别 ABI;发行包只出 arm64-v8a,其余文件一律忽略
+  String? _extractArchitecture(String fileName) =>
+      fileName.contains(releaseAbi) ? releaseAbi : null;
 
-  /// 获取匹配当前设备架构的 APK 资源
+  /// 获取当前设备可安装的 APK 资源:设备支持 arm64-v8a 且 Release 里有该包
   Future<ApkAsset?> getMatchingApkAsset(UpdateInfo updateInfo) async {
-    final architecture = await getDeviceArchitecture();
-    if (architecture == null) return null;
+    if (!await deviceSupportsReleaseAbi()) return null;
 
     for (final asset in updateInfo.apkAssets) {
-      if (asset.architecture == architecture) {
+      if (asset.architecture == releaseAbi) {
         return asset;
       }
     }
@@ -437,7 +431,7 @@ class UpdateService {
   ///
   /// 数字段不限段数(cfluxdo 曾用第 4 段表示基于同一上游版本的修订,
   /// 0.2.28.1);`-` 之后是预发布标识(1.0.0-beta):数字段相同时无标识
-  /// 大于有标识,都有标识按字符串比较。非数字段按 0 处理,不抛异常
+  /// 大于有标识,都有标识按 semver 规则比较。非数字段按 0 处理,不抛异常
   /// (1.0.0-beta 之前的版本在这里 int.parse 会炸,手动检查直接报错)。
   int _compareVersions(String v1, String v2) {
     final (numbers1, pre1) = _splitVersion(v1);
@@ -453,7 +447,34 @@ class UpdateService {
     if (pre1 == null && pre2 == null) return 0;
     if (pre1 == null) return 1;
     if (pre2 == null) return -1;
-    return pre1.compareTo(pre2);
+    return _comparePreRelease(pre1, pre2);
+  }
+
+  /// 预发布标识按 semver 规则比较:以 `.` 分段,纯数字段按数值比较且小于
+  /// 非数字段,其余按 ASCII;公共前缀相同时段数少的小。
+  /// 直接比字符串会得出 beta.10 < beta.2、beta.2 < beta,到 beta.10 或
+  /// 正式版 1.0.0 时推送就乱了。
+  int _comparePreRelease(String a, String b) {
+    final partsA = a.split('.');
+    final partsB = b.split('.');
+    final length =
+        partsA.length < partsB.length ? partsA.length : partsB.length;
+    for (var i = 0; i < length; i++) {
+      final numA = int.tryParse(partsA[i]);
+      final numB = int.tryParse(partsB[i]);
+      final int cmp;
+      if (numA != null && numB != null) {
+        cmp = numA.compareTo(numB);
+      } else if (numA != null) {
+        cmp = -1;
+      } else if (numB != null) {
+        cmp = 1;
+      } else {
+        cmp = partsA[i].compareTo(partsB[i]);
+      }
+      if (cmp != 0) return cmp;
+    }
+    return partsA.length.compareTo(partsB.length);
   }
 
   /// 拆成数字段与预发布标识;`+` 之后的构建号不参与比较。
