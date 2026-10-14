@@ -5,8 +5,10 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../models/user.dart';
+import '../../../pages/network_settings_page/widgets/cf_select_privacy_dialog.dart';
 import 'accel_doh_api.dart';
 import 'accel_doh_connect_flow.dart';
+import 'network_settings_service.dart';
 
 /// 加速 DoH 当前处在哪一档
 enum AccelDohAuthStatus {
@@ -438,6 +440,14 @@ class AccelDohAuthService extends ChangeNotifier {
     if (_consentPromptTimer != null || _consentPromptShowing) return;
     _consentPromptTimer = Timer(consentPromptDelay, () async {
       _consentPromptTimer = null;
+      // 本地优选的隐私说明正在显示：不叠弹，推后再查
+      if (CfSelectPrivacyDialog.isShowing) {
+        _scheduleConsentPrompt();
+        return;
+      }
+      // 1.1 起本地优选是一等连接方式：已经选出赢家就不自动弹专属加速的
+      // Connect 授权（菜单里手动授权不受影响）
+      if (NetworkSettingsService.instance.selectorHasWinner) return;
       final user = _user;
       if (user == null ||
           user.trustLevel < minTrustLevel ||

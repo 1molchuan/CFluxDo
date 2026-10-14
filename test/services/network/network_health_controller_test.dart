@@ -34,6 +34,18 @@ void main() {
       expect(snapshot.isDegraded, isFalse);
     });
 
+    test('本地优选未跑过时 phase 为 idle、无赢家，摘要仍带 select= 段', () {
+      // 1.1 起本地优选是一等连接方式,归因网络问题时必须知道当时走的是
+      // 优选赢家还是回退线路,所以摘要里无条件带 select= 段。
+      final snapshot = NetworkHealthController.instance.snapshot();
+
+      expect(snapshot.cfSelectPhase, 'idle');
+      expect(snapshot.cfSelectWinner, isNull);
+      expect(snapshot.summary(), contains('select=idle'));
+      expect(snapshot.toJson()['cfSelectPhase'], 'idle');
+      expect(snapshot.toJson().containsKey('cfSelectWinner'), isFalse);
+    });
+
     test('会话级兼容通道开启后，快照与 isDegraded 同步变化', () {
       final webView = WebViewAdapterSettingsService.instance;
       addTearDown(webView.disableSessionFallback);
@@ -103,6 +115,7 @@ void main() {
         'hasForegroundUi',
         'maxConcurrent',
         'isDegraded',
+        'cfSelectPhase',
       ]) {
         expect(entry.containsKey(key), isTrue, reason: '缺字段 $key');
       }

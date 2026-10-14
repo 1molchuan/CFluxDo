@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:app_icons/app_icons.dart';
 
 import '../../l10n/s.dart';
+import '../../pages/network_settings_page/widgets/cf_select_card.dart';
 import '../../pages/network_settings_page/widgets/cf_verify_card.dart';
 import '../../pages/network_settings_page/widgets/debug_tools_card.dart';
 import '../../pages/network_settings_page/widgets/doh_settings_card.dart';
@@ -37,6 +38,13 @@ List<SettingsGroup> buildNetworkGroups(BuildContext context) {
       icon: Symbols.dns_rounded,
       wrapInCard: false,
       items: [
+        // 1.1 起本地优选是一等连接方式，放在 DoH 之前
+        CustomModel(
+          id: 'cfSelect',
+          title: l10n.cfSelect_title,
+          subtitle: l10n.networkSettings_proxy,
+          builder: (_, _) => const CfSelectCard(),
+        ),
         CustomModel(
           id: 'dohSettings',
           title: 'DNS over HTTPS',

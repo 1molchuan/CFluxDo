@@ -7,6 +7,7 @@ import '../../local_notification_service.dart' show navigatorKey;
 import '../../log/log_writer.dart';
 import '../adapters/platform_adapter.dart';
 import '../cookie/csrf_token_service.dart';
+import '../doh/network_settings_service.dart';
 import '../request_scheduler_config.dart';
 import '../webview/webview_adapter_settings_service.dart';
 
@@ -35,6 +36,7 @@ class NetworkHealthController {
     final webView = WebViewAdapterSettingsService.instance;
     final csrf = CsrfTokenService();
     final engine = resolveEffectiveAdapter();
+    final select = NetworkSettingsService.instance.selectStatusNotifier.value;
 
     return NetworkHealthSnapshot(
       engine: engine.type,
@@ -54,6 +56,9 @@ class NetworkHealthController {
       maxConcurrent: RequestSchedulerConfig.maxConcurrent,
       maxPerWindow: RequestSchedulerConfig.maxPerWindow,
       windowSeconds: RequestSchedulerConfig.windowSeconds,
+      cfSelectPhase: select?.phase ?? 'idle',
+      cfSelectWinner: select?.winnerIp,
+      cfSelectLatencyMs: select?.latencyMs,
     );
   }
 
@@ -134,6 +139,9 @@ class NetworkHealthSnapshot {
     required this.maxConcurrent,
     required this.maxPerWindow,
     required this.windowSeconds,
+    required this.cfSelectPhase,
+    this.cfSelectWinner,
+    this.cfSelectLatencyMs,
   });
 
   // --- 引擎 ---
@@ -163,6 +171,16 @@ class NetworkHealthSnapshot {
   final int maxPerWindow;
   final int windowSeconds;
 
+  // --- 本地优选(1.1 起一等连接方式)---
+  /// 优选阶段:`idle` / `verifying` / `racing` / `ready` / `failed`
+  final String cfSelectPhase;
+
+  /// 当前赢家 IP,没有赢家时为 null
+  final String? cfSelectWinner;
+
+  /// 赢家握手延迟(毫秒)
+  final int? cfSelectLatencyMs;
+
   /// 是否有任何降级/异常在生效(供 UI 或日志快速判断)。
   bool get isDegraded =>
       shield != ShieldState.ok || webViewCompatSession || csrfInFailureCooldown;
@@ -187,6 +205,11 @@ class NetworkHealthSnapshot {
     if (csrfInFailureCooldown) parts.add('csrfCooldown=on');
     if (!hasForegroundUi) parts.add('ui=headless');
     parts.add('sched=$maxConcurrent/$maxPerWindow per ${windowSeconds}s');
+    if (cfSelectPhase == 'ready' && cfSelectWinner != null) {
+      parts.add('select=ready($cfSelectWinner/${cfSelectLatencyMs ?? '-'}ms)');
+    } else {
+      parts.add('select=$cfSelectPhase');
+    }
     return parts.join(' ');
   }
 
@@ -212,6 +235,9 @@ class NetworkHealthSnapshot {
     'maxPerWindow': maxPerWindow,
     'windowSeconds': windowSeconds,
     'isDegraded': isDegraded,
+    'cfSelectPhase': cfSelectPhase,
+    if (cfSelectWinner != null) 'cfSelectWinner': cfSelectWinner,
+    if (cfSelectLatencyMs != null) 'cfSelectLatencyMs': cfSelectLatencyMs,
   };
 
   @override

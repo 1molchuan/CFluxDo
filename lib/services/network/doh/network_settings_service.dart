@@ -6,9 +6,11 @@ import 'dart:math' show Random;
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart' as inappwebview;
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../constants.dart';
+import '../../connectivity_service.dart';
 import '../../preloaded_data_service.dart';
 import '../doh_proxy/cert_preference_service.dart';
 import '../doh_proxy/doh_proxy_ffi.dart';
@@ -24,8 +26,32 @@ import '../webview/webview_adapter_settings_service.dart';
 import '../../windows_webview_environment_service.dart';
 import 'accel_doh_auth_service.dart';
 import 'accel_doh_nodes.dart';
+import 'cfhub_api.dart';
+import 'cfhub_probe_auth_service.dart';
 import 'doh_resolver.dart';
 import 'webview_mitm_policy.dart';
+
+/// 本地动态优选的模式（只在 Android 网关模式下生效）
+enum CfSelectMode {
+  /// 本地优选一等：atlas 路由表的候选也参与竞速，赢家直接用
+  localAtlas('local_atlas'),
+
+  /// 只用 atlas 下发的路由，不自己竞速
+  atlasOnly('atlas_only');
+
+  const CfSelectMode(this.wire);
+
+  /// 传给 Rust / 存进 prefs 的字符串形式
+  final String wire;
+
+  /// 非法 / 空值回落到 [localAtlas]
+  static CfSelectMode fromWire(String? value) {
+    for (final mode in values) {
+      if (mode.wire == value) return mode;
+    }
+    return localAtlas;
+  }
+}
 
 class NetworkSettings {
   const NetworkSettings({
@@ -38,6 +64,8 @@ class NetworkSettings {
     this.serverIp,
     this.gatewayEnabled = true,
     this.h2Mitm = false,
+    this.selectMode = CfSelectMode.localAtlas,
+    this.shareMeasurements = false,
   });
 
   final bool dohEnabled;
@@ -64,6 +92,12 @@ class NetworkSettings {
   /// WebView MITM 是否启用 HTTP/2 多路复用（实验性，默认关闭；需实测 CF 指纹）
   final bool h2Mitm;
 
+  /// 本地动态优选的模式
+  final CfSelectMode selectMode;
+
+  /// 「帮助优选」：把本地竞速的测量结果上报 cfhub（默认关，需 Connect 授权拿探针令牌）
+  final bool shareMeasurements;
+
   NetworkSettings copyWith({
     bool? dohEnabled,
     String? selectedServerUrl,
@@ -74,6 +108,8 @@ class NetworkSettings {
     String? Function()? serverIp,
     bool? gatewayEnabled,
     bool? h2Mitm,
+    CfSelectMode? selectMode,
+    bool? shareMeasurements,
   }) {
     return NetworkSettings(
       dohEnabled: dohEnabled ?? this.dohEnabled,
@@ -85,6 +121,8 @@ class NetworkSettings {
       gatewayEnabled: gatewayEnabled ?? this.gatewayEnabled,
       serverIp: serverIp != null ? serverIp() : this.serverIp,
       h2Mitm: h2Mitm ?? this.h2Mitm,
+      selectMode: selectMode ?? this.selectMode,
+      shareMeasurements: shareMeasurements ?? this.shareMeasurements,
     );
   }
 }
@@ -215,6 +253,32 @@ class NetworkSettingsService {
   /// 加速节点列表的签名信封 `{"kid","payload","sig"}`，启动时回传给 Rust 重新验签
   static const _accelNodesKey = 'doh_accel_nodes';
 
+  /// 本地动态优选的模式（[CfSelectMode.wire]）
+  static const _selectModeKey = 'doh_select_mode';
+
+  /// 「帮助优选」开关
+  static const _selectShareKey = 'doh_select_share';
+
+  /// Rust 的优选状态 JSON（赢家 + ECH 钥匙），启动时回灌给 Rust
+  static const _selectStateKey = 'doh_select_state';
+
+  /// 本地优选首次说明已弹过的版本（见 CfSelectNotice）
+  static const selectNoticeVersionKey = 'doh_select_notice_version';
+
+  /// atlas（CF 橙云入口）的路由表接口，只回源 hk2，表按线路选池
+  static const _atlasHost = 'atlas.1molchuan.top';
+  static const accelAtlasRoutesUrl = 'https://$_atlasHost/v1/routes';
+
+  /// cfhub：众包 ECH 测速分池，探针上报与探针令牌都在这里
+  static const cfhubHost = CfhubApi.host;
+  static const cfhubReportUrl = 'https://$cfhubHost/api/v1/probe/report';
+
+  /// 本地优选用来解析大厂域名的公共 DoH（国内可达的两家），带引导 IP 免鸡蛋问题
+  static const _publicDohUrls = [
+    'https://doh.pub/dns-query',
+    'https://dns.alidns.com/dns-query',
+  ];
+
   final ValueNotifier<NetworkSettings> notifier = ValueNotifier(
     NetworkSettings(
       dohEnabled: false,
@@ -255,7 +319,18 @@ class NetworkSettingsService {
 
   final ValueNotifier<bool> isApplying = ValueNotifier(false);
 
+  /// 本地优选的最新状态（定时从 Rust 拉），没在跑时为 null
+  final ValueNotifier<DohSelectStatus?> selectStatusNotifier = ValueNotifier(
+    null,
+  );
+
+  /// 应用版本，启动时读一次，随优选探针带给 Rust
+  String? _appVersion;
+
   int get version => _version;
+
+  /// 本地优选当前有没有验证通过的赢家
+  bool get selectorHasWinner => selectStatusNotifier.value?.hasWinner ?? false;
   DohResolver get resolver => _resolver;
   bool get lastStartFailed => _lastStartFailed;
   bool get wasRunningBeforeApply => _wasRunningBeforeApply;
@@ -273,6 +348,29 @@ class NetworkSettingsService {
       current.dohEnabled &&
       current.gatewayEnabled &&
       _rustProxyService.isRunning;
+
+  /// 本地动态优选只在 Android 网关模式下跑：DoH 开着、没有上游代理、网关开关开着
+  /// （网关/上游的判断和 [_applyProxyState] 里启动代理时用的一致）
+  bool get selectorEligible =>
+      Platform.isAndroid &&
+      current.dohEnabled &&
+      !_proxyService.current.isValid &&
+      WebViewMitmPolicy.useGatewayMode(
+        isWindows: false,
+        dohEnabled: current.dohEnabled,
+        gatewayEnabled: current.gatewayEnabled,
+        webViewAdapterEnabled: WebViewAdapterSettingsService.instance.enabled,
+      );
+
+  /// 交给 Rust 的公共 DoH 种子：`[{'url': ..., 'bootstrap_ips': [...]}]`
+  List<Map<String, Object>> get _publicDohSeeds => [
+    for (final server in _defaultServers)
+      if (_publicDohUrls.contains(server.url))
+        {
+          'url': server.url,
+          'bootstrap_ips': List<String>.of(server.bootstrapIps),
+        },
+  ];
 
   String? get _effectiveEchServerUrl =>
       current.dohEnabled ? (_activeEchServerUrl ?? _activeServerUrl) : null;
@@ -376,7 +474,11 @@ class NetworkSettingsService {
       serverUrl: _accelServer!.url,
       bootstrapIps: _getBootstrapIps(_accelServer!.url),
     );
+    // 探针令牌要在起代理前读回来，start() 才能带上
+    CfhubProbeAuthService.instance.initialize(prefs);
     final dohEnabled = prefs.getBool(_dohEnabledKey) ?? true;
+    final selectMode = CfSelectMode.fromWire(prefs.getString(_selectModeKey));
+    final shareMeasurements = prefs.getBool(_selectShareKey) ?? false;
     final selected = prefs.getString(_dohSelectedKey) ?? _defaultServerUrl;
     final customRaw = prefs.getString(_dohCustomKey);
     final custom = _decodeServers(customRaw);
@@ -398,6 +500,8 @@ class NetworkSettingsService {
       serverIp: serverIp,
       gatewayEnabled: gatewayEnabled,
       h2Mitm: h2Mitm,
+      selectMode: selectMode,
+      shareMeasurements: shareMeasurements,
     );
     final activeUrl = _activeServerUrl;
     _resolver = DohResolver(
@@ -411,6 +515,11 @@ class NetworkSettingsService {
     );
     _accelRouteSignature = _currentAccelRouteSignature;
     AccelDohAuthService.instance.addListener(_handleAccelAuthChanged);
+    _appVersion = await _loadAppVersion();
+    // 换网（Wi-Fi ↔ 蜂窝）时让 Rust 重新核验优选赢家
+    ConnectivityService().networkSignature.addListener(
+      _handleNetworkSignatureChanged,
+    );
     await _applyProxyState();
     await refreshDnsCacheStats();
     _touch();
@@ -589,6 +698,84 @@ class NetworkSettingsService {
     _touch();
   }
 
+  /// 切换本地优选模式；网关要按新模式重启
+  Future<void> setSelectMode(CfSelectMode mode) async {
+    final prefs = _prefs;
+    if (prefs == null) return;
+    if (current.selectMode == mode) return;
+    notifier.value = notifier.value.copyWith(selectMode: mode);
+    await prefs.setString(_selectModeKey, mode.wire);
+    _scheduleApplyProxyState();
+    _touch();
+  }
+
+  /// 开关「帮助优选」（把本地竞速的测量结果上报 cfhub）；Rust 侧热更新，不重启网关
+  ///
+  /// [bearer] 是 cfhub 的探针令牌，没给时取 [CfhubProbeAuthService] 当前的；
+  /// 没有令牌时 Rust 侧一律不上报，开关只是记住用户意愿
+  Future<void> setShareMeasurements(bool on, {String? bearer}) async {
+    final prefs = _prefs;
+    if (prefs == null) return;
+    notifier.value = notifier.value.copyWith(shareMeasurements: on);
+    await prefs.setBool(_selectShareKey, on);
+    final token = on ? (bearer ?? CfhubProbeAuthService.instance.token) : null;
+    try {
+      await _rustProxyService.setShareMeasurements(on && token != null, token);
+    } catch (e) {
+      debugPrint('[DOH] 更新探针上报开关失败: $e');
+    }
+    _touch();
+  }
+
+  /// 立刻重新竞速一次（设置页「重新优选」）
+  Future<bool> reraceSelection() async {
+    if (!_rustProxyService.isRunning) return false;
+    try {
+      final ok = await _rustProxyService.reraceSelection();
+      unawaited(refreshSelectStatus());
+      return ok;
+    } catch (e) {
+      debugPrint('[DOH] 触发重新优选失败: $e');
+      return false;
+    }
+  }
+
+  /// 问 Rust 要一次本地优选状态并发布到 [selectStatusNotifier]
+  Future<DohSelectStatus?> refreshSelectStatus() async {
+    DohSelectStatus? status;
+    if (_rustProxyService.isRunning) {
+      try {
+        status = await _rustProxyService.selectStatus();
+      } catch (e) {
+        debugPrint('[DOH] 读取本地优选状态失败: $e');
+      }
+    }
+    selectStatusNotifier.value = status;
+    return status;
+  }
+
+  /// 网络环境变了（换 Wi-Fi / 蜂窝）：告诉 Rust 重新核验赢家
+  void _handleNetworkSignatureChanged() {
+    if (_prefs == null) return;
+    final sig = ConnectivityService().networkSignature.value;
+    if (sig == null || sig.isEmpty) return;
+    unawaited(
+      _rustProxyService.networkChanged(sig).catchError((Object e) {
+        debugPrint('[DOH] 通知网络变化失败: $e');
+      }),
+    );
+  }
+
+  /// 应用版本只在启动时读一次，随优选探针一起带给 Rust（上报时标明客户端版本）
+  Future<String?> _loadAppVersion() async {
+    try {
+      return (await PackageInfo.fromPlatform()).version;
+    } catch (e) {
+      debugPrint('[DOH] 读取应用版本失败: $e');
+      return null;
+    }
+  }
+
   Future<void> _applyProxyState() async {
     final startedAt = DateTime.now();
     _syncAccelPolling();
@@ -746,6 +933,19 @@ class NetworkSettingsService {
         dohRoutesUrl: dohRoutesUrl,
         dohRouteTableJson: dohRouteTableJson,
         dohNodeListJson: dohNodeListJson,
+        // 本地动态优选：只在 Android 网关模式下开；上次的赢家状态回灌给 Rust
+        selectMode: selectorEligible ? current.selectMode.wire : 'off',
+        selectStateJson: prefsForSeed?.getString(_selectStateKey),
+        shareMeasurements:
+            current.shareMeasurements &&
+            CfhubProbeAuthService.instance.token != null,
+        atlasRoutesUrl: accelAtlasRoutesUrl,
+        publicDoh: _publicDohSeeds,
+        reportUrl: cfhubReportUrl,
+        reportBearer: CfhubProbeAuthService.instance.token,
+        extraCoveredHosts: const [_atlasHost, cfhubHost],
+        appVersion: _appVersion,
+        networkSig: ConnectivityService().networkSignature.value,
       );
 
       if (!success) {
@@ -798,6 +998,7 @@ class NetworkSettingsService {
         }
         isApplying.value = false;
         await refreshDnsCacheStats();
+        unawaited(refreshSelectStatus());
         _touch();
       }
     }
@@ -1038,9 +1239,10 @@ class NetworkSettingsService {
   /// 正在用加速服务器（专属或公共）时，定时问 Rust 代理：令牌有没有被拒、有没有新拉到路由表 / 节点列表
   void _syncAccelPolling() {
     final needPoll =
-        current.dohEnabled &&
-        (accelRoutesUrlFor(_activeServerUrl) != null ||
-            _authTokenFor(_activeEchServerUrl) != null);
+        (current.dohEnabled &&
+            (accelRoutesUrlFor(_activeServerUrl) != null ||
+                _authTokenFor(_activeEchServerUrl) != null)) ||
+        selectorEligible;
     if (!needPoll) {
       _accelPollTimer?.cancel();
       _accelPollTimer = null;
@@ -1049,6 +1251,7 @@ class NetworkSettingsService {
     _accelPollTimer ??= Timer.periodic(const Duration(seconds: 20), (_) {
       unawaited(_checkAuthRejected());
       unawaited(_checkAccelUpdate());
+      unawaited(refreshSelectStatus());
     });
   }
 
@@ -1093,6 +1296,16 @@ class NetworkSettingsService {
         'hosts=${_nodeStore.hosts.join(", ")}',
       );
       _updateResolverServer();
+    }
+
+    // 本地优选的赢家 / ECH 钥匙变了：落盘，下次启动回灌给 Rust
+    final selectState = update.selectState;
+    if (selectState != null && selectState.isNotEmpty) {
+      await prefs.setString(_selectStateKey, selectState);
+    }
+    // 探针上报被 cfhub 拒绝：令牌已失效，关掉「帮助优选」并提示用户
+    if (update.reportAuthRejected) {
+      unawaited(CfhubProbeAuthService.instance.onRejected());
     }
   }
 

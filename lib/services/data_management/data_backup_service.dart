@@ -47,14 +47,17 @@ class DataBackupService {
     'auth_passive_logout_history',
     'bg_shared_session_key',
     'one_time_password',
+    'cfhub_probe_', // 探针上报令牌 / 绑定的账号 id(cfhub 按账号发,换机无效)
     // ── 设备绑定 / 运行态 ──
     'vpn_suppressed_',
     'per_device_cert_installed',
     'cert_use_per_device',
+    'doh_select_state', // 本地优选的赢家 / ECH 钥匙(按当前网络测出来的,换机无意义)
     'window_', // 桌面端窗口几何(legacy keys)
     // ── 一次性 UI 标记(新设备应重新引导)──
     'onboarding_completed',
     'crashlytics_notice_shown',
+    'doh_select_notice_version', // 本地优选首次说明已弹过的版本
     'cursor_swipe_hint_',
   ];
 

@@ -200,6 +200,16 @@ class LoggerUtils {
       lines.add(S.current.deviceInfo_dohOff);
     }
 
+    // 本地优选（1.1 起一等连接方式）
+    final select = NetworkSettingsService.instance.selectStatusNotifier.value;
+    lines.add(
+      '优选: ${select?.mode ?? doh.selectMode.name} '
+      '${select?.phase ?? 'idle'} '
+      '${select?.winnerIp ?? '-'} '
+      '${select?.latencyMs ?? '-'}ms '
+      '上报:${doh.shareMeasurements ? 'on' : 'off'}',
+    );
+
     // HTTP 代理
     final proxy = ProxySettingsService.instance.current;
     if (proxy.isValid) {
@@ -223,6 +233,14 @@ class LoggerUtils {
       map['dohServer'] = doh.selectedServerUrl;
       map['preferIPv6'] = doh.preferIPv6;
     }
+
+    // 本地优选
+    final select = NetworkSettingsService.instance.selectStatusNotifier.value;
+    map['cfSelectMode'] = select?.mode ?? doh.selectMode.name;
+    map['cfSelectPhase'] = select?.phase ?? 'idle';
+    map['cfSelectWinner'] = select?.winnerIp;
+    map['cfSelectLatencyMs'] = select?.latencyMs;
+    map['cfSelectShare'] = doh.shareMeasurements;
 
     final proxy = ProxySettingsService.instance.current;
     map['proxyEnabled'] = proxy.isValid;

@@ -40,6 +40,22 @@ class ConnectivityService {
   /// 当前是否已连接
   bool get isConnected => _isConnected;
 
+  /// 当前网络环境签名（见 [signatureOf]），null 表示还没拿到过结果。
+  /// 本地动态优选用它判断「换网了」：同值不通知，变了才触发重新优选
+  final ValueNotifier<String?> networkSignature = ValueNotifier<String?>(null);
+
+  /// 把 connectivity_plus 的结果集压成稳定签名：去掉 none、按名字去重排序后用 `|` 连接，
+  /// 无网络返回空串。例如 `[wifi, vpn]` → `vpn|wifi`
+  static String signatureOf(List<ConnectivityResult> results) {
+    final names = results
+        .where((r) => r != ConnectivityResult.none)
+        .map((r) => r.name)
+        .toSet()
+        .toList()
+      ..sort();
+    return names.join('|');
+  }
+
   /// 使用项目统一 Dio（含平台适配器、Cookie 等），
   /// 但关闭重试、CF 验证、并发限制，避免 ping 请求被干扰或排队
   late final Dio _pingDio = DiscourseDio.create(
@@ -113,6 +129,7 @@ class ConnectivityService {
   Future<void> _onConnectivityChanged(List<ConnectivityResult> results) async {
     debugPrint('[Connectivity] onConnectivityChanged: $results');
     VpnAutoToggleService.instance.handleConnectivityChanged(results);
+    networkSignature.value = signatureOf(results);
     final hasNetwork = results.isNotEmpty &&
         !results.every((r) => r == ConnectivityResult.none);
 
@@ -194,6 +211,7 @@ class ConnectivityService {
         final hasNetwork = result.isNotEmpty &&
             !result.every((r) => r == ConnectivityResult.none);
         if (hasNetwork) {
+          networkSignature.value = signatureOf(result);
           if (enableServerPing) {
             final reachable = await pingServer();
             if (reachable) _setConnected(true); // _setConnected(true) 内部会调用 _stopRetry
@@ -228,6 +246,7 @@ class ConnectivityService {
       _setConnected(reachable);
     } else {
       final result = await safeCheckConnectivity();
+      networkSignature.value = signatureOf(result);
       final hasNetwork = result.isNotEmpty &&
           !result.every((r) => r == ConnectivityResult.none);
       _setConnected(hasNetwork);

@@ -40,6 +40,7 @@ class DohProxyService {
   bool? _currentH2Mitm;
   String? _currentUpstreamSignature;
   String? _currentDohRoutesUrl;
+  String? _currentSelectMode;
   String? _lastError;
   bool _processAuthRejected = false;
   // 进程模式下 stdout 打出的 DOH_ACCEL_UPDATE 行，等 App 取走
@@ -88,6 +89,16 @@ class DohProxyService {
     String? dohRoutesUrl,
     String? dohRouteTableJson,
     String? dohNodeListJson,
+    String selectMode = 'off',
+    String? selectStateJson,
+    bool shareMeasurements = false,
+    String? atlasRoutesUrl,
+    List<Map<String, Object>> publicDoh = const [],
+    String? reportUrl,
+    String? reportBearer,
+    List<String> extraCoveredHosts = const [],
+    String? appVersion,
+    String? networkSig,
   }) async {
     final authSignature = _buildAuthSignature(dohAuthToken, dohEchAuthToken);
     final bootstrapSignature = _buildBootstrapSignature(
@@ -117,7 +128,10 @@ class DohProxyService {
           _currentH2Mitm == h2Mitm &&
           _currentUpstreamSignature == upstreamSignature &&
           // 路由表 / 节点列表只是启动时的种子，内容变了不重启；只看接口地址
-          _currentDohRoutesUrl == dohRoutesUrl;
+          _currentDohRoutesUrl == dohRoutesUrl &&
+          // 优选模式变了要重启；share / bearer / networkSig / selectState / appVersion
+          // 都是运行态（有专门的 FFI 入口或只在启动时回灌），不触发重启
+          _currentSelectMode == selectMode;
       if (sameConfig) {
         NetworkLogger.log('[DOH] 代理已在运行，端口: $_port');
         return true;
@@ -155,6 +169,16 @@ class DohProxyService {
         dohRoutesUrl,
         dohRouteTableJson,
         dohNodeListJson,
+        selectMode: selectMode,
+        selectStateJson: selectStateJson,
+        shareMeasurements: shareMeasurements,
+        atlasRoutesUrl: atlasRoutesUrl,
+        publicDoh: publicDoh,
+        reportUrl: reportUrl,
+        reportBearer: reportBearer,
+        extraCoveredHosts: extraCoveredHosts,
+        appVersion: appVersion,
+        networkSig: networkSig,
       );
       // 桌面平台 FFI 加载失败时，回退到进程模式
       if (!result && DohProxyFfi.canFallbackToProcess) {
@@ -181,6 +205,7 @@ class DohProxyService {
           mitmConnect,
           h2Mitm,
           dohRoutesUrl,
+          selectMode: selectMode,
         );
       }
       return result;
@@ -206,6 +231,7 @@ class DohProxyService {
         mitmConnect,
         h2Mitm,
         dohRoutesUrl,
+        selectMode: selectMode,
       );
     }
   }
@@ -235,8 +261,18 @@ class DohProxyService {
     bool h2Mitm,
     String? dohRoutesUrl,
     String? dohRouteTableJson,
-    String? dohNodeListJson,
-  ) async {
+    String? dohNodeListJson, {
+    String selectMode = 'off',
+    String? selectStateJson,
+    bool shareMeasurements = false,
+    String? atlasRoutesUrl,
+    List<Map<String, Object>> publicDoh = const [],
+    String? reportUrl,
+    String? reportBearer,
+    List<String> extraCoveredHosts = const [],
+    String? appVersion,
+    String? networkSig,
+  }) async {
     try {
       return await _enqueueFfiOp(() async {
         NetworkLogger.log(
@@ -270,6 +306,16 @@ class DohProxyService {
           dohRoutesUrl: dohRoutesUrl,
           dohRouteTableJson: dohRouteTableJson,
           dohNodeListJson: dohNodeListJson,
+          selectMode: selectMode,
+          selectStateJson: selectStateJson,
+          shareMeasurements: shareMeasurements,
+          atlasRoutesUrl: atlasRoutesUrl,
+          publicDoh: publicDoh,
+          reportUrl: reportUrl,
+          reportBearer: reportBearer,
+          extraCoveredHosts: extraCoveredHosts,
+          appVersion: appVersion,
+          networkSig: networkSig,
         );
         if (resultPort <= 0) {
           // _callFfiStart 已设置更详细的 _lastError，仅在未设置时补充
@@ -306,6 +352,7 @@ class DohProxyService {
           cipher: upstreamCipher,
         );
         _currentDohRoutesUrl = dohRoutesUrl;
+        _currentSelectMode = selectMode;
         NetworkLogger.log('[DOH] FFI 代理已启动，端口: $_port');
         return true;
       });
@@ -337,8 +384,10 @@ class DohProxyService {
     String? upstreamCipher,
     bool mitmConnect,
     bool h2Mitm,
-    String? dohRoutesUrl,
-  ) async {
+    String? dohRoutesUrl, {
+    // 进程模式不做本地优选，只记下模式让 sameConfig 比较稳定
+    String selectMode = 'off',
+  }) async {
     try {
       final executablePath = await _getExecutablePath();
       if (executablePath == null) {
@@ -467,6 +516,7 @@ class DohProxyService {
             cipher: upstreamCipher,
           );
           _currentDohRoutesUrl = dohRoutesUrl;
+          _currentSelectMode = selectMode;
           NetworkLogger.log('[DOH] 代理已启动，端口: $_port');
           completed = true;
           completer.complete(true);
@@ -575,6 +625,7 @@ class DohProxyService {
     _currentH2Mitm = null;
     _currentUpstreamSignature = null;
     _currentDohRoutesUrl = null;
+    _currentSelectMode = null;
     // 注意：不清除 _lastError，保留用于 UI 展示
   }
 
@@ -588,12 +639,17 @@ class DohProxyService {
       final routeTable = map['route_table'];
       final nodes = map['nodes'];
       final envelope = map['nodes_envelope'];
+      final selectState = map['select_state'];
       final update = DohAccelUpdate(
         routeTable: routeTable is String && routeTable.isNotEmpty
             ? routeTable
             : null,
         nodes: nodes is String && nodes.isNotEmpty ? nodes : null,
         nodesEnvelopeJson: envelope is Map ? jsonEncode(envelope) : null,
+        selectState: selectState is String && selectState.isNotEmpty
+            ? selectState
+            : null,
+        reportAuthRejected: map['report_auth_rejected'] == true,
       );
       return update.isEmpty ? null : update;
     } catch (e) {
@@ -867,8 +923,82 @@ class DohProxyService {
         routeTable: data['routeTable'] as String?,
         nodes: data['nodes'] as String?,
         nodesEnvelopeJson: data['nodesEnvelopeJson'] as String?,
+        selectState: data['selectState'] as String?,
+        reportAuthRejected: data['reportAuthRejected'] == true,
       );
       return update.isEmpty ? null : update;
+    });
+  }
+
+  /// 通知 Rust 侧网络环境变了（[sig] 来自 ConnectivityService.signatureOf）
+  ///
+  /// 只在 FFI 可用的平台有效；进程模式 / 代理未运行时直接返回，不抛异常
+  Future<void> networkChanged(String sig) async {
+    if (!DohProxyFfi.isAvailable || _ffiSendPort == null) return;
+    await _enqueueFfiOp(() async {
+      final sendPort = await _ensureFfiIsolate();
+      final response = ReceivePort();
+      sendPort.send({
+        'cmd': 'network_changed',
+        'sig': sig,
+        'replyTo': response.sendPort,
+      });
+      await response.first;
+      response.close();
+    });
+  }
+
+  /// 查询本地动态优选状态；进程模式 / 未运行 / 库不支持 / 没有优选实例返回 null
+  Future<DohSelectStatus?> selectStatus() async {
+    if (!DohProxyFfi.isAvailable || _ffiSendPort == null) return null;
+    return _enqueueFfiOp(() async {
+      final sendPort = await _ensureFfiIsolate();
+      final response = ReceivePort();
+      sendPort.send({
+        'cmd': 'select_status',
+        'replyTo': response.sendPort,
+      });
+      final result = await response.first;
+      response.close();
+      if (result is! Map || result['ok'] != true) return null;
+      final data = result['data'];
+      if (data is! Map) return null;
+      return DohSelectStatus.fromJson(data.cast<String, dynamic>());
+    });
+  }
+
+  /// 手动触发重新优选；true 表示已发车，false 表示冷却中 / 没有实例 / 不可用
+  Future<bool> reraceSelection() async {
+    if (!DohProxyFfi.isAvailable || _ffiSendPort == null) return false;
+    return _enqueueFfiOp(() async {
+      final sendPort = await _ensureFfiIsolate();
+      final response = ReceivePort();
+      sendPort.send({
+        'cmd': 'select_rerace',
+        'replyTo': response.sendPort,
+      });
+      final result = await response.first;
+      response.close();
+      return result is Map && result['ok'] == true && result['started'] == true;
+    });
+  }
+
+  /// 开关「帮助优选」；[bearer] 为 cfhub 令牌，关闭时可为 null，只传给 Rust 不进日志。
+  /// true 表示已应用，false 表示没有优选实例 / 不可用
+  Future<bool> setShareMeasurements(bool enabled, String? bearer) async {
+    if (!DohProxyFfi.isAvailable || _ffiSendPort == null) return false;
+    return _enqueueFfiOp(() async {
+      final sendPort = await _ensureFfiIsolate();
+      final response = ReceivePort();
+      sendPort.send({
+        'cmd': 'set_share_measurements',
+        'enabled': enabled,
+        'bearer': bearer,
+        'replyTo': response.sendPort,
+      });
+      final result = await response.first;
+      response.close();
+      return result is Map && result['ok'] == true && result['applied'] == true;
     });
   }
 
@@ -1013,6 +1143,16 @@ class DohProxyService {
     String? dohRoutesUrl,
     String? dohRouteTableJson,
     String? dohNodeListJson,
+    String selectMode = 'off',
+    String? selectStateJson,
+    bool shareMeasurements = false,
+    String? atlasRoutesUrl,
+    List<Map<String, Object>> publicDoh = const [],
+    String? reportUrl,
+    String? reportBearer,
+    List<String> extraCoveredHosts = const [],
+    String? appVersion,
+    String? networkSig,
   }) async {
     final sendPort = await _ensureFfiIsolate();
     final response = ReceivePort();
@@ -1042,6 +1182,16 @@ class DohProxyService {
       'dohRoutesUrl': dohRoutesUrl,
       'dohRouteTableJson': dohRouteTableJson,
       'dohNodeListJson': dohNodeListJson,
+      'selectMode': selectMode,
+      'selectStateJson': selectStateJson,
+      'shareMeasurements': shareMeasurements,
+      'atlasRoutesUrl': atlasRoutesUrl,
+      'publicDoh': publicDoh,
+      'reportUrl': reportUrl,
+      'reportBearer': reportBearer,
+      'extraCoveredHosts': extraCoveredHosts,
+      'appVersion': appVersion,
+      'networkSig': networkSig,
       'preferredPort': port,
       'replyTo': response.sendPort,
     });
@@ -1304,6 +1454,22 @@ class DohProxyService {
 List<String> _stringList(Object? value) =>
     value is List ? value.whereType<String>().toList() : const [];
 
+/// 跨 isolate 传来的公共 DoH 池：每项 `{'url': String, 'bootstrap_ips': List<String>}`
+List<Map<String, Object>> _publicDohList(Object? value) {
+  if (value is! List) return const [];
+  return value
+      .whereType<Map>()
+      .map((item) {
+        final url = item['url']?.toString() ?? '';
+        return <String, Object>{
+          'url': url,
+          'bootstrap_ips': _stringList(item['bootstrap_ips']),
+        };
+      })
+      .where((item) => (item['url'] as String).isNotEmpty)
+      .toList();
+}
+
 void _ffiIsolateEntry(SendPort mainSendPort) {
   final port = ReceivePort();
   mainSendPort.send(port.sendPort);
@@ -1348,6 +1514,17 @@ void _ffiIsolateEntry(SendPort mainSendPort) {
           final dohRoutesUrl = message['dohRoutesUrl'] as String?;
           final dohRouteTableJson = message['dohRouteTableJson'] as String?;
           final dohNodeListJson = message['dohNodeListJson'] as String?;
+          final selectMode = message['selectMode'] as String? ?? 'off';
+          final selectStateJson = message['selectStateJson'] as String?;
+          final shareMeasurements =
+              message['shareMeasurements'] as bool? ?? false;
+          final atlasRoutesUrl = message['atlasRoutesUrl'] as String?;
+          final publicDoh = _publicDohList(message['publicDoh']);
+          final reportUrl = message['reportUrl'] as String?;
+          final reportBearer = message['reportBearer'] as String?;
+          final extraCoveredHosts = _stringList(message['extraCoveredHosts']);
+          final appVersion = message['appVersion'] as String?;
+          final networkSig = message['networkSig'] as String?;
           var resultPort = DohProxyFfi.instance.start(
             port: portValue,
             enableDoh: enableDoh,
@@ -1373,6 +1550,16 @@ void _ffiIsolateEntry(SendPort mainSendPort) {
             dohRoutesUrl: dohRoutesUrl,
             dohRouteTableJson: dohRouteTableJson,
             dohNodeListJson: dohNodeListJson,
+            selectMode: selectMode,
+            selectStateJson: selectStateJson,
+            shareMeasurements: shareMeasurements,
+            atlasRoutesUrl: atlasRoutesUrl,
+            publicDoh: publicDoh,
+            reportUrl: reportUrl,
+            reportBearer: reportBearer,
+            extraCoveredHosts: extraCoveredHosts,
+            appVersion: appVersion,
+            networkSig: networkSig,
           );
           if (resultPort <= 0 && preferredPort != 0) {
             resultPort = DohProxyFfi.instance.start(
@@ -1400,6 +1587,16 @@ void _ffiIsolateEntry(SendPort mainSendPort) {
               dohRoutesUrl: dohRoutesUrl,
               dohRouteTableJson: dohRouteTableJson,
               dohNodeListJson: dohNodeListJson,
+              selectMode: selectMode,
+              selectStateJson: selectStateJson,
+              shareMeasurements: shareMeasurements,
+              atlasRoutesUrl: atlasRoutesUrl,
+              publicDoh: publicDoh,
+              reportUrl: reportUrl,
+              reportBearer: reportBearer,
+              extraCoveredHosts: extraCoveredHosts,
+              appVersion: appVersion,
+              networkSig: networkSig,
             );
           }
           if (resultPort <= 0) {
@@ -1508,8 +1705,32 @@ void _ffiIsolateEntry(SendPort mainSendPort) {
                     'routeTable': update.routeTable,
                     'nodes': update.nodes,
                     'nodesEnvelopeJson': update.nodesEnvelopeJson,
+                    'selectState': update.selectState,
+                    'reportAuthRejected': update.reportAuthRejected,
                   },
           });
+          return;
+        case 'network_changed':
+          final sig = message['sig'] as String? ?? '';
+          final code = DohProxyFfi.instance.networkChanged(sig);
+          replyTo.send({'ok': true, 'code': code});
+          return;
+        case 'select_status':
+          final status = DohProxyFfi.instance.selectStatus();
+          replyTo.send({'ok': true, 'data': status?.toJson()});
+          return;
+        case 'select_rerace':
+          final started = DohProxyFfi.instance.reraceSelection();
+          replyTo.send({'ok': true, 'started': started});
+          return;
+        case 'set_share_measurements':
+          final enabled = message['enabled'] as bool? ?? false;
+          final bearer = message['bearer'] as String?;
+          final applied = DohProxyFfi.instance.setShareMeasurements(
+            enabled,
+            bearer,
+          );
+          replyTo.send({'ok': true, 'applied': applied});
           return;
         case 'accel_request':
           final method = message['method'] as String? ?? 'GET';

@@ -1,5 +1,50 @@
 {
   "@@locale": "zh",
+  "cfSelect_title": "连接方式",
+  "cfSelect_modeLocalAtlas": "本地优选 + atlas",
+  "cfSelect_modeAtlasOnly": "只用 atlas 池",
+  "cfSelect_modeLocalAtlasDesc": "App 自己在 Cloudflare 共享池里测速选节点，atlas 节点表一起参与竞速",
+  "cfSelect_modeAtlasOnlyDesc": "不做本地测速，只用 atlas 节点表里的节点",
+  "cfSelect_statusIdle": "未开始",
+  "cfSelect_statusVerifying": "正在校验上次的节点…",
+  "cfSelect_statusRacing": "正在优选…",
+  "cfSelect_statusReady": "已连接 {ip}（{ms} ms）",
+  "@cfSelect_statusReady": {
+    "placeholders": {
+      "ip": {
+        "type": "String"
+      },
+      "ms": {
+        "type": "int"
+      }
+    }
+  },
+  "cfSelect_statusFailed": "优选失败，已回退到中转线路",
+  "cfSelect_disabledByProxy": "应用代理开启时不做优选",
+  "cfSelect_disabledByDoh": "加速关闭时不做优选",
+  "cfSelect_lastRace": "上次优选 {time}",
+  "@cfSelect_lastRace": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "cfSelect_rerace": "重新优选",
+  "cfSelect_reraceStarted": "已开始重新优选",
+  "cfSelect_reraceCooldown": "刚刚优选过，请稍后再试",
+  "cfSelect_viewPrivacy": "查看隐私说明",
+  "cfSelect_share": "帮助优选",
+  "cfSelect_shareDesc": "用 linux.do 账号授权 cfhub，分享握手测量结果帮助同运营商的用户；默认关闭",
+  "cfSelect_shareAuthorized": "已用 linux.do 账号授权 cfhub",
+  "cfSelect_shareNeedTrust": "需要登录 linux.do 且信任等级 1 以上",
+  "cfSelect_shareHubUnavailable": "cfhub 暂未开放 App 接入",
+  "cfSelect_shareRejected": "cfhub 拒绝了授权",
+  "cfSelect_shareRevoked": "cfhub 授权已失效，已关闭帮助优选",
+  "cfSelect_noticeTitle": "新版本如何连接 linux.do",
+  "cfSelect_noticeBody": "从这个版本起，cfluxdo 自己寻找能连上 linux.do 的 Cloudflare 节点，不再默认依赖任何中转服务：\n• 会向腾讯 DNSPod、阿里 AliDNS、360、Cloudflare、Google、Quad9 等公共 DNS 服务 发送少量域名查询（Visa、OpenAI、Shopify 等 Cloudflare 大厂站点，以及节点表 atlas.1molchuan.top），用来获取候选节点和加密钥匙。查询只含域名，不带你的任何账号信息。\n• 会与若干 Cloudflare 节点做加密握手（ECH）并请求 /cdn-cgi/trace 测速，择优记住；只在切换网络或连不上时重测。\n• 单次测速约 50–200 KB 流量。\n可以在「设置 → 网络 → 连接方式」改为「只用 atlas 池」，或查看当前线路。\n\n帮助优选（默认关闭）：打开后，App 会把本来就做的测速结果分享给社区节点站 cfhub，帮同运营商的其他用户更快找到节点。开启需要用你的 linux.do 账号通过 Connect 授权 cfhub（与在 cfhub 网页上加入相同，需信任等级 1 以上）。我们承诺：\n• 只分享候选 Cloudflare 节点地址、握手耗时和是否成功；分享内容不含 Cookie、令牌、设备标识或浏览记录。\n• cfhub 会记录你的 linux.do 用户名、信任等级，以及这次分享归属的运营商与地区；不保存你的完整 IP 地址。\n• 不会在后台额外测速，不额外耗电耗流量；分享失败就放弃，不重试。\n• 随时可在设置里关闭，关闭立即生效并作废授权；退出 linux.do 登录也会作废。\n• 客户端代码与分享格式均开源。",
+  "cfSelect_noticeKeepOff": "保持关闭",
+  "cfSelect_noticeEnable": "开启并帮助优选",
   "dohDetail_addServer": "添加服务器",
   "dohDetail_bootstrapIpHelper": "直接用 IP 连接 DoH 服务器，绕过 DNS 解析",
   "dohDetail_bootstrapIpHint": "用逗号分隔，如 1.1.1.1, 1.0.0.1",

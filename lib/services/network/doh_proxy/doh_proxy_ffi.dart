@@ -23,7 +23,13 @@ class DohHostLookupResult {
 
 /// Rust 侧新拉到的加速路由表 / 节点列表，App 负责持久化
 class DohAccelUpdate {
-  const DohAccelUpdate({this.routeTable, this.nodes, this.nodesEnvelopeJson});
+  const DohAccelUpdate({
+    this.routeTable,
+    this.nodes,
+    this.nodesEnvelopeJson,
+    this.selectState,
+    this.reportAuthRejected = false,
+  });
 
   /// 路由表接口的原始响应 JSON（下次启动原样回传给 Rust）
   final String? routeTable;
@@ -34,8 +40,108 @@ class DohAccelUpdate {
   /// 带签名的节点信封 JSON（`{"kid","payload","sig"}`，下次启动回传给 Rust 重新验签）
   final String? nodesEnvelopeJson;
 
+  /// 本地优选状态 JSON（赢家 + ECH 钥匙，下次启动经 `select_state_json` 回灌给 Rust）
+  final String? selectState;
+
+  /// 探针上报被 cfhub 拒绝令牌（401/403），App 需要重新取令牌或关掉「帮助优选」
+  final bool reportAuthRejected;
+
   bool get isEmpty =>
-      routeTable == null && nodes == null && nodesEnvelopeJson == null;
+      routeTable == null &&
+      nodes == null &&
+      nodesEnvelopeJson == null &&
+      selectState == null &&
+      !reportAuthRejected;
+}
+
+/// 本地动态优选的运行状态（`doh_proxy_select_status` 的解析结果）
+class DohSelectStatus {
+  const DohSelectStatus({
+    required this.mode,
+    required this.phase,
+    this.winnerIp,
+    this.latencyMs,
+    this.verifiedAt,
+    this.source,
+    this.echSource,
+    this.lastRaceAt = 0,
+    this.lastError,
+    this.failStreak = 0,
+    this.share = false,
+  });
+
+  /// 优选模式（如 `off` / `local_atlas`）
+  final String mode;
+
+  /// 阶段：`idle` / `verifying` / `racing` / `ready` / `failed`
+  final String phase;
+
+  /// 当前赢家 IP，没有赢家时为 null
+  final String? winnerIp;
+
+  /// 赢家握手延迟（毫秒）
+  final int? latencyMs;
+
+  /// 赢家最近一次验证通过的 Unix 秒
+  final int? verifiedAt;
+
+  /// 赢家候选来源（如 `vendor` / `atlas` / `random`）
+  final String? source;
+
+  /// 赢家所用 ECH 钥匙来源
+  final String? echSource;
+
+  /// 最近一次竞速的 Unix 秒，没跑过为 0
+  final int lastRaceAt;
+
+  /// 最近一次失败原因
+  final String? lastError;
+
+  /// 连续失败次数
+  final int failStreak;
+
+  /// 是否开启「帮助优选」（分享测量结果给 cfhub）
+  final bool share;
+
+  bool get hasWinner => winnerIp != null && phase == 'ready';
+
+  factory DohSelectStatus.fromJson(Map<String, dynamic> map) {
+    final winner = map['winner'];
+    final winnerMap = winner is Map ? winner : null;
+    final winnerIp = winnerMap?['ip']?.toString();
+    final lastError = map['last_error'];
+    return DohSelectStatus(
+      mode: map['mode']?.toString() ?? 'off',
+      phase: map['phase']?.toString() ?? 'idle',
+      winnerIp: winnerIp != null && winnerIp.isNotEmpty ? winnerIp : null,
+      latencyMs: (winnerMap?['latency_ms'] as num?)?.toInt(),
+      verifiedAt: (winnerMap?['verified_at'] as num?)?.toInt(),
+      source: winnerMap?['source']?.toString(),
+      echSource: winnerMap?['ech_source']?.toString(),
+      lastRaceAt: (map['last_race_at'] as num?)?.toInt() ?? 0,
+      lastError: lastError is String && lastError.isNotEmpty ? lastError : null,
+      failStreak: (map['fail_streak'] as num?)?.toInt() ?? 0,
+      share: map['share'] == true,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+    'mode': mode,
+    'phase': phase,
+    'winner': winnerIp == null
+        ? null
+        : {
+            'ip': winnerIp,
+            'latency_ms': latencyMs,
+            'verified_at': verifiedAt,
+            'source': source,
+            'ech_source': echSource,
+          },
+    'last_race_at': lastRaceAt,
+    'last_error': lastError,
+    'fail_streak': failStreak,
+    'share': share,
+  };
 }
 
 class DohDnsCacheStats {
@@ -203,6 +309,11 @@ class DohProxyFfi {
   Pointer<Utf8> Function()? _dohProxyTakeAccelUpdate;
   Pointer<Utf8> Function(Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>)?
   _dohProxyAccelRequest;
+  // 本地动态优选：网络变化通知 / 状态查询 / 手动重选 / 开关「帮助优选」，均为可选符号
+  int Function(Pointer<Utf8>)? _dohProxyNetworkChanged;
+  Pointer<Utf8> Function()? _dohProxySelectStatus;
+  int Function()? _dohProxySelectRerace;
+  int Function(int, Pointer<Utf8>)? _dohProxySetShareMeasurements;
   late void Function(Pointer<Utf8>) _dohProxyFreeString;
 
   /// Initialize FFI bindings
@@ -346,6 +457,47 @@ class DohProxyFfi {
             .asFunction();
       } catch (_) {
         _dohProxyAccelRequest = null;
+      }
+
+      // 本地动态优选相关符号：旧版本库没有，缺失时置 null，调用方按无操作处理
+      try {
+        _dohProxyNetworkChanged = _lib!
+            .lookup<NativeFunction<Int32 Function(Pointer<Utf8>)>>(
+              'doh_proxy_network_changed',
+            )
+            .asFunction();
+      } catch (_) {
+        _dohProxyNetworkChanged = null;
+      }
+
+      try {
+        _dohProxySelectStatus = _lib!
+            .lookup<NativeFunction<Pointer<Utf8> Function()>>(
+              'doh_proxy_select_status',
+            )
+            .asFunction();
+      } catch (_) {
+        _dohProxySelectStatus = null;
+      }
+
+      try {
+        _dohProxySelectRerace = _lib!
+            .lookup<NativeFunction<Int32 Function()>>(
+              'doh_proxy_select_rerace',
+            )
+            .asFunction();
+      } catch (_) {
+        _dohProxySelectRerace = null;
+      }
+
+      try {
+        _dohProxySetShareMeasurements = _lib!
+            .lookup<NativeFunction<Int32 Function(Int32, Pointer<Utf8>)>>(
+              'doh_proxy_set_share_measurements',
+            )
+            .asFunction();
+      } catch (_) {
+        _dohProxySetShareMeasurements = null;
       }
 
       // doh_proxy_generate_ca 是新增符号，旧版本库可能没有，可选绑定
@@ -504,6 +656,16 @@ class DohProxyFfi {
     String? dohRoutesUrl,
     String? dohRouteTableJson,
     String? dohNodeListJson,
+    String selectMode = 'off',
+    String? selectStateJson,
+    bool shareMeasurements = false,
+    String? atlasRoutesUrl,
+    List<Map<String, Object>> publicDoh = const [],
+    String? reportUrl,
+    String? reportBearer,
+    List<String> extraCoveredHosts = const [],
+    String? appVersion,
+    String? networkSig,
   }) {
     if (!_initialized && !initialize()) {
       return -1;
@@ -553,6 +715,21 @@ class DohProxyFfi {
         'doh_route_table_json': dohRouteTableJson,
       if (dohNodeListJson != null && dohNodeListJson.isNotEmpty)
         'doh_node_list_json': dohNodeListJson,
+      // 本地动态优选：模式总是写；上次落盘的状态 / atlas 查表地址 / 公共 DoH 池 /
+      // 探针上报地址与令牌 / 额外覆盖域名 / App 版本 / 网络签名，空值不写键
+      'select_mode': selectMode,
+      if (selectStateJson != null && selectStateJson.isNotEmpty)
+        'select_state_json': selectStateJson,
+      'share_measurements': shareMeasurements,
+      if (atlasRoutesUrl != null && atlasRoutesUrl.isNotEmpty)
+        'atlas_routes_url': atlasRoutesUrl,
+      if (publicDoh.isNotEmpty) 'public_doh': publicDoh,
+      if (reportUrl != null && reportUrl.isNotEmpty) 'report_url': reportUrl,
+      if (reportBearer != null && reportBearer.isNotEmpty)
+        'report_bearer': reportBearer,
+      if (extraCoveredHosts.isNotEmpty) 'extra_covered_hosts': extraCoveredHosts,
+      if (appVersion != null && appVersion.isNotEmpty) 'app_version': appVersion,
+      if (networkSig != null && networkSig.isNotEmpty) 'network_sig': networkSig,
     });
     final configPtr = configJson.toNativeUtf8();
     try {
@@ -755,14 +932,84 @@ class DohProxyFfi {
     final routeTable = map['route_table'];
     final nodes = map['nodes'];
     final envelope = map['nodes_envelope'];
+    final selectState = map['select_state'];
     final update = DohAccelUpdate(
       routeTable: routeTable is String && routeTable.isNotEmpty
           ? routeTable
           : null,
       nodes: nodes is String && nodes.isNotEmpty ? nodes : null,
       nodesEnvelopeJson: envelope is Map ? jsonEncode(envelope) : null,
+      selectState: selectState is String && selectState.isNotEmpty
+          ? selectState
+          : null,
+      reportAuthRejected: map['report_auth_rejected'] == true,
     );
     return update.isEmpty ? null : update;
+  }
+
+  /// 通知 Rust 侧网络环境变了（[sig] 为连接类型集合签名，如 `wifi` / `mobile|wifi`）
+  ///
+  /// 返回 Rust 的原始返回值：1 受理、0 没有优选实例、-1 参数错；库不支持返回 -1
+  int networkChanged(String sig) {
+    if (!_initialized && !initialize()) return -1;
+    final fn = _dohProxyNetworkChanged;
+    if (fn == null) return -1;
+
+    final sigPtr = sig.toNativeUtf8();
+    try {
+      return fn(sigPtr);
+    } finally {
+      calloc.free(sigPtr);
+    }
+  }
+
+  /// 查询本地动态优选状态；库不支持、没有优选实例或解析失败返回 null
+  DohSelectStatus? selectStatus() {
+    if (!_initialized && !initialize()) return null;
+    final fn = _dohProxySelectStatus;
+    if (fn == null) return null;
+
+    final resultPtr = fn();
+    if (resultPtr == nullptr) return null;
+
+    final jsonStr = resultPtr.toDartString();
+    _dohProxyFreeString(resultPtr);
+
+    final decoded = jsonDecode(jsonStr);
+    if (decoded is! Map<String, dynamic>) return null;
+    if (decoded['ok'] != true) {
+      debugPrint('[DOH FFI] selectStatus: ${decoded['error'] ?? 'unknown error'}');
+      return null;
+    }
+    return DohSelectStatus.fromJson(decoded);
+  }
+
+  /// 手动触发重新优选；true 表示已发车，false 表示冷却中 / 没有实例 / 库不支持
+  bool reraceSelection() {
+    if (!_initialized && !initialize()) return false;
+    final fn = _dohProxySelectRerace;
+    if (fn == null) return false;
+    return fn() == 1;
+  }
+
+  /// 开关「帮助优选」（把握手测量结果分享给 cfhub）
+  ///
+  /// [bearer] 为 cfhub 令牌，关闭时可为 null；令牌只传给 Rust，绝不进日志。
+  /// true 表示已应用，false 表示没有优选实例 / 库不支持
+  bool setShareMeasurements(bool enabled, String? bearer) {
+    if (!_initialized && !initialize()) return false;
+    final fn = _dohProxySetShareMeasurements;
+    if (fn == null) return false;
+
+    final hasBearer = bearer != null && bearer.isNotEmpty;
+    final bearerPtr = hasBearer ? bearer.toNativeUtf8() : nullptr.cast<Utf8>();
+    try {
+      return fn(enabled ? 1 : 0, bearerPtr) == 1;
+    } finally {
+      if (hasBearer) {
+        calloc.free(bearerPtr);
+      }
+    }
   }
 
   /// 经 Rust 的 DoH 客户端（同一套 TLS 栈）向加速服务端发 HTTP 请求
