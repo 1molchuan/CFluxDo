@@ -132,7 +132,35 @@ class DiscourseUrlParser {
   static String? parseTag(String url) {
     final match = _tagRegex.firstMatch(url);
     final encoded = match?.group(1);
-    return encoded == null ? null : Uri.decodeComponent(encoded);
+    return encoded == null ? null : decodeComponentLenient(encoded);
+  }
+
+  /// 宽容版 [Uri.decodeComponent]:兼容两种 href 写法 —— 服务端 cooked 是
+  /// 百分号编码(`/tag/%E5%BC%80...`),而发帖器预览走的客户端 cook 直接
+  /// 拼原文(`/tag/开源推广`)。`Uri.decodeComponent` 只要遇到非 ASCII 字符
+  /// 就抛 ArgumentError(「Illegal percent encoding in URI」),在 hashtag
+  /// 药丸的 build 里抛出来,release 下整段正文就变成一整块灰色 ErrorWidget。
+  ///
+  /// 做法:先把非 ASCII 字符按 UTF-8 百分号编码,再整体解码,原文与编码
+  /// 混排也能还原;仍失败(畸形 `%`)就原样返回,绝不抛。
+  static String decodeComponentLenient(String component) {
+    try {
+      return Uri.decodeComponent(component);
+    } on ArgumentError {
+      final buf = StringBuffer();
+      for (final rune in component.runes) {
+        if (rune < 0x80) {
+          buf.writeCharCode(rune);
+        } else {
+          buf.write(Uri.encodeComponent(String.fromCharCode(rune)));
+        }
+      }
+      try {
+        return Uri.decodeComponent(buf.toString());
+      } on ArgumentError {
+        return component;
+      }
+    }
   }
 
   /// 解析聊天链接,返回 [ChatLinkInfo] 或 null(thread 形态优先匹配,
