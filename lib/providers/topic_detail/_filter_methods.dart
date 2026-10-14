@@ -197,18 +197,17 @@ extension FilterMethods on TopicDetailNotifier {
         );
 
         final existingIds = currentPosts.map((p) => p.id).toSet();
+        final streamPosition = _streamPositionsOf(stream);
+        // 已加载部分本就按 stream 有序,只给新页排序后接到尾部,不再全量重排
         final newPosts = newPostStream.posts
             .where((p) => !existingIds.contains(p.id))
-            .toList();
+            .toList()
+          ..sort(
+            (a, b) => (streamPosition[a.id] ?? stream.length).compareTo(
+              streamPosition[b.id] ?? stream.length,
+            ),
+          );
         final mergedPosts = [...currentPosts, ...newPosts];
-        final streamPosition = <int, int>{
-          for (var i = 0; i < stream.length; i++) stream[i]: i,
-        };
-        mergedPosts.sort(
-          (a, b) => (streamPosition[a.id] ?? stream.length).compareTo(
-            streamPosition[b.id] ?? stream.length,
-          ),
-        );
 
         final newLastId = mergedPosts.last.id;
         final newLastIndex = stream.indexOf(newLastId);
@@ -273,18 +272,17 @@ extension FilterMethods on TopicDetailNotifier {
         final newPostStream = await service.getPosts(arg.topicId, prevIds);
 
         final existingIds = currentPosts.map((p) => p.id).toSet();
+        final streamPosition = _streamPositionsOf(stream);
+        // 新页都在已加载部分之前,只排新页再拼到头部,不再全量重排
         final newPosts = newPostStream.posts
             .where((p) => !existingIds.contains(p.id))
-            .toList();
-        final mergedPosts = [...currentPosts, ...newPosts];
-        final streamPosition = <int, int>{
-          for (var i = 0; i < stream.length; i++) stream[i]: i,
-        };
-        mergedPosts.sort(
-          (a, b) => (streamPosition[a.id] ?? stream.length).compareTo(
-            streamPosition[b.id] ?? stream.length,
-          ),
-        );
+            .toList()
+          ..sort(
+            (a, b) => (streamPosition[a.id] ?? stream.length).compareTo(
+              streamPosition[b.id] ?? stream.length,
+            ),
+          );
+        final mergedPosts = [...newPosts, ...currentPosts];
 
         final newFirstId = mergedPosts.first.id;
         final newFirstIndex = stream.indexOf(newFirstId);

@@ -230,6 +230,12 @@ extension LoadingMethods on TopicDetailNotifier {
     }
   }
 
+  /// 整体重载前清掉待拉的新回复:新数据本身就包含它们,失败计数也归零
+  void _resetPendingNewPosts() {
+    _pendingNewPostIds.clear();
+    _newPostLoadFailures = 0;
+  }
+
   /// 批量加载待处理的新帖子（对齐 Discourse triggerNewPostsInStream）
   Future<void> _loadPendingNewPosts() async {
     if (_isLoadingNewPosts) return;
@@ -242,6 +248,7 @@ extension LoadingMethods on TopicDetailNotifier {
     try {
       final service = ref.read(discourseServiceProvider);
       final postStream = await service.getPosts(arg.topicId, postIds);
+      _newPostLoadFailures = 0;
       final fetchedPosts = postStream.posts;
 
       if (fetchedPosts.isEmpty || !ref.mounted) return;
@@ -297,16 +304,27 @@ extension LoadingMethods on TopicDetailNotifier {
         ),
       ));
     } catch (e) {
-      // 失败时将 post IDs 放回队列,退避后由 finally 重试(无退避会在
-      // 断网时立即重试打转)
+      // 失败时将 post IDs 放回队列,由 finally 按指数退避安排重试
       _pendingNewPostIds.insertAll(0, postIds);
-      debugPrint('[TopicDetail] 加载新回复失败: $e');
-      await Future.delayed(const Duration(seconds: 3));
+      _newPostLoadFailures++;
+      debugPrint('[TopicDetail] 加载新回复失败(第 $_newPostLoadFailures 次): $e');
     } finally {
       _isLoadingNewPosts = false;
-      // 如果在加载期间又有新帖子进入队列，继续加载
       if (ref.mounted && _pendingNewPostIds.isNotEmpty) {
-        _loadPendingNewPosts();
+        if (_newPostLoadFailures == 0) {
+          // 加载期间又有新帖子进入队列,继续加载
+          _loadPendingNewPosts();
+        } else if (_newPostLoadFailures <=
+            TopicDetailNotifier._maxNewPostLoadRetries) {
+          // 3s、6s、12s、24s、48s;退避期间不占 _isLoadingNewPosts,
+          // 不挡用户自己的翻页
+          final delay = Duration(seconds: 3 << (_newPostLoadFailures - 1));
+          Future.delayed(delay, () {
+            if (ref.mounted) _loadPendingNewPosts();
+          });
+        } else {
+          debugPrint('[TopicDetail] 新回复加载连续失败,停止自动重试,待下一条消息再拉');
+        }
       }
     }
   }
@@ -318,6 +336,7 @@ extension LoadingMethods on TopicDetailNotifier {
     _hasMoreBefore = true;
     _isLoadMoreFailed = false;
     _isLoadPreviousFailed = false;
+    _resetPendingNewPosts();
 
     await Future.delayed(Duration.zero);
 
@@ -344,17 +363,21 @@ extension LoadingMethods on TopicDetailNotifier {
     if (state.isLoading) return;
     _isLoadMoreFailed = false;
     _isLoadPreviousFailed = false;
+    _resetPendingNewPosts();
 
     // ignore: invalid_use_of_internal_member
     state = const AsyncLoading<TopicDetail>().copyWithPrevious(state);
 
     final result = await AsyncValue.guard(() async {
       final service = ref.read(discourseServiceProvider);
+      // 三个过滤参数要一起传:漏掉 filterTopLevelReplies 时「只看顶层回复」
+      // 下拉刷新会拿回未过滤的全量数据,而过滤标记仍亮着
       final detail = await service.getTopicDetail(
         arg.topicId,
         postNumber: _isFilteredMode ? null : postNumber,
         filter: _filter,
         usernameFilters: _usernameFilter,
+        filterTopLevelReplies: _filterTopLevelReplies,
       );
 
       _updateBoundaryState(detail.postStream.posts, detail.postStream.stream);

@@ -25,11 +25,16 @@ bool resolveCanBoostAfterRealtimeBoost({
 
 /// 帖子和话题更新相关方法
 extension PostUpdateMethods on TopicDetailNotifier {
-  /// 正在请求中的 postId 集合，防止同一 postId 并发请求。
+  /// 正在请求中的 postId → 该次调用的 preserveCooked,防止同一 postId 并发请求。
   /// 对齐 Discourse 官方 triggerChangedPost：同一 postId 同时只有一个在途请求，
   /// 如果在途期间又收到新消息，标记需要「尾部重试」一次以获取最新状态。
-  static final _pendingRefresh = <int>{};
-  static final _needsRetry = <int>{};
+  static final _pendingRefresh = <int, bool>{};
+
+  /// 需要尾部重试的 postId → 重试用的 preserveCooked。窗口内每条消息都要求
+  /// 保留 cooked 才保留;有一条 revised 就得换上新 cooked。重试丢掉这个参数
+  /// 会让两条 acted 消息的第二条覆盖 cooked/read(单帖接口无 topic_view
+  /// 上下文,read 缺省 false),已读楼层重新变未读、长帖重付一次解析。
+  static final _needsRetry = <int, bool>{};
 
   /// 刷新单个帖子（用于 MessageBus revised/acted 等消息）
   /// 与 Discourse 官方一致，使用 /posts/{id}.json 单帖接口获取完整数据
@@ -52,10 +57,13 @@ extension PostUpdateMethods on TopicDetailNotifier {
     }
 
     // 同一 postId 已有在途请求 → 标记尾部重试，不发新请求
-    if (!_pendingRefresh.add(postId)) {
-      _needsRetry.add(postId);
+    final inflightPreserve = _pendingRefresh[postId];
+    if (inflightPreserve != null) {
+      _needsRetry[postId] =
+          (_needsRetry[postId] ?? inflightPreserve) && preserveCooked;
       return;
     }
+    _pendingRefresh[postId] = preserveCooked;
 
     try {
       final service = ref.read(discourseServiceProvider);
@@ -68,8 +76,9 @@ extension PostUpdateMethods on TopicDetailNotifier {
     } finally {
       _pendingRefresh.remove(postId);
       // 在途期间有新消息到达 → 自动重试一次获取最新状态
-      if (_needsRetry.remove(postId) && ref.mounted) {
-        refreshPost(postId);
+      final retryPreserve = _needsRetry.remove(postId);
+      if (retryPreserve != null && ref.mounted) {
+        refreshPost(postId, preserveCooked: retryPreserve);
       }
     }
   }

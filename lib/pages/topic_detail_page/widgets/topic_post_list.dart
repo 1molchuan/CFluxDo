@@ -1578,34 +1578,34 @@ class _TopicPostListState extends State<TopicPostList> {
     final currentDate = posts[postIndex].createdAt;
     final previousDate = posts[postIndex - 1].createdAt;
 
-    final currentDay = DateTime(
-      currentDate.year,
-      currentDate.month,
-      currentDate.day,
-    );
-    final previousDay = DateTime(
-      previousDate.year,
-      previousDate.month,
-      previousDate.day,
-    );
-
-    return currentDay != previousDay;
+    // 直接比年月日,不为每个 segment 的每次 build 构造两个 DateTime
+    return currentDate.year != previousDate.year ||
+        currentDate.month != previousDate.month ||
+        currentDate.day != previousDate.day;
   }
 
   Widget _buildSegmentItem(BuildContext context, _PostRenderSegment segment) {
     final post = segment.post;
     final postIndex = segment.postIndex;
     final showDivider = dividerPostIndex == postIndex;
-    final showTopSeparator = _shouldShowDateSeparator(postIndex);
-    final dateSeparatorLabel = showTopSeparator
+    // 顶部日期分隔只有 shortPost / longHeader 用,底部只有 shortPost /
+    // longFooter 用;长帖的 chunk 段和 gap 段一个都不用,不再为它们算
+    final needsTopLabel =
+        segment.type == _PostRenderSegmentType.shortPost ||
+        segment.type == _PostRenderSegmentType.longHeader;
+    final needsBottomLabel =
+        segment.type == _PostRenderSegmentType.shortPost ||
+        segment.type == _PostRenderSegmentType.longFooter;
+    final dateSeparatorLabel =
+        needsTopLabel && _shouldShowDateSeparator(postIndex)
         ? TimeUtils.formatSmartDate(post.createdAt)
         : null;
     final posts_ = detail.postStream.posts;
     final nextPostIndex = postIndex + 1;
-    final showBottomSeparator =
-        nextPostIndex < posts_.length &&
-        _shouldShowDateSeparator(nextPostIndex);
-    final bottomDateSeparatorLabel = showBottomSeparator
+    final bottomDateSeparatorLabel =
+        needsBottomLabel &&
+            nextPostIndex < posts_.length &&
+            _shouldShowDateSeparator(nextPostIndex)
         ? TimeUtils.formatSmartDate(posts_[nextPostIndex].createdAt)
         : null;
     final isSelectedPost = selectedPostNumber == post.postNumber;
@@ -1690,8 +1690,13 @@ class _TopicPostListState extends State<TopicPostList> {
         // 实例缓存:输入未变时复用同一 widget 实例,让整页 rebuild 时
         // 未变化的楼层在框架层短路(闭包回调经 State 转发,行为始终
         // 跟随最新 widget,复用实例不会捕获旧数据)
+        // 签名必须覆盖 PostItem 的全部输入:漏一项,该项变化时就会复用旧实例
+        // (话题改分类、指派/取消指派、权限变化都曾因此不刷新)
         final signature = (
           post: post,
+          categoryId: detail.categoryId,
+          assignmentInfo: detail.indirectlyAssignedTo[post.id],
+          canAssignPost: widget.canAssignPost,
           selected: isSelectedPost,
           highlight: highlight,
           boostUsername: boostUsername,

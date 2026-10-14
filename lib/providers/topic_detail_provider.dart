@@ -92,6 +92,14 @@ class TopicDetailNotifier extends AsyncNotifier<TopicDetail> {
   /// 待加载的新帖子 ID 队列（对齐 Discourse _newPostsInStream）
   final List<int> _pendingNewPostIds = [];
   bool _isLoadingNewPosts = false;
+  /// 新回复拉取的连续失败次数:指数退避,超过上限停止自动重试(队列保留,
+  /// 下一条 created 消息或刷新再拉)。无上限时断网会每 3 秒打一次请求直到
+  /// 离开页面,期间还挡住用户自己的翻页。
+  int _newPostLoadFailures = 0;
+  static const int _maxNewPostLoadRetries = 5;
+  /// 过滤模式分页用的 stream 位置表,随 stream 列表实例缓存
+  List<int>? _streamPositionSource;
+  Map<int, int>? _streamPositions;
 
   bool get hasMoreAfter => _hasMoreAfter;
   bool get hasMoreBefore => _hasMoreBefore;
@@ -126,6 +134,21 @@ class TopicDetailNotifier extends AsyncNotifier<TopicDetail> {
     final lastPostId = posts.last.id;
     final lastIndex = stream.indexOf(lastPostId);
     _hasMoreAfter = lastIndex != -1 && lastIndex < stream.length - 1;
+  }
+
+  /// stream id → 下标。过滤模式每翻一页都要按 stream 顺序排新页,表随
+  /// stream 实例缓存,不再每页重建(stream 可达数千条)。
+  Map<int, int> _streamPositionsOf(List<int> stream) {
+    final cached = _streamPositions;
+    if (cached != null && identical(stream, _streamPositionSource)) {
+      return cached;
+    }
+    final positions = <int, int>{
+      for (var i = 0; i < stream.length; i++) stream[i]: i,
+    };
+    _streamPositionSource = stream;
+    _streamPositions = positions;
+    return positions;
   }
 
   /// 用缓存补齐详情里的推荐话题(新响应带了就刷新缓存,没带就回填)
