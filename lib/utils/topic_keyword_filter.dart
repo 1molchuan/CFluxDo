@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart';
+
 import '../models/topic.dart';
 import 'blocked_user_filter.dart';
 
@@ -10,6 +12,39 @@ class TopicKeywordFilter {
 
   static const int autoLoadVisibleThreshold = 5;
   static const int autoLoadMaxAttempts = 3;
+
+  // 编译结果随关键词列表缓存:列表每次 build / 翻页都会调 apply,而关键词
+  // 几乎不变,此前每次都重新 escape + 编译全部正则
+  static List<String>? _cachedKeywords;
+  static bool _cachedWholeWord = false;
+  static List<String> _cachedSubstrings = const [];
+  static List<RegExp> _cachedRegexes = const [];
+
+  static void _ensureCompiled(List<String> normalizedKeywords, bool wholeWord) {
+    final cached = _cachedKeywords;
+    if (cached != null &&
+        _cachedWholeWord == wholeWord &&
+        listEquals(cached, normalizedKeywords)) {
+      return;
+    }
+
+    final substrings = <String>[];
+    final regexes = <RegExp>[];
+    for (final keyword in normalizedKeywords) {
+      if (wholeWord && _isAsciiWordOnly(keyword)) {
+        regexes.add(
+          RegExp(r'\b' + RegExp.escape(keyword) + r'\b', caseSensitive: false),
+        );
+      } else {
+        substrings.add(keyword);
+      }
+    }
+    // 存副本,调用方原地改列表也不会让缓存失真
+    _cachedKeywords = List.unmodifiable(normalizedKeywords);
+    _cachedWholeWord = wholeWord;
+    _cachedSubstrings = substrings;
+    _cachedRegexes = regexes;
+  }
 
   /// 应用关键词与本地屏蔽名单过滤，返回
   /// `(可见列表, 隐藏总数, 其中因屏蔽名单隐藏的数量)`。
@@ -30,17 +65,9 @@ class TopicKeywordFilter {
       return (topics, 0, 0);
     }
 
-    final substrings = <String>[];
-    final regexes = <RegExp>[];
-    for (final keyword in normalizedKeywords) {
-      if (wholeWord && _isAsciiWordOnly(keyword)) {
-        regexes.add(
-          RegExp(r'\b' + RegExp.escape(keyword) + r'\b', caseSensitive: false),
-        );
-      } else {
-        substrings.add(keyword);
-      }
-    }
+    _ensureCompiled(normalizedKeywords, wholeWord);
+    final substrings = _cachedSubstrings;
+    final regexes = _cachedRegexes;
 
     final visible = <Topic>[];
     var hidden = 0;

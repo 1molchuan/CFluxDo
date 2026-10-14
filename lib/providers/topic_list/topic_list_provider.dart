@@ -348,53 +348,6 @@ class TopicListNotifier extends AsyncNotifier<List<Topic>>
     return retryPagedLoadMore(loadMore);
   }
 
-  /// 刷新单条话题状态（用于 MessageBus 更新）
-  Future<void> refreshTopic(int topicId) async {
-    final currentTopics = state.value;
-    if (currentTopics == null) return;
-
-    final existingIndex = currentTopics.indexWhere((t) => t.id == topicId);
-    if (existingIndex == -1) {
-      return;
-    }
-    final existingTopic = currentTopics[existingIndex];
-
-    try {
-      final service = ref.read(discourseServiceProvider);
-      final detail = await service.getTopicDetail(topicId);
-
-      final updatedTopic = Topic(
-        id: detail.id,
-        title: detail.title,
-        slug: detail.slug,
-        categoryId: detail.categoryId.toString(),
-        postsCount: detail.postsCount,
-        replyCount: detail.postsCount > 0 ? detail.postsCount - 1 : 0,
-        views: existingTopic.views,
-        likeCount: existingTopic.likeCount,
-        lastPostedAt: existingTopic.lastPostedAt,
-        pinned: existingTopic.pinned,
-        tags: detail.tags ?? existingTopic.tags,
-        posters: existingTopic.posters,
-        unseen: false,
-        unread: 0,
-        lastReadPostNumber: detail.postsCount,
-        highestPostNumber: detail.postsCount,
-        lastPosterUsername: detail.postStream.posts.isNotEmpty
-            ? detail.postStream.posts.last.username
-            : existingTopic.lastPosterUsername,
-      );
-
-      final newList = currentTopics.map((t) {
-        return t.id == topicId ? updatedTopic : t;
-      }).toList();
-
-      state = AsyncValue.data(newList);
-    } catch (e) {
-      debugPrint('[TopicList] 刷新话题 $topicId 失败: $e');
-    }
-  }
-
   /// 忽略全部（新话题或未读话题）
   Future<void> dismissAll() async {
     final service = ref.read(discourseServiceProvider);

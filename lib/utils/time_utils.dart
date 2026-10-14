@@ -13,6 +13,12 @@ class TimeUtils {
   static String _localTimezone = 'UTC';
   static bool _tzInitialized = false;
 
+  // 纯数字模式与 locale 无关,复用一个实例;此前每次格式化都新建 DateFormat
+  // (解析模式串),列表滚动时每条都走一遍
+  static final DateFormat _detailFormat = DateFormat('yyyy-MM-dd HH:mm');
+  static final DateFormat _compactFormat = DateFormat('MM-dd HH:mm');
+  static final DateFormat _clockFormat = DateFormat('HH:mm');
+
   /// 设备本地 IANA 时区名（如 "Asia/Shanghai"）
   ///
   /// `initialize()` 执行前返回 "UTC"。
@@ -160,9 +166,7 @@ class TimeUtils {
   /// 适用于详情页等需要精确时间的场景
   static String formatDetailTime(DateTime? time) {
     if (time == null) return '';
-
-    final formatter = DateFormat('yyyy-MM-dd HH:mm');
-    return formatter.format(time);
+    return _detailFormat.format(time);
   }
 
   /// 格式化时间为短日期
@@ -213,14 +217,12 @@ class TimeUtils {
   /// 适用于聊天引用等空间有限的场景
   static String formatCompactTime(DateTime? time) {
     if (time == null) return '';
-
-    final formatter = DateFormat('MM-dd HH:mm');
-    return formatter.format(time);
+    return _compactFormat.format(time);
   }
 
   /// 时:分(聊天气泡内联时间;日期已由分隔线承载)
   static String formatClockTime(DateTime? time) {
     if (time == null) return '';
-    return DateFormat('HH:mm').format(time);
+    return _clockFormat.format(time);
   }
 }
