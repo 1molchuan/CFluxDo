@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../../models/user.dart';
 import '../../discourse/discourse_service.dart';
 import 'cfhub_api.dart';
+import 'connect_bound_token.dart';
 import 'connect_code_flow.dart';
 import 'network_settings_service.dart';
 
@@ -42,29 +43,37 @@ enum CfhubEnableResult {
 ///
 /// 发给 cfhub 的只有 code/state 和它自己发的令牌，从不携带 linux.do 的 cookie、_t
 /// 或 API key。登出或换账号时令牌作废。令牌值不写日志。
+///
+/// 取授权地址 → Connect → 换码 → 作废这条链路与加速 DoH 共用 [ConnectBoundToken]
+/// （网络类失败整体重来、作废先于重发、换号守卫都在那里），这里只管开关与令牌存取。
 class CfhubProbeAuthService extends ChangeNotifier {
   CfhubProbeAuthService._({
-    CfhubApi? api,
+    ConnectTokenTransport? transport,
     ConnectCodeFlow? flow,
     ValueListenable<User?>? userNotifier,
-  }) : _api = api,
+    Future<void> Function(Duration delay)? sleep,
+  }) : _transport = transport,
        _flow = flow,
-       _userNotifier = userNotifier;
+       _userNotifier = userNotifier,
+       _sleep = sleep;
 
   static CfhubProbeAuthService instance = CfhubProbeAuthService._();
 
-  /// 测试用：换一个干净的实例，可注入假的 cfhub 接口 / Connect 流程 / 用户通知器
+  /// 测试用：换一个干净的实例，可注入假的传输（假 cfhub）/ Connect 流程 /
+  /// 用户通知器 / 重试等待
   @visibleForTesting
   static void resetForTest({
-    CfhubApi? api,
+    ConnectTokenTransport? transport,
     ConnectCodeFlow? flow,
     ValueListenable<User?>? userNotifier,
+    Future<void> Function(Duration delay)? sleep,
   }) {
     instance._detachUserListener();
     instance = CfhubProbeAuthService._(
-      api: api,
+      transport: transport,
       flow: flow,
       userNotifier: userNotifier,
+      sleep: sleep,
     );
   }
 
@@ -77,9 +86,10 @@ class CfhubProbeAuthService extends ChangeNotifier {
   /// 令牌被 cfhub 拒绝（401/403）时自增一次，UI 据此弹一次提示
   final ValueNotifier<int> rejectedNotifier = ValueNotifier<int>(0);
 
-  CfhubApi? _api;
+  final ConnectTokenTransport? _transport;
   ConnectCodeFlow? _flow;
   ValueListenable<User?>? _userNotifier;
+  final Future<void> Function(Duration delay)? _sleep;
   bool _userListenerAttached = false;
 
   SharedPreferences? _prefs;
@@ -87,13 +97,15 @@ class CfhubProbeAuthService extends ChangeNotifier {
   int? _userId;
   Future<CfhubEnableResult>? _inflight;
 
-  /// 上一次关闭时发出的作废请求：cfhub 按账号作废，重新开启前要等它落地，
-  /// 否则它可能晚于新令牌到达、把新令牌一起作废
-  Future<void>? _pendingRevoke;
-
-  CfhubApi get _effectiveApi => _api ??= CfhubApi();
-
-  ConnectCodeFlow get _effectiveFlow => _flow ??= ConnectCodeFlow();
+  /// cfhub 按账号作废令牌：重新开启前由它先等上一次作废落地，
+  /// 否则作废可能晚于新令牌到达、把新令牌一起作废
+  late final ConnectBoundToken _bound = ConnectBoundToken(
+    policy: CfhubApi.policy,
+    transport: _transport ?? CfhubApi.transport(),
+    flow: () => _flow ??= ConnectCodeFlow(),
+    currentUserId: () => _currentUser?.id,
+    sleep: _sleep,
+  );
 
   /// 用户通知器默认取 DiscourseService 的；测试里注入假的，免得构造整个服务
   ValueListenable<User?> get _effectiveUserNotifier =>
@@ -132,37 +144,13 @@ class CfhubProbeAuthService extends ChangeNotifier {
   /// 用户在设置里打开「帮助优选」：按账号条件走一遍 Connect 换令牌
   ///
   /// 已经有当前账号的令牌时只是把上报重新打开。并发调用共用同一次结果。
+  /// 网络类失败整条链路最多重来 2 次（2 s / 4 s，见 [CfhubApi.policy]）
   Future<CfhubEnableResult> enable() {
     final running = _inflight;
     if (running != null) return running;
-    final future = _enableWithRetry().whenComplete(() => _inflight = null);
+    final future = _enable().whenComplete(() => _inflight = null);
     _inflight = future;
     return future;
-  }
-
-  /// 整条链路（取授权地址 → Connect → 换令牌）有 4 跳、每跳只请求一次，
-  /// 移动网络上任一跳瞬时失败就整体失败。只对「网络类失败」整体重来：
-  /// 每次都是新的 state，重来是安全的；被拒 / 未开放 / 用户取消不重来
-  static const int _maxAttempts = 3;
-
-  /// 重试间隔；测试里置空让用例不用真等
-  @visibleForTesting
-  static List<Duration> retryDelays = const [
-    Duration(seconds: 2),
-    Duration(seconds: 4),
-  ];
-
-  Future<CfhubEnableResult> _enableWithRetry() async {
-    CfhubEnableResult result = CfhubEnableResult.failed;
-    for (var attempt = 0; attempt < _maxAttempts; attempt++) {
-      if (attempt > 0) {
-        await Future<void>.delayed(retryDelays[attempt - 1]);
-        debugPrint('[CFHUB] 开启失败，第 ${attempt + 1} 次尝试');
-      }
-      result = await _enable();
-      if (result != CfhubEnableResult.failed) break;
-    }
-    return result;
   }
 
   Future<CfhubEnableResult> _enable() async {
@@ -178,53 +166,31 @@ class CfhubProbeAuthService extends ChangeNotifier {
       return CfhubEnableResult.ok;
     }
     if (existing != null) {
-      // 别的账号留下的令牌，先作废
+      // 别的账号留下的令牌，先作废（下面换码前会等它落地）
       await _clearStored();
-      _pendingRevoke = _effectiveApi.revoke(existing);
-    }
-    await _awaitPendingRevoke();
-
-    final start = await _effectiveApi.startConnect();
-    if (start.unavailable) return _fail(CfhubEnableResult.hubUnavailable);
-    final authorizeUrl = start.url;
-    if (authorizeUrl == null) return _fail(CfhubEnableResult.failed);
-
-    final connect = await _effectiveFlow.fetchCode(authorizeUrl, silent: false);
-    if (_currentUser?.id != user.id) return _fail(CfhubEnableResult.cancelled);
-    switch (connect.outcome) {
-      case ConnectCodeOutcome.failed:
-        _effectiveApi.lastFailure = 'connect failed';
-        return _fail(CfhubEnableResult.failed);
-      case ConnectCodeOutcome.unavailable:
-        debugPrint('[CFHUB] Connect 授权没拿到 code，放弃开启探针上报');
-        return _fail(CfhubEnableResult.cancelled);
-      case ConnectCodeOutcome.code:
-        break;
+      unawaited(_bound.revoke(existing));
     }
 
-    final result = await _effectiveApi.exchangeCode(
-      connect.code!,
-      connect.state!,
-    );
-    if (_currentUser?.id != user.id) {
-      // 等结果期间退出或换了号，这个令牌不能留
-      final issued = result.token;
-      if (issued != null) unawaited(_effectiveApi.revoke(issued));
-      return _fail(CfhubEnableResult.cancelled);
-    }
+    final result = await _bound.authorize(userId: user.id, interactive: true);
     switch (result.outcome) {
-      case CfhubTokenOutcome.ok:
+      case ConnectTokenOutcome.issued:
         final issued = result.token!;
         await _save(issued, user.id);
         await _setShare(true, bearer: issued);
         notifyListeners();
         return CfhubEnableResult.ok;
-      case CfhubTokenOutcome.rejected:
+      case ConnectTokenOutcome.rejected:
         debugPrint('[CFHUB] cfhub 拒绝了此账号');
         return _fail(CfhubEnableResult.rejected);
-      case CfhubTokenOutcome.unavailable:
+      case ConnectTokenOutcome.serverUnavailable:
         return _fail(CfhubEnableResult.hubUnavailable);
-      case CfhubTokenOutcome.failed:
+      case ConnectTokenOutcome.connectUnavailable:
+        debugPrint('[CFHUB] Connect 授权没拿到 code，放弃开启探针上报');
+        return _fail(CfhubEnableResult.cancelled);
+      case ConnectTokenOutcome.stale:
+        // 等结果期间退出或换了号：拿到的令牌已作废
+        return _fail(CfhubEnableResult.cancelled);
+      case ConnectTokenOutcome.failed:
         return _fail(CfhubEnableResult.failed);
     }
   }
@@ -232,7 +198,7 @@ class CfhubProbeAuthService extends ChangeNotifier {
   /// 没开成：确保上报是关的，再把结果原样返回
   Future<CfhubEnableResult> _fail(CfhubEnableResult result) async {
     lastFailureDetail = result == CfhubEnableResult.failed
-        ? _effectiveApi.lastFailure
+        ? _bound.lastFailureDetail
         : null;
     await _setShare(false);
     notifyListeners();
@@ -240,26 +206,16 @@ class CfhubProbeAuthService extends ChangeNotifier {
   }
 
   /// 关闭「帮助优选」：作废令牌（尽力而为）、清掉本地记录、关上报
+  ///
+  /// 作废请求由 [ConnectBoundToken] 记着：重新开启时先等它落地再换码
   Future<void> disable({bool revoke = true}) async {
     final token = _token;
     if (revoke && token != null) {
-      _pendingRevoke = _effectiveApi.revoke(token);
+      unawaited(_bound.revoke(token));
     }
     await _clearStored();
     await _setShare(false);
     notifyListeners();
-  }
-
-  /// 等上一次的作废请求结束（最多几秒，失败也不管），避免它压掉随后发的新令牌
-  Future<void> _awaitPendingRevoke() async {
-    final pending = _pendingRevoke;
-    if (pending == null) return;
-    try {
-      await pending.timeout(const Duration(seconds: 5));
-    } catch (_) {
-      // revoke 本来就是尽力而为
-    }
-    if (identical(_pendingRevoke, pending)) _pendingRevoke = null;
   }
 
   /// Rust 侧上报被 cfhub 拒绝（401/403）：令牌已失效，清掉并关上报，通知 UI 提示一次

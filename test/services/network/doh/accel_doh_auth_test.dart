@@ -9,65 +9,35 @@ import 'package:fluxdo/services/network/doh/network_settings_service.dart';
 import 'package:fluxdo/services/network/doh_proxy/doh_proxy_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// 假的加速服务端：记录调用，按设定返回
-class _FakeApi implements AccelDohApi {
-  int startCalls = 0;
-  int refreshCalls = 0;
-  String? lastCode;
-  String? lastState;
-  final List<String> revoked = [];
-  AccelDohIssueResult exchangeResult = const AccelDohIssueResult.issued(
-    'connect-token',
-    Duration(days: 7),
-  );
+import 'connect_token_fakes.dart';
 
-  @override
-  Future<Uri?> startConnect() async {
-    startCalls++;
-    return Uri.parse('https://connect.linux.do/oauth2/authorize?client_id=x');
+/// 假的加速服务端：换码默认发 connect-token（7 天），续期一律 500
+class _FakeServer extends FakeTokenServer {
+  _FakeServer() : super(AccelDohApi.policy) {
+    issue('connect-token');
   }
 
-  @override
-  Future<AccelDohIssueResult> exchangeCode({
-    required String code,
-    required String state,
-  }) async {
-    lastCode = code;
-    lastState = state;
-    return exchangeResult;
-  }
+  int get startCalls => count(policy.startPath);
+  int get refreshCalls => count(policy.refreshPath!);
+  String? get lastCode => lastCall(policy.tokenPath)?.body?['code'] as String?;
+  String? get lastState =>
+      lastCall(policy.tokenPath)?.body?['state'] as String?;
 
-  @override
-  Future<AccelDohIssueResult> refresh(String token) async {
-    refreshCalls++;
-    return const AccelDohIssueResult.failed();
-  }
-
-  @override
-  Future<void> revoke(String token) async => revoked.add(token);
+  void issue(String token) => respond(policy.tokenPath, 200, {
+    'token': token,
+    'expires_in': const Duration(days: 7).inSeconds,
+  });
 }
 
-/// 假的 Connect 授权与授权说明：不弹窗、不发请求
-class _FakeConnectFlow implements ConnectCodeFlow {
-  /// null 表示现在弹不了窗
-  bool? consentAnswer;
-  int consentAsks = 0;
-  ConnectCodeResult result = const ConnectCodeResult.code(
-    'the-code',
-    'the-state',
-  );
+/// 授权说明：null 表示现在弹不了窗
+class _FakeConsent {
+  bool? answer;
+  int asks = 0;
 
-  Future<bool?> askConsent() async {
-    consentAsks++;
-    return consentAnswer;
+  Future<bool?> ask() async {
+    asks++;
+    return answer;
   }
-
-  @override
-  Future<ConnectCodeResult> fetchCode(
-    Uri authorizeUrl, {
-    bool silent = true,
-    String requestTag = '',
-  }) async => result;
 }
 
 void main() {
@@ -78,8 +48,9 @@ void main() {
     late SharedPreferences prefs;
     final auth = AccelDohAuthService.instance;
     final service = NetworkSettingsService.instance;
-    final api = _FakeApi();
-    final flow = _FakeConnectFlow();
+    final api = _FakeServer();
+    final flow = FakeConnectFlow();
+    final consent = _FakeConsent();
 
     late DohServer accelServer;
 
@@ -106,9 +77,9 @@ void main() {
       });
       prefs = await SharedPreferences.getInstance();
       auth
-        ..debugApi = api
+        ..debugTransport = api.transport()
         ..debugConnectFlow = flow
-        ..debugAskConsent = flow.askConsent
+        ..debugAskConsent = consent.ask
         ..consentPromptDelay = Duration.zero
         ..rejectCooldown = Duration.zero;
       await service.initialize(prefs);
@@ -204,7 +175,7 @@ void main() {
       expect(backoff['reason'], 'displaced');
 
       // 手动授权照样走 Connect；这次服务端拒绝了（比如 3 台都在用）
-      api.exchangeResult = const AccelDohIssueResult.rejected();
+      api.respond(api.policy.tokenPath, 403);
       final status = await auth.authorizeNow();
       expect(api.startCalls, 3);
       expect(status, AccelDohAuthStatus.denied);
@@ -216,13 +187,12 @@ void main() {
     });
 
     test('换成用不了 Connect 的账号（青春版）：同意后仍走公共加速', () async {
-      flow
-        ..consentAnswer = true
-        ..result = const ConnectCodeResult.unavailable();
-      final asksBefore = flow.consentAsks;
+      consent.answer = true;
+      flow.result = const ConnectCodeResult.unavailable();
+      final asksBefore = consent.asks;
       auth.onUserChanged(User(id: 8, username: 'bob', trustLevel: 1));
       await pumpEventQueue();
-      expect(flow.consentAsks, asksBefore + 1);
+      expect(consent.asks, asksBefore + 1);
       expect(auth.token, isNull);
       expect(auth.status, AccelDohAuthStatus.unavailable);
       expect(activeUrl(), accelDohPublicServer.url);
@@ -230,13 +200,9 @@ void main() {
     });
 
     test('选了暂不：走公共加速；之后在设置里手动授权就切到专属加速', () async {
-      flow
-        ..consentAnswer = false
-        ..result = const ConnectCodeResult.code('code-9', 'state-9');
-      api.exchangeResult = const AccelDohIssueResult.issued(
-        'token-9',
-        Duration(days: 7),
-      );
+      consent.answer = false;
+      flow.result = const ConnectCodeResult.code('code-9', 'state-9');
+      api.issue('token-9');
       final startsBefore = api.startCalls;
       auth.onUserChanged(User(id: 9, username: 'carol', trustLevel: 3));
       await pumpEventQueue();
@@ -245,7 +211,7 @@ void main() {
       expect(activeUrl(), accelDohPublicServer.url);
       expect(service.accelFallbackHint, contains('未授权'));
 
-      flow.consentAnswer = true;
+      consent.answer = true;
       final status = await auth.authorizeNow();
       expect(status, AccelDohAuthStatus.ready);
       expect(api.lastCode, 'code-9');
@@ -256,6 +222,7 @@ void main() {
 
     test('主动退出：作废令牌、清掉授权记录，改回公共加速', () async {
       await auth.revoke();
+      await pumpEventQueue();
       expect(auth.token, isNull);
       expect(auth.isMember, isFalse);
       expect(auth.status, AccelDohAuthStatus.notEligible);

@@ -8,50 +8,21 @@ import 'package:fluxdo/services/network/doh/network_settings_service.dart';
 import 'package:fluxdo/services/network/doh_proxy/doh_proxy_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// 假的 cfhub：记录调用，按设定返回
-class _FakeApi implements CfhubApi {
-  @override
-  String? lastFailure;
+import 'connect_token_fakes.dart';
 
-  int startCalls = 0;
-  CfhubStartResult startResult = CfhubStartResult.ok(
-    Uri.parse('https://connect.linux.do/oauth2/authorize?client_id=x'),
-  );
-  CfhubTokenResult tokenResult = const CfhubTokenResult.ok('cfp_first');
-  String? lastCode;
-  String? lastState;
-  final List<String> revoked = [];
-
-  @override
-  Future<CfhubStartResult> startConnect() async {
-    startCalls++;
-    return startResult;
+/// 假的 cfhub：换码默认发 cfp_first
+class _FakeServer extends FakeTokenServer {
+  _FakeServer() : super(CfhubApi.policy) {
+    issue('cfp_first');
   }
 
-  @override
-  Future<CfhubTokenResult> exchangeCode(String code, String state) async {
-    lastCode = code;
-    lastState = state;
-    return tokenResult;
-  }
+  int get startCalls => count(policy.startPath);
+  String? get lastCode => lastCall(policy.tokenPath)?.body?['code'] as String?;
+  String? get lastState =>
+      lastCall(policy.tokenPath)?.body?['state'] as String?;
 
-  @override
-  Future<void> revoke(String token) async => revoked.add(token);
-}
-
-/// 假的 Connect 授权：不弹窗、不发请求
-class _FakeConnectFlow implements ConnectCodeFlow {
-  ConnectCodeResult result = const ConnectCodeResult.code(
-    'the-code',
-    'the-state',
-  );
-
-  @override
-  Future<ConnectCodeResult> fetchCode(
-    Uri authorizeUrl, {
-    bool silent = true,
-    String requestTag = '',
-  }) async => result;
+  void issue(String token) =>
+      respond(policy.tokenPath, 200, {'token': token});
 }
 
 void main() {
@@ -61,19 +32,20 @@ void main() {
   group('cfhub 探针令牌', () {
     late SharedPreferences prefs;
     final service = NetworkSettingsService.instance;
-    final api = _FakeApi();
-    final flow = _FakeConnectFlow();
+    final api = _FakeServer();
+    final flow = FakeConnectFlow();
     final user = ValueNotifier<User?>(null);
     late CfhubProbeAuthService auth;
 
     setUpAll(() async {
       SharedPreferences.setMockInitialValues({});
       prefs = await SharedPreferences.getInstance();
-      CfhubProbeAuthService.retryDelays = const [Duration.zero, Duration.zero];
       CfhubProbeAuthService.resetForTest(
-        api: api,
+        transport: api.transport(),
         flow: flow,
         userNotifier: user,
+        // 重试不真等
+        sleep: (_) async {},
       );
       auth = CfhubProbeAuthService.instance;
       // 网络设置服务初始化时会顺带初始化探针服务
@@ -112,7 +84,7 @@ void main() {
 
     test('cfhub 未开放（404）：hubUnavailable，上报保持关', () async {
       user.value = User(id: 7, username: 'alice', trustLevel: 2);
-      api.startResult = const CfhubStartResult.unavailable();
+      api.respond(api.policy.startPath, 404);
       expect(await auth.enable(), CfhubEnableResult.hubUnavailable);
       expect(api.startCalls, 1);
       expect(auth.token, isNull);
@@ -122,9 +94,9 @@ void main() {
     });
 
     test('授权成功：存令牌与账号 id，打开上报', () async {
-      api.startResult = CfhubStartResult.ok(
-        Uri.parse('https://connect.linux.do/oauth2/authorize?client_id=x'),
-      );
+      api.respond(api.policy.startPath, 200, {
+        'authorize_url': FakeTokenServer.authorizeUrl,
+      });
       expect(await auth.enable(), CfhubEnableResult.ok);
       expect(api.startCalls, 2);
       expect(api.lastCode, 'the-code');
@@ -160,14 +132,14 @@ void main() {
     });
 
     test('cfhub 拒绝此账号：rejected，上报关', () async {
-      api.tokenResult = const CfhubTokenResult.rejected();
+      api.respond(api.policy.tokenPath, 403);
       expect(await auth.enable(), CfhubEnableResult.rejected);
       expect(auth.token, isNull);
       expect(service.current.shareMeasurements, isFalse);
     });
 
     test('Connect 没拿到 code：cancelled，上报关', () async {
-      api.tokenResult = const CfhubTokenResult.ok('cfp_second');
+      api.issue('cfp_second');
       flow.result = const ConnectCodeResult.unavailable();
       expect(await auth.enable(), CfhubEnableResult.cancelled);
       expect(auth.token, isNull);
@@ -189,7 +161,7 @@ void main() {
     });
 
     test('登出：令牌作废、上报关', () async {
-      api.tokenResult = const CfhubTokenResult.ok('cfp_third');
+      api.issue('cfp_third');
       expect(await auth.enable(), CfhubEnableResult.ok);
       expect(prefs.getInt('cfhub_probe_user_id'), 8);
 
@@ -202,9 +174,10 @@ void main() {
 
     test('手动关闭：作废令牌、清记录', () async {
       user.value = User(id: 8, username: 'bob', trustLevel: 2);
-      api.tokenResult = const CfhubTokenResult.ok('cfp_fourth');
+      api.issue('cfp_fourth');
       expect(await auth.enable(), CfhubEnableResult.ok);
       await auth.disable();
+      await pumpEventQueue();
       expect(auth.token, isNull);
       expect(api.revoked, contains('cfp_fourth'));
       expect(prefs.getString('cfhub_probe_token'), isNull);
