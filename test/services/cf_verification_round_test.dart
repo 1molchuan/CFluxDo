@@ -95,6 +95,21 @@ void main() {
       expect(env.landed, hasLength(3), reason: '落值确认 3 次');
     });
 
+    test('值一直在变、稳定不下来 → 不落值，按超时收口', () async {
+      final (outcome, round) = await start();
+      var n = 0;
+      // 每 1 秒换一枚值，永远不满 1.5 秒
+      for (var i = 0; i < 12 && !round.isDone; i++) {
+        env.webView = 'v${n++}';
+        round.clearanceSeen(env.webView!, source: 'polling');
+        await clock.advance(const Duration(seconds: 1));
+      }
+
+      final result = await outcome;
+      expect((result as CfRoundFailed).reason, CfRoundFailure.timeout);
+      expect(env.landed, isEmpty, reason: '还在变的值不落 jar');
+    });
+
     test('定稿期间的自动放弃被忽略（用户退出除外）', () async {
       final (outcome, round) = await start();
       env.webView = 'fresh';

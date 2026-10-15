@@ -142,6 +142,9 @@ class CfVerificationRound implements CfVerificationSignals {
   CfFreshClearanceReader? _reader;
   String? _pendingValue;
   DateTime? _pendingSince;
+
+  /// 本轮第一次见到新值的时刻：值一直在变、迟迟不稳定时据此兜底收口。
+  DateTime? _firstSeenAt;
   DateTime? _hintAt;
   DateTime? _conclusiveAt;
   bool _networkTrouble = false;
@@ -181,6 +184,7 @@ class CfVerificationRound implements CfVerificationSignals {
       final replaced = _pendingValue != null;
       _pendingValue = normalized;
       _pendingSince = _clock.now();
+      _firstSeenAt ??= _pendingSince;
       CfChallengeLogger.log(
         '[ROUND $id] ${replaced ? 'cf_clearance changed' : 'new cf_clearance'} '
         '(${normalized.length} chars, via $source), waiting '
@@ -289,6 +293,16 @@ class CfVerificationRound implements CfVerificationSignals {
     if (pending != null) {
       if (now.difference(_pendingSince!) >= settleWindow) {
         await _land(pending);
+        return;
+      }
+      // 值一直在变、始终稳定不下来（定稿期间自动放弃会被忽略）：不能让
+      // 一轮卡死，也不能落一枚还在变的值——按超时收口。
+      if (now.difference(_firstSeenAt!) >= settleWindow + completionDeadline) {
+        _complete(
+          CfRoundFailed(round: id, reason: CfRoundFailure.timeout),
+          detail: 'cf_clearance kept changing for '
+              '${now.difference(_firstSeenAt!).inMilliseconds}ms',
+        );
         return;
       }
       _ensureTicking();
