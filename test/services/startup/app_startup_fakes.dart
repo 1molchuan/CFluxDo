@@ -29,6 +29,9 @@ class FakeStartupPorts implements AppStartupPorts {
 
   /// 预加载等它完成；不为 null 时可模拟慢预加载 / 失败。
   Completer<void>? preloadGate;
+
+  /// 预加载的实际过程（例如用真实 Dio 走一遍直连 → 回退直连）；抛错即预加载失败。
+  Future<void> Function()? preloadBody;
   Object? preloadError;
   bool _preloaded = false;
 
@@ -70,6 +73,15 @@ class FakeStartupPorts implements AppStartupPorts {
     onPreload?.call(progress);
     final gate = preloadGate;
     if (gate != null) await gate.future;
+    final body = preloadBody;
+    if (body != null) {
+      try {
+        await body();
+      } catch (_) {
+        log.add('preload:failed');
+        rethrow;
+      }
+    }
     final error = preloadError;
     if (error != null) {
       preloadError = null;

@@ -82,7 +82,7 @@ class RateLimitPolicy implements RecoveryPolicy {
   }
 }
 
-/// 瞬态故障恢复策略:5xx 与连接类错误。
+/// 瞬态故障恢复策略:5xx 与连接类错误(含连接在响应前被掐断)。
 ///
 /// 只对幂等方法生效——POST 重放可能造成重复发帖/重复点赞,宁可失败也不
 /// 冒这个风险(这也是为什么它不能简单等价于 dio_smart_retry 的默认行为:
@@ -159,7 +159,13 @@ class TransientRetryPolicy implements RecoveryPolicy {
       case DioExceptionType.cancel:
         return false;
       case DioExceptionType.unknown:
-        return err.error is SocketException;
+        // HttpException：连接在收到响应（头或正文）之前被掐断，例如网络刚
+        // 恢复时蜂窝→Wi-Fi 切换，系统销毁了旧网络上的 socket，本地网关随之
+        // 断开下游连接（「Connection closed before full header was
+        // received」）。与连接失败同属瞬态，幂等请求照常退避重放；以前它
+        // 不在此列，启动预加载撞上就直接落到错误页。
+        final inner = err.error;
+        return inner is SocketException || inner is HttpException;
       default:
         return false;
     }

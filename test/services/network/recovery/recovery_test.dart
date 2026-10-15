@@ -1,3 +1,4 @@
+import 'dart:io' show HttpException;
 import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
@@ -140,6 +141,33 @@ void main() {
       expect(
         policy.canHandle(_networkFailure(DioExceptionType.badCertificate)),
         isFalse,
+      );
+    });
+
+    test('连接在响应前被掐断(HttpException)按瞬态处理,仅限幂等方法', () {
+      const policy = TransientRetryPolicy();
+      AttemptOutcome dropped(String method, Object inner) =>
+          AttemptOutcome.failure(
+            error: DioException(
+              requestOptions: RequestOptions(path: '/x', method: method),
+              type: DioExceptionType.unknown,
+              error: inner,
+            ),
+            attemptIndex: 0,
+          );
+      const closed = HttpException(
+        'Connection closed before full header was received',
+      );
+      expect(policy.canHandle(dropped('GET', closed)), isTrue);
+      expect(
+        policy.canHandle(dropped('POST', closed)),
+        isFalse,
+        reason: '非幂等请求被掐断时服务端可能已处理,不能重放',
+      );
+      expect(
+        policy.canHandle(dropped('GET', const FormatException('bad'))),
+        isFalse,
+        reason: '其他 unknown 错误仍不重放',
       );
     });
 
