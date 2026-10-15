@@ -11,7 +11,9 @@ import '../utils/frame_jank_monitor.dart';
 import 'app_logger.dart';
 import 'cf_challenge_logger.dart';
 import 'cf_challenge_service.dart';
+import 'cf_clearance_authority.dart';
 import 'cf_clearance_refresh_service.dart';
+import 'network/cf/cf_round_outcome.dart';
 import 'discourse/discourse_service.dart';
 import 'network/cookie/boundary_sync_service.dart';
 import 'network/cookie/cookie_jar_service.dart';
@@ -76,14 +78,15 @@ class BrowserTrustCoordinator {
   BrowserTrustCoordinator._();
   static final BrowserTrustCoordinator instance = BrowserTrustCoordinator._();
 
-  static const Duration _trustedClearanceMinTtl = Duration(minutes: 10);
-  static const Duration _requestClearanceMinTtl = Duration(seconds: 30);
   static const Duration _webViewPreloadTimeout = Duration(seconds: 25);
   static const Duration _domSnapshotTimeout = Duration(seconds: 12);
   static const Duration _originLoadTimeout = Duration(seconds: 8);
   static const Duration _backgroundPauseDelay = Duration(seconds: 8);
   static const Duration _requestGateTimeout = Duration(seconds: 6);
   static const Duration _diagnosticBackgroundPauseDelay = Duration(seconds: 60);
+
+  /// bootstrap 被挡时只等进行中那一轮验证的上限（不发起、不转前台）。
+  static const Duration _activeRoundWaitTimeout = Duration(seconds: 12);
   static const Duration _webViewTeardownCooldown = Duration(milliseconds: 1200);
 
   final CookieJarService _jar = CookieJarService();
@@ -98,21 +101,9 @@ class BrowserTrustCoordinator {
   /// 导航 context,供 bootstrap 被 CF 挡下时主动发起 CF 验证(showManualVerify)。
   BuildContext? _navigatorContext;
 
-  /// 服务端最近一次以 CF(403/429)拒绝 cf_clearance 的时刻。在此窗口内,即使本地
-  /// cf_clearance 的 TTL 仍足够,也视为不可信——避免冷启动盲信本地 clearance 再撞墙。
-  DateTime? _lastClearanceRejectedAt;
-  static const Duration _clearanceRejectionTtl = Duration(minutes: 2);
-
-  /// 最近是否被服务端以 CF 拒绝过(带自动过期清理)。
-  bool get _clearanceRecentlyRejected {
-    final at = _lastClearanceRejectedAt;
-    if (at == null) return false;
-    if (DateTime.now().difference(at) >= _clearanceRejectionTtl) {
-      _lastClearanceRejectedAt = null;
-      return false;
-    }
-    return true;
-  }
+  /// cf_clearance 能不能用（被拒窗口、有效期门槛、被撞标记）统一由账本
+  /// 判定，这里只读。
+  CfClearanceAuthority get _ledger => CfClearanceAuthority.instance;
 
   BrowserTrustPreloadPath? _lastPreloadPath;
 
@@ -435,7 +426,12 @@ class BrowserTrustCoordinator {
     required SessionBootstrapResult blocked,
   }) async {
     final cycleStartAt = DateTime.now();
-    _lastClearanceRejectedAt = cycleStartAt;
+    // 记进账本：窗口内原生预加载/请求门都不再盲信本地 clearance。被拒时
+    // jar 里的值一并记下，jar 换上别的值即解除。
+    _ledger.noteRejected(
+      CfClearanceAuthority.mainHost,
+      value: await _jar.getCfClearance(),
+    );
     _log(
       'bootstrap blocked by CF status=${blocked.status} phase=${blocked.phase}; '
       'invalidate native trust, coordinate clearance reason=$reason',
@@ -451,16 +447,23 @@ class BrowserTrustCoordinator {
 
     final resolvedAt = cf.clearanceResolvedAt.value;
     if (resolvedAt != null && resolvedAt.isAfter(cycleStartAt)) {
-      // Dio 侧在本周期内已经把 cf_clearance 重新拿到,直接重跑即可。
+      // 本周期内已经有一轮验证把 cf_clearance 重新拿到,直接重跑即可。
       gotClearance = true;
-    } else if (cf.inProgressNotifier.value) {
-      // Dio 侧(或其它入口)正在验证 → 等它广播 clearance 解决,不重复弹验证。
-      gotClearance = await _awaitClearanceResolved(cf, after: cycleStartAt);
+    } else if (cf.isVerifying) {
+      // Dio 侧(或其它入口)正在验证 → 只等这一轮的结果,不重复弹验证、
+      // 也不把它转前台。通过即定稿值已在 jar。
+      final outcome = await cf.waitForActiveRound(
+        timeout: _activeRoundWaitTimeout,
+      );
+      gotClearance = outcome?.passed ?? false;
     } else if (cf.autoVerifyEnabled && !cf.isInCooldown) {
-      // 没有进行中的验证 → coordinator 主动发起(内部会复用任何期间出现的
-      // 进行中验证)。自动恢复不是用户发起的,先后台静默尝试再转前台。
-      final ok = await cf.showVerifySilentFirst(_navigatorContext);
-      gotClearance = ok == true;
+      // 没有进行中的验证 → coordinator 主动发起(期间出现的进行中验证会被
+      // 合流)。自动恢复不是用户发起的,先后台静默尝试再转前台。
+      final outcome = await cf.verify(
+        mode: CfVerifyMode.silentFirst,
+        context: _navigatorContext,
+      );
+      gotClearance = outcome.passed;
     }
 
     if (!gotClearance) {
@@ -475,7 +478,7 @@ class BrowserTrustCoordinator {
       return blocked;
     }
 
-    _lastClearanceRejectedAt = null;
+    _ledger.clearRejection(CfClearanceAuthority.mainHost);
     // 验证结果会早于 Windows WebView2 Controller 的真实析构完成。
     // 等 CF teardown gate（内部含 1.2 秒冷却）后才能创建 Session WebView。
     await cf.waitForManualTeardown();
@@ -493,32 +496,6 @@ class BrowserTrustCoordinator {
     );
     // 即使重跑仍被 CF 挡下也直接返回,不再递归(本周期只恢复一次)。
     return retry;
-  }
-
-  /// 等待 [CfChallengeService.clearanceResolvedAt] 出现晚于 [after] 的新值,
-  /// 表示 cf_clearance 已被(Dio 侧或并发的手动验证)重新拿到。带超时兜底。
-  Future<bool> _awaitClearanceResolved(
-    CfChallengeService cf, {
-    required DateTime after,
-    Duration timeout = const Duration(seconds: 12),
-  }) async {
-    final current = cf.clearanceResolvedAt.value;
-    if (current != null && current.isAfter(after)) return true;
-
-    final completer = Completer<bool>();
-    void listener() {
-      final v = cf.clearanceResolvedAt.value;
-      if (v != null && v.isAfter(after) && !completer.isCompleted) {
-        completer.complete(true);
-      }
-    }
-
-    cf.clearanceResolvedAt.addListener(listener);
-    try {
-      return await completer.future.timeout(timeout, onTimeout: () => false);
-    } finally {
-      cf.clearanceResolvedAt.removeListener(listener);
-    }
   }
 
   void _completeRequestGate(Completer<bool>? gate, bool ready) {
@@ -748,85 +725,41 @@ class BrowserTrustCoordinator {
     );
   }
 
+  /// 冷启动能否直接走原生链路预加载首页（剩余有效期门槛见
+  /// [CfClearancePurpose.nativePreload]）。
   Future<bool> _isNativePreloadTrusted() async {
-    _nativeUntrustedReason = null;
-    if (_clearanceRecentlyRejected) {
-      _log(
-        'native trust check: untrusted, clearance recently rejected by server',
-        level: 'warning',
-      );
-      _nativeUntrustedReason = StartupDetourReason.clearanceRejected;
-      return false;
-    }
-    if (!_jar.isInitialized) {
-      await _jar.initialize();
-    }
-    final clearance = await _jar.getCanonicalCookie('cf_clearance');
-    if (clearance == null || clearance.value.isEmpty) {
-      _log('native trust check: untrusted, no cf_clearance');
-      _nativeUntrustedReason = StartupDetourReason.noClearance;
-      return false;
-    }
-    if (!CookieJarService.matchesAppHost(clearance.domain)) {
-      _log(
-        'native trust check: untrusted, domain=${clearance.domain}',
-        level: 'warning',
-      );
-      _nativeUntrustedReason = StartupDetourReason.noClearance;
-      return false;
-    }
-    final expiresAt = clearance.expiresAt;
-    if (expiresAt == null) {
-      _log('native trust check: trusted, no expires');
-      return true;
-    }
-    final ttl = expiresAt.difference(DateTime.now());
-    final trusted = ttl >= _trustedClearanceMinTtl;
+    final status = await _clearanceStatus(CfClearancePurpose.nativePreload);
+    _nativeUntrustedReason = switch (status.verdict) {
+      CfClearanceVerdict.usable => null,
+      CfClearanceVerdict.recentlyRejected ||
+      CfClearanceVerdict.challenged => StartupDetourReason.clearanceRejected,
+      CfClearanceVerdict.expiring ||
+      CfClearanceVerdict.expired => StartupDetourReason.clearanceExpiring,
+      CfClearanceVerdict.missing ||
+      CfClearanceVerdict.foreignDomain => StartupDetourReason.noClearance,
+    };
     _log(
-      'native trust check: trusted=$trusted ttl=${ttl.inSeconds}s expires=${expiresAt.toIso8601String()}',
+      'native trust check: trusted=${status.usable} $status',
+      level: status.usable ? 'info' : 'warning',
     );
-    if (!trusted) {
-      _nativeUntrustedReason = StartupDetourReason.clearanceExpiring;
-    }
-    return trusted;
+    return status.usable;
   }
 
+  /// 首波业务请求的信任门（剩余有效期门槛见 [CfClearancePurpose.requestGate]）。
   Future<bool> _isRequestGateTrusted() async {
-    if (_clearanceRecentlyRejected) {
-      _log(
-        'request gate trust check: untrusted, clearance recently rejected by server',
-        level: 'warning',
-      );
-      return false;
-    }
+    final status = await _clearanceStatus(CfClearancePurpose.requestGate);
+    _log(
+      'request gate trust check: trusted=${status.usable} $status',
+      level: status.usable ? 'info' : 'warning',
+    );
+    return status.usable;
+  }
+
+  Future<CfClearanceStatus> _clearanceStatus(CfClearancePurpose purpose) async {
     if (!_jar.isInitialized) {
       await _jar.initialize();
     }
-    final clearance = await _jar.getCanonicalCookie('cf_clearance');
-    if (clearance == null || clearance.value.isEmpty) {
-      _log('request gate trust check: untrusted, no cf_clearance');
-      return false;
-    }
-    if (!CookieJarService.matchesAppHost(clearance.domain)) {
-      _log(
-        'request gate trust check: untrusted, domain=${clearance.domain}',
-        level: 'warning',
-      );
-      return false;
-    }
-    final expiresAt = clearance.expiresAt;
-    if (expiresAt == null) {
-      _log('request gate trust check: trusted, no expires');
-      return true;
-    }
-    final ttl = expiresAt.difference(DateTime.now());
-    final trusted = ttl >= _requestClearanceMinTtl;
-    _log(
-      'request gate trust check: trusted=$trusted ttl=${ttl.inSeconds}s '
-      'expires=${expiresAt.toIso8601String()}',
-      level: trusted ? 'info' : 'warning',
-    );
-    return trusted;
+    return _ledger.status(CfClearanceAuthority.mainHost, purpose: purpose);
   }
 
   void _startClearanceRefreshIfLoggedIn({String reason = 'preload_logged_in'}) {

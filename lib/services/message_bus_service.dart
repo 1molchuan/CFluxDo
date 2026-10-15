@@ -155,13 +155,13 @@ class MessageBusService {
     String? sharedSessionKey,
   }) {
     return DiscourseDio.create(
+      kind: DiscourseDioKind.longPoll,
       receiveTimeout: const Duration(seconds: 60),
       defaultHeaders: {
         'Accept': 'application/json',
         'Content-Type': 'application/x-www-form-urlencoded',
       },
       baseUrl: baseUrl,
-      maxConcurrent: null,
       enableCookies: !_shouldDisableCookiesForPolling(
         baseUrl: baseUrl,
         sharedSessionKey: sharedSessionKey,

@@ -123,6 +123,14 @@ class _HostState {
 ///
 /// 并发数和速率限制从 [RequestSchedulerConfig] 动态读取。
 class RequestSchedulerInterceptor extends Interceptor {
+  RequestSchedulerInterceptor({this.freezeDuringCfVerification = true});
+
+  /// CF 验证进行中是否冻结经过本调度器的业务请求。
+  ///
+  /// 由工厂按链路种类（DiscourseDioKind）显式传入，不再随"是否限并发"
+  /// 暗中决定。
+  final bool freezeDuringCfVerification;
+
   /// 按 host 共享的状态表。key = uri.host 小写。
   static final Map<String, _HostState> _states = {};
 
@@ -184,7 +192,9 @@ class RequestSchedulerInterceptor extends Interceptor {
     //   或超时才拒绝。此前一律取消，验证期间点开的页面过盾后只能手动重试。
     //
     // 仅 CfChallengeInterceptor 内部 retry（标记 skipCfBlock=true）能绕过。
-    if (!options.spec.skipCfBlock && CfChallengeService().isVerifying) {
+    if (freezeDuringCfVerification &&
+        !options.spec.skipCfBlock &&
+        CfChallengeService().isVerifying) {
       final passed =
           !options.spec.isSilent && await _waitForCfVerification(options);
       if (options.cancelToken?.isCancelled ?? false) {

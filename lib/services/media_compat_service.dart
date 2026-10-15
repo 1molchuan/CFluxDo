@@ -50,11 +50,8 @@ class MediaCompatService {
   /// 懒建 Dio:cookie 开着走 secure-uploads(CDN host 无 cookie 自然不带),
   /// 媒体文件下载不需要 CF 验证/重试/日志。测试只用纯函数,不会触发构建。
   late final Dio _dio = DiscourseDio.create(
+    kind: DiscourseDioKind.media,
     enableCookies: true,
-    enableCfChallenge: false,
-    enableRetry: false,
-    enableNetworkLog: false,
-    maxConcurrent: null,
   );
 
   /// url → 播放地址(含负缓存:确认非媒体/无需处理时缓存原 URL,

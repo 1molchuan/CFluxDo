@@ -31,20 +31,15 @@ class DioHttpClient extends http.BaseClient {
 
   DioHttpClient._internal()
     : _mainDomainDio = DiscourseDio.create(
+        // 几百张图：不调度、不恢复、不过盾、不记日志（日志占主线程）
+        kind: DiscourseDioKind.media,
         defaultHeaders: _imageHeaders,
-        maxConcurrent: null,
         enableCookies: true, // 主域需要 cookie 走 secure-uploads
-        enableCfChallenge: false,
-        enableRetry: false,
-        enableNetworkLog: false, // 几百张图都 log 占主线程
       ),
       _cdnDio = DiscourseDio.create(
+        kind: DiscourseDioKind.media,
         defaultHeaders: _imageHeaders,
-        maxConcurrent: null,
         enableCookies: false, // CDN 完全不需要 cookie
-        enableCfChallenge: false,
-        enableRetry: false,
-        enableNetworkLog: false,
       );
 
   /// Accept-Language 由 RequestHeaderInterceptor 按系统语言逐请求设置

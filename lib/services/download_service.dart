@@ -28,9 +28,9 @@ class DownloadService {
   /// 初始化下载专用 Dio 实例
   void initialize() {
     _dio = DiscourseDio.create(
+      // 下载不受并发限制、不过盾
+      kind: DiscourseDioKind.download,
       receiveTimeout: const Duration(minutes: 30),
-      maxConcurrent: null, // 下载不受并发限制
-      enableCfChallenge: false, // 下载不需要 CF 验证
     );
     debugPrint('[DownloadService] 初始化完成');
   }

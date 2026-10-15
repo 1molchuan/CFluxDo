@@ -1,12 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:app_icons/app_icons.dart';
 import 'package:flutter/services.dart';
-import 'package:dio/dio.dart';
 
 import '../../l10n/s.dart';
 import '../../pages/network_settings_page/network_settings_page.dart';
 import '../../services/cf_challenge_service.dart';
-import '../../services/network/exceptions/api_exception.dart';
+import '../../services/network/cf/cf_challenge_classifier.dart';
 import '../../services/toast_service.dart';
 import '../../utils/dialog_utils.dart';
 import 'app_bottom_sheet.dart';
@@ -162,13 +161,8 @@ class ErrorView extends StatelessWidget {
     return widgets;
   }
 
-  bool _isCfChallengeError(Object error) {
-    if (error is CfChallengeException) return true;
-    if (error is DioException && error.error is CfChallengeException) {
-      return true;
-    }
-    return false;
-  }
+  bool _isCfChallengeError(Object error) =>
+      CfChallengeClassifier.isChallengeFailure(error);
 
   Future<void> _runManualCfVerify(BuildContext context) async {
     final result = await CfChallengeService().showManualVerifyNow(
