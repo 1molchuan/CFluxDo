@@ -354,10 +354,10 @@ class NetworkSettingsService {
       current.gatewayEnabled &&
       _rustProxyService.isRunning;
 
-  /// 本地动态优选只在 Android 网关模式下跑：DoH 开着、没有上游代理、网关开关开着
+  /// 本地动态优选只在 Android / Linux 网关模式下跑：DoH 开着、没有上游代理、网关开关开着
   /// （网关/上游的判断和 [_applyProxyState] 里启动代理时用的一致）
   bool get selectorEligible =>
-      Platform.isAndroid &&
+      (Platform.isAndroid || Platform.isLinux) &&
       current.dohEnabled &&
       !_proxyService.current.isValid &&
       WebViewMitmPolicy.useGatewayMode(
@@ -943,7 +943,7 @@ class NetworkSettingsService {
         dohRoutesUrl: dohRoutesUrl,
         dohRouteTableJson: dohRouteTableJson,
         dohNodeListJson: dohNodeListJson,
-        // 本地动态优选：只在 Android 网关模式下开；上次的赢家状态回灌给 Rust
+        // 本地动态优选：只在 Android / Linux 网关模式下开；上次的赢家状态回灌给 Rust
         selectMode: selectorEligible ? current.selectMode.wire : 'off',
         selectStateJson: prefsForSeed?.getString(_selectStateKey),
         shareMeasurements:
