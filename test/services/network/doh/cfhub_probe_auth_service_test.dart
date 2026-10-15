@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fluxdo/models/user.dart';
@@ -36,6 +38,8 @@ void main() {
     final flow = FakeConnectFlow();
     final user = ValueNotifier<User?>(null);
     late CfhubProbeAuthService auth;
+    final sleeps = <Duration>[];
+    void Function()? onSleep;
 
     setUpAll(() async {
       SharedPreferences.setMockInitialValues({});
@@ -45,7 +49,10 @@ void main() {
         flow: flow,
         userNotifier: user,
         // 重试不真等
-        sleep: (_) async {},
+        sleep: (delay) async {
+          sleeps.add(delay);
+          onSleep?.call();
+        },
       );
       auth = CfhubProbeAuthService.instance;
       // 网络设置服务初始化时会顺带初始化探针服务
@@ -183,6 +190,95 @@ void main() {
       expect(prefs.getString('cfhub_probe_token'), isNull);
       expect(prefs.getInt('cfhub_probe_user_id'), isNull);
       expect(service.current.shareMeasurements, isFalse);
+    });
+
+    test('网络类失败：整条链路重来 2 次（2 s / 4 s），提示带上卡在哪一步', () async {
+      api.calls.clear();
+      api.respond(api.policy.startPath, 403);
+      expect(await auth.enable(), CfhubEnableResult.failed);
+      expect(api.startCalls, 3);
+      expect(sleeps, const [Duration(seconds: 2), Duration(seconds: 4)]);
+      expect(auth.lastFailureDetail, 'start HTTP 403');
+      expect(auth.token, isNull);
+      expect(service.current.shareMeasurements, isFalse);
+      api.respond(api.policy.startPath, 200, {
+        'authorize_url': FakeTokenServer.authorizeUrl,
+      });
+    });
+
+    test('Connect 期间换号又换回来：结果丢弃，不换码', () async {
+      api.calls.clear();
+      api.issue('cfp_aba');
+      flow.onFetch = () {
+        user.value = User(id: 9, username: 'carol', trustLevel: 2);
+        user.value = User(id: 8, username: 'bob', trustLevel: 2);
+      };
+      expect(await auth.enable(), CfhubEnableResult.cancelled);
+      flow.onFetch = null;
+      expect(api.count(api.policy.tokenPath), 0);
+      expect(auth.token, isNull);
+      expect(auth.lastFailureDetail, isNull);
+      expect(service.current.shareMeasurements, isFalse);
+    });
+
+    test('换码期间登出又登回同一账号：结果丢弃，刚拿到的令牌作废', () async {
+      api.calls.clear();
+      api.once(api.policy.tokenPath, (_) {
+        user.value = null;
+        user.value = User(id: 8, username: 'bob', trustLevel: 2);
+        return (200, '{"token":"cfp_relogin"}');
+      });
+      expect(await auth.enable(), CfhubEnableResult.cancelled);
+      await pumpEventQueue();
+      expect(auth.token, isNull);
+      expect(prefs.getString('cfhub_probe_token'), isNull);
+      expect(api.revoked, contains('cfp_relogin'));
+      expect(service.current.shareMeasurements, isFalse);
+    });
+
+    test('重试前的等待期间换了号：不再重来', () async {
+      api.calls.clear();
+      api.reply(api.policy.startPath, (_) => throw const SocketException('x'));
+      onSleep = () => user.value = User(id: 9, username: 'carol', trustLevel: 2);
+      expect(await auth.enable(), CfhubEnableResult.cancelled);
+      onSleep = null;
+      expect(api.startCalls, 1);
+      expect(auth.token, isNull);
+      api.respond(api.policy.startPath, 200, {
+        'authorize_url': FakeTokenServer.authorizeUrl,
+      });
+    });
+
+    test('开启途中关掉：结果丢弃，上报保持关', () async {
+      api.calls.clear();
+      api.issue('cfp_late');
+      flow.onFetch = () => auth.disable();
+      expect(await auth.enable(), CfhubEnableResult.cancelled);
+      flow.onFetch = null;
+      expect(api.count(api.policy.tokenPath), 0);
+      expect(auth.token, isNull);
+      expect(service.current.shareMeasurements, isFalse);
+    });
+
+    test('作废还没落地时重新开启：先等作废，再取授权地址', () async {
+      api.issue('cfp_fifth');
+      expect(await auth.enable(), CfhubEnableResult.ok);
+      final gate = api.hold(api.policy.revokePath);
+      api.calls.clear();
+      await auth.disable();
+      api.issue('cfp_sixth');
+      final enabling = auth.enable();
+      await pumpEventQueue();
+      expect(api.startCalls, 0);
+      gate.complete();
+      expect(await enabling, CfhubEnableResult.ok);
+      expect(api.paths, [
+        api.policy.revokePath,
+        api.policy.startPath,
+        api.policy.tokenPath,
+      ]);
+      expect(api.revoked, ['cfp_fifth']);
+      expect(auth.token, 'cfp_sixth');
     });
   });
 }

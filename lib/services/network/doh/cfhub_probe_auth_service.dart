@@ -97,6 +97,9 @@ class CfhubProbeAuthService extends ChangeNotifier {
   int? _userId;
   Future<CfhubEnableResult>? _inflight;
 
+  /// 上次看到的登录账号 id：区分「换号 / 登出」与同一账号的资料刷新
+  int? _seenUserId;
+
   /// cfhub 按账号作废令牌：重新开启前由它先等上一次作废落地，
   /// 否则作废可能晚于新令牌到达、把新令牌一起作废
   late final ConnectBoundToken _bound = ConnectBoundToken(
@@ -136,6 +139,7 @@ class CfhubProbeAuthService extends ChangeNotifier {
     _attachUserListener();
     // 启动时已经知道是谁（不是本令牌的账号）就马上停用；还不知道时等通知
     final user = _effectiveUserNotifier.value;
+    _seenUserId = user?.id;
     if (_token != null && user != null && user.id != _userId) {
       unawaited(disable());
     }
@@ -207,8 +211,10 @@ class CfhubProbeAuthService extends ChangeNotifier {
 
   /// 关闭「帮助优选」：作废令牌（尽力而为）、清掉本地记录、关上报
   ///
-  /// 作废请求由 [ConnectBoundToken] 记着：重新开启时先等它落地再换码
+  /// 进行中的开启结果一并丢弃；作废请求由 [ConnectBoundToken] 记着，
+  /// 重新开启时先等它落地再换码
   Future<void> disable({bool revoke = true}) async {
+    _bound.invalidate();
     final token = _token;
     if (revoke && token != null) {
       unawaited(_bound.revoke(token));
@@ -248,8 +254,14 @@ class CfhubProbeAuthService extends ChangeNotifier {
 
   /// 登出（变成 null）或换了账号：令牌不能再用
   void _handleUserChanged() {
-    if (_token == null) return;
     final user = _effectiveUserNotifier.value;
+    if (user?.id != _seenUserId) {
+      _seenUserId = user?.id;
+      // 换号 / 登出（哪怕很快又换回来）：进行中的开启结果不能落到现在的账号上，
+      // Connect 那一跳用的可能已经是另一个账号的登录态
+      _bound.invalidate();
+    }
+    if (_token == null) return;
     if (user == null || user.id != _userId) {
       debugPrint('[CFHUB] 登录账号变化，停用探针令牌');
       unawaited(disable());
