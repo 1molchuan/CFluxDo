@@ -83,9 +83,11 @@ class ConnectivityService {
     }
 
     try {
-      return await Connectivity().checkConnectivity().timeout(
-        const Duration(seconds: 3),
-      );
+      final check = Connectivity().checkConnectivity();
+      // Linux 上 NetworkManager 不响应时 Future 可能永远不完成；其他平台保持原样
+      return Platform.isLinux
+          ? await check.timeout(const Duration(seconds: 3))
+          : await check;
     } catch (e) {
       debugPrint('[Connectivity] checkConnectivity 失败，fallback to connected state: $e');
       return const [ConnectivityResult.other];
