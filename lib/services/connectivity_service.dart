@@ -59,11 +59,9 @@ class ConnectivityService {
   /// 使用项目统一 Dio（含平台适配器、Cookie 等），
   /// 但关闭重试、CF 验证、并发限制，避免 ping 请求被干扰或排队
   late final Dio _pingDio = DiscourseDio.create(
+    kind: DiscourseDioKind.probe,
     connectTimeout: const Duration(seconds: 5),
     receiveTimeout: const Duration(seconds: 5),
-    maxConcurrent: null,
-    enableRetry: false,
-    enableCfChallenge: false,
   );
 
   static bool get _isFlatpakSandbox =>

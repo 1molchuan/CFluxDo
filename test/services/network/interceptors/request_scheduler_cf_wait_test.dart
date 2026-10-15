@@ -116,6 +116,21 @@ void main() {
     expect(adapter.callCount, 0);
     expect(cf.isVerifying, isTrue, reason: '取消单个请求不影响验证本身');
   });
+
+  test('链路种类声明不冻结时,验证期间照常放行', () async {
+    // 冻结以前由「是否限并发」暗中决定;现在由 DiscourseDioKind 显式传入。
+    final unfrozen = Dio(BaseOptions(baseUrl: 'https://scheduler-cf-test.example'))
+      ..httpClientAdapter = adapter
+      ..interceptors.add(
+        RequestSchedulerInterceptor(freezeDuringCfVerification: false),
+      );
+    cf.debugBeginVerification();
+
+    final response = await unfrozen.get<dynamic>('/t/1.json');
+
+    expect(response.statusCode, 200);
+    expect(adapter.callCount, 1);
+  });
 }
 
 class _CountingAdapter implements HttpClientAdapter {
