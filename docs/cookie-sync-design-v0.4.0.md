@@ -430,7 +430,8 @@ flowchart TD
 > 分叉时由服务端探测决定采纳 WebView 的值还是把 jar 的值推回，探测无结论两端都不动；
 > jar / WebView 只在无需探测时按血缘决胜。Sentinel 收敛多枚 `_t`、Nuclear Reset 能否清空
 > 重灌 `_t`、会话自愈都改问它（WebView 那枚「不可能比 jar 新」才让 jar 赢），不再「jar 永远赢」。
-> 本节规则仍适用于 `_forum_session` 等其他 cookie。
+> 本节规则仍适用于 `_forum_session` 等其他 cookie。WebView 使用前的重灌（§5.2）与使用后的
+> 回写口径现由 `WebViewUses` 按用途统一决定（调用方不再自己挑 trusted / acceptValues）。
 
 #### 5.1.2 Nuclear Reset 流程
 
