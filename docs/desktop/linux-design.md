@@ -1,6 +1,6 @@
 # cfluxdo Linux 桌面端设计（草案，2026-10-15 夜）
 
-> 状态：设计 + 可行性验证。代码都在本地分支 `desktop/linux`（主仓库 6 个提交，含本文；子模块 `core/doh_proxy` 本地分支 `desktop/linux` 1 个提交），**没有推送、没有发布**，`cfluxdo` / `main` 分支没动。
+> 状态：设计 + 可行性验证。代码都在本地分支 `desktop/linux`（主仓库 7 个提交，含本文；子模块 `core/doh_proxy` 本地分支 `desktop/linux` 1 个提交），**没有推送、没有发布**，`cfluxdo` / `main` 分支没动。
 > 下面每条决定都写了理由和「什么情况下推翻」，不同意的直接划掉。
 
 ## 0. 结论
@@ -19,7 +19,7 @@
 | Flutter Linux 编译 | Debian 13 + WPE 2.48.3（发行版包，没有 WPEPlatform，插件自动退到 WPEBackend-FDO）；改 2 处后编过；bundle 259 MB，其中 WPE 113 MB | `build/linux/x64/release/bundle` |
 | App 实跑（Xvfb） | 启动 → CF 验证页（WebView 经代理：`linux.do` 走 MITM，`challenges.cloudflare.com` 走隧道）→ 点勾选框 → `cf_clearance` 进罐 → 游客模式列表、帖子详情（代码高亮、头像）正常；10/10 个主机的叶子预放行，没有走「出错再比对」的兜底 | `/root/linux-spike/run4_*.png`、`app_log.jsonl` |
 | 本地优选 | `select: winner 172.64.145.202 14 ms source=Atlas`（32 个候选，4/4 通过） | `app_*.log` |
-| 回归 | Rust 全量 64 通过；新增 Dart 测试 3 通过；`flutter analyze` 与 `cfluxdo` 分支同为 66 条（无新增） | — |
+| 回归 | Rust 全量 64 通过；Flutter 全量 1400 通过，失败的只有 13 条已知基线（另有 5 个文件在整批跑时加载失败或抖动，单独重跑全部通过）；新增 Dart 测试 3 条；`flutter analyze` 与 `cfluxdo` 分支同为 66 条（无新增） | `/tmp/linux_branch_fulltest.log` |
 
 实跑时顺带发现并修掉的三个 Linux 专属问题：
 - **启动卡死。** 没有系统 D-Bus 时，`connectivity_plus` 把错误抛在内部订阅里，`checkConnectivity()` 永远不返回，`main()` 卡在 `runApp` 之前，窗口一直是黑的。
