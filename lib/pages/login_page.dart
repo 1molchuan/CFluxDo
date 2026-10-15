@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../l10n/s.dart';
 import '../services/auth_session.dart';
 import '../services/cf_challenge_service.dart';
+import '../services/network/cf/cf_round_outcome.dart';
 import '../services/credential_store_service.dart';
 import '../services/discourse/discourse_service.dart';
 import '../services/network/cookie/boundary_sync_service.dart';
@@ -139,34 +140,29 @@ class _LoginPageState extends State<LoginPage>
   }
 
   /// 确保 jar 里有 cf_clearance。没有 → 弹 fluxdo 现有的 CF 手动验证页让用户
-  /// 人机交互拿 cookie, 然后**显式 sync** 从 WebView cookie store 到 dart jar
-  /// (这步 [CfChallengeService.showManualVerify] 本身不做, sync 一般是
-  /// [CfChallengeInterceptor._syncCookiesOnce] 触发, 我们直接调 showManualVerify
-  /// 不经过 interceptor, 所以要手动 sync, 不然 jar 还是空)。
+  /// 人机交互拿 cookie。验证轮次通过即保证定稿值已经在 jar 里（以前这里要
+  /// 自己「等 1.5 秒 → 同步 → 重试 3 次」）。
   Future<bool> _ensureCfClearance() async {
-    final jar = CookieJarService();
-    var clearance = await jar.getCfClearance();
+    final clearance = await CookieJarService().getCfClearance();
     if (clearance != null && clearance.isNotEmpty) return true;
     if (!mounted) return false;
 
     final requestGeneration = AuthSession().generation;
-    final ok = await CfChallengeService().showManualVerify(context, true);
-    if (ok != true) return false;
+    final outcome = await CfChallengeService().verify(
+      mode: CfVerifyMode.foreground,
+      context: context,
+    );
+    if (!outcome.passed) return false;
 
-    // 等 1.5s 让 WV 网络栈把 Set-Cookie 写完, 然后同步 CF/验证码相关 cookie。
-    // 这里明确排除 Discourse session cookie，登录成功收口流程会单独同步它们。
-    await Future<void>.delayed(const Duration(milliseconds: 1500));
-    for (var i = 0; i < 3; i++) {
-      await BoundarySyncService.instance.syncFromWebView(
-        cookieNames: null,
-        excludeCookieNames: CookieJarService.authCookieNames,
-        requestGeneration: requestGeneration,
-      );
-      clearance = await jar.getCfClearance();
-      if (clearance != null && clearance.isNotEmpty) return true;
-      await Future<void>.delayed(const Duration(milliseconds: 500));
-    }
-    return false;
+    // 验证码等其余非会话 cookie 顺带同步一次（登录对话框会把 jar 灌回
+    // WebView，jar 里的旧值不能盖掉刚签发的）。这里明确排除 Discourse
+    // session cookie，登录成功收口流程会单独同步它们。
+    await BoundarySyncService.instance.syncFromWebView(
+      cookieNames: null,
+      excludeCookieNames: CookieJarService.authCookieNames,
+      requestGeneration: requestGeneration,
+    );
+    return true;
   }
 
   /// 表单提交回调。返 true 表示走完成功路径并已 pop, false 留在表单。

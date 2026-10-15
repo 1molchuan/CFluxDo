@@ -12,6 +12,7 @@ import 'app_logger.dart';
 import 'cf_challenge_logger.dart';
 import 'cf_challenge_service.dart';
 import 'cf_clearance_refresh_service.dart';
+import 'network/cf/cf_round_outcome.dart';
 import 'discourse/discourse_service.dart';
 import 'network/cookie/boundary_sync_service.dart';
 import 'network/cookie/cookie_jar_service.dart';
@@ -84,6 +85,9 @@ class BrowserTrustCoordinator {
   static const Duration _backgroundPauseDelay = Duration(seconds: 8);
   static const Duration _requestGateTimeout = Duration(seconds: 6);
   static const Duration _diagnosticBackgroundPauseDelay = Duration(seconds: 60);
+
+  /// bootstrap 被挡时只等进行中那一轮验证的上限（不发起、不转前台）。
+  static const Duration _activeRoundWaitTimeout = Duration(seconds: 12);
   static const Duration _webViewTeardownCooldown = Duration(milliseconds: 1200);
 
   final CookieJarService _jar = CookieJarService();
@@ -451,16 +455,23 @@ class BrowserTrustCoordinator {
 
     final resolvedAt = cf.clearanceResolvedAt.value;
     if (resolvedAt != null && resolvedAt.isAfter(cycleStartAt)) {
-      // Dio 侧在本周期内已经把 cf_clearance 重新拿到,直接重跑即可。
+      // 本周期内已经有一轮验证把 cf_clearance 重新拿到,直接重跑即可。
       gotClearance = true;
-    } else if (cf.inProgressNotifier.value) {
-      // Dio 侧(或其它入口)正在验证 → 等它广播 clearance 解决,不重复弹验证。
-      gotClearance = await _awaitClearanceResolved(cf, after: cycleStartAt);
+    } else if (cf.isVerifying) {
+      // Dio 侧(或其它入口)正在验证 → 只等这一轮的结果,不重复弹验证、
+      // 也不把它转前台。通过即定稿值已在 jar。
+      final outcome = await cf.waitForActiveRound(
+        timeout: _activeRoundWaitTimeout,
+      );
+      gotClearance = outcome?.passed ?? false;
     } else if (cf.autoVerifyEnabled && !cf.isInCooldown) {
-      // 没有进行中的验证 → coordinator 主动发起(内部会复用任何期间出现的
-      // 进行中验证)。自动恢复不是用户发起的,先后台静默尝试再转前台。
-      final ok = await cf.showVerifySilentFirst(_navigatorContext);
-      gotClearance = ok == true;
+      // 没有进行中的验证 → coordinator 主动发起(期间出现的进行中验证会被
+      // 合流)。自动恢复不是用户发起的,先后台静默尝试再转前台。
+      final outcome = await cf.verify(
+        mode: CfVerifyMode.silentFirst,
+        context: _navigatorContext,
+      );
+      gotClearance = outcome.passed;
     }
 
     if (!gotClearance) {
@@ -493,32 +504,6 @@ class BrowserTrustCoordinator {
     );
     // 即使重跑仍被 CF 挡下也直接返回,不再递归(本周期只恢复一次)。
     return retry;
-  }
-
-  /// 等待 [CfChallengeService.clearanceResolvedAt] 出现晚于 [after] 的新值,
-  /// 表示 cf_clearance 已被(Dio 侧或并发的手动验证)重新拿到。带超时兜底。
-  Future<bool> _awaitClearanceResolved(
-    CfChallengeService cf, {
-    required DateTime after,
-    Duration timeout = const Duration(seconds: 12),
-  }) async {
-    final current = cf.clearanceResolvedAt.value;
-    if (current != null && current.isAfter(after)) return true;
-
-    final completer = Completer<bool>();
-    void listener() {
-      final v = cf.clearanceResolvedAt.value;
-      if (v != null && v.isAfter(after) && !completer.isCompleted) {
-        completer.complete(true);
-      }
-    }
-
-    cf.clearanceResolvedAt.addListener(listener);
-    try {
-      return await completer.future.timeout(timeout, onTimeout: () => false);
-    } finally {
-      cf.clearanceResolvedAt.removeListener(listener);
-    }
   }
 
   void _completeRequestGate(Completer<bool>? gate, bool ready) {

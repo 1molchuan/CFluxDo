@@ -50,6 +50,17 @@ class CfClearanceAuthority {
 
   static const int _maxTrackedValues = 16;
 
+  /// 验证轮次正在落值的定稿值（归一化）。它是本会话最新、经挑战确认的
+  /// 值：即便验证期间有别的同步往（被清空的）jar 里写过一枚"健康"值，
+  /// 也要让它继位。只在落值那一次同步期间有效。
+  String? _verifiedSuccessor;
+
+  /// 验证轮次落值前登记定稿值，落值结束后传 null 清除。
+  void expectVerifiedSuccessor(String? value) {
+    final normalized = _normalize(value ?? '');
+    _verifiedSuccessor = normalized.isEmpty ? null : normalized;
+  }
+
   /// 撞盾时登记：请求实际携带的 cf_clearance 已被 CF 挑战 = 在位值已死，
   /// 此后 sync 可以替换它（过盾新值继位，或 Turnstile 新铸值无缝补位）。
   void noteIncumbentChallenged(String? value) {
@@ -109,6 +120,9 @@ class CfClearanceAuthority {
       return CfClearanceReplaceDecision.skipSameValue;
     }
 
+    // 2.5 验证轮次定稿的值：经挑战确认的最新值，直接继位。
+    if (candidate == _verifiedSuccessor) return CfClearanceReplaceDecision.allow;
+
     // 3. 在位值过期/临期：自然换届窗口，放行（新铸值无缝继位）。
     // 只做时刻比较,与 DateTime 的 UTC/本地标记无关,不需要 toLocal
     final expires = current?.expiresAt;
@@ -159,6 +173,7 @@ class CfClearanceAuthority {
   /// 登出/换账号时清空：标记随登录会话失效。
   void reset() {
     _lastChallengedValue = null;
+    _verifiedSuccessor = null;
     _challengedValues.clear();
     _observedWebViewValues.clear();
   }

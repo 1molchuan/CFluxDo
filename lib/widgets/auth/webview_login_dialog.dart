@@ -9,6 +9,7 @@ import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import '../../constants.dart';
 import '../../services/auth_session.dart';
 import '../../services/cf_challenge_service.dart';
+import '../../services/network/cf/cf_round_outcome.dart';
 import '../../services/discourse/discourse_service.dart';
 import '../../services/network/cookie/boundary_sync_service.dart';
 import '../../services/network/cookie/cookie_jar_service.dart';
@@ -514,10 +515,13 @@ document.close();
       ToastService.showInfo('Cloudflare 验证已失效, 正在重新验证...');
     }
 
-    // 1. 拉起 CF 手动验证页, 用户过完后 sync cookie 到 jar
-    final ok = await CfChallengeService().showManualVerify(context, true);
+    // 1. 拉起 CF 手动验证页；通过即定稿 cf_clearance 已在 jar
+    final outcome = await CfChallengeService().verify(
+      mode: CfVerifyMode.foreground,
+      context: context,
+    );
     if (_finished) return;
-    if (ok != true) {
+    if (!outcome.passed) {
       _finishFailure(
         LoginErrorKind.network,
         'Cloudflare 验证已失效, 请重试 (CSRF $status)',
@@ -525,20 +529,13 @@ document.close();
       return;
     }
 
-    // 2. 等 WV 网络栈把 Set-Cookie 写完, 再同步 CF/验证码相关 cookie。
+    // 2. 验证码等其余非会话 cookie 顺带同步一次。
     //    session cookie 只在登录成功收口时同步，避免旧会话回写。
-    await Future<void>.delayed(const Duration(milliseconds: 1500));
-    if (_finished) return;
-    for (var i = 0; i < 3; i++) {
-      await BoundarySyncService.instance.syncFromWebView(
-        cookieNames: null,
-        excludeCookieNames: CookieJarService.authCookieNames,
-        requestGeneration: _flowGeneration,
-      );
-      final clearance = await CookieJarService().getCfClearance();
-      if (clearance != null && clearance.isNotEmpty) break;
-      await Future<void>.delayed(const Duration(milliseconds: 500));
-    }
+    await BoundarySyncService.instance.syncFromWebView(
+      cookieNames: null,
+      excludeCookieNames: CookieJarService.authCookieNames,
+      requestGeneration: _flowGeneration,
+    );
     if (_finished) return;
 
     // 3. 把 jar 里的新 cookie 重新灌进 dialog WV (清掉一次锁, 否则跳过)

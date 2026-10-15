@@ -5,12 +5,14 @@ import 'package:dio/dio.dart';
 import 'package:enhanced_cookie_jar/enhanced_cookie_jar.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fluxdo/services/cf_clearance_authority.dart';
+import 'package:fluxdo/services/cf_verification_round.dart';
 import 'package:fluxdo/services/network/cf/cf_challenge_recovery.dart';
-import 'package:fluxdo/services/network/cf/cf_round_outcome.dart';
 import 'package:fluxdo/services/network/cookie/cookie_jar_service.dart';
 import 'package:fluxdo/services/network/exceptions/api_exception.dart';
 import 'package:fluxdo/services/network/flux_request_spec.dart';
 import 'package:fluxdo/services/network/interceptors/cf_challenge_interceptor.dart';
+
+import '../../cf_round_fakes.dart';
 
 /// 单个撞盾请求的恢复流程（[CfChallengeRecovery]）契约。
 ///
@@ -74,7 +76,6 @@ void main() {
       contains('cf_clearance=new'),
       reason: '重放带的是这一轮定稿的值',
     );
-    expect(round.resolved, 1);
   });
 
   test('在位旧值先登记为被撞，新值才落 jar（权威闸门放行）', () async {
@@ -227,31 +228,44 @@ void main() {
     expect(replay.calls, isEmpty, reason: '没拿到定稿值就不重放');
   });
 
-  test('N 个并发撞盾请求共享一轮验证', () async {
-    final joining = _JoiningRound(jar);
+  test('N 个并发撞盾请求共享一轮验证（真实轮次合流）', () async {
+    final clock = FakeRoundClock();
+    final env = FakeRoundEnvironment(clock)..jar = 'old';
+    final rounds = CfVerificationRounds(environment: env, clock: clock);
+    env.rounds = rounds;
+    // 重放读的是轮次环境里的 jar
+    final replayFromEnv = _ScriptedReplay(_FakeJar(null), jarOf: () => env.jar);
+    for (var i = 0; i < 5; i++) {
+      replayFromEnv.script.add(_ok);
+    }
     final shared = CfChallengeRecovery(
-      replay: replay,
-      clearance: clearance,
-      round: joining,
+      replay: replayFromEnv,
+      clearance: _EnvClearance(env),
+      round: _RoundsPort(rounds),
       compat: compat,
       ledger: ledger,
     );
-    for (var i = 0; i < 5; i++) {
-      replay.script.add(_ok);
-    }
 
     final results = Future.wait([
       for (var i = 0; i < 5; i++)
         shared.recover(_challenge(_request('old', path: '/t/$i.json'))),
     ]);
     await pumpEventQueue();
-    expect(joining.acquired, 5);
-    expect(joining.started, 1, reason: '五个请求合流到同一轮');
-    joining.finish(_passed('new'));
+    expect(env.presentations, 1, reason: '五个请求合流到同一轮');
+
+    env.webView = 'new';
+    env.presented!.clearanceSeen('new', source: 'polling');
+    await clock.advance(const Duration(seconds: 2));
 
     final all = await results;
     expect(all.whereType<CfRecovered>(), hasLength(5));
-    expect(replay.calls.map((o) => o.uri.path).toSet(), hasLength(5));
+    expect(env.landed, ['new'], reason: '只落一次值');
+    expect(
+      replayFromEnv.calls.map((o) => o.headers['Cookie']).toSet(),
+      {'_t=token; cf_clearance=new'},
+      reason: '每个请求都用定稿值重放自己的原请求',
+    );
+    expect(replayFromEnv.calls.map((o) => o.uri.path).toSet(), hasLength(5));
   });
 
   group('Dio 适配层', () {
@@ -418,15 +432,17 @@ class _FakeJar {
 
 /// 按脚本逐次返回结果；像真实端口一样用 jar 当前值改写 Cookie 头。
 class _ScriptedReplay implements CfReplayPort {
-  _ScriptedReplay(this.jar);
+  _ScriptedReplay(this.jar, {this.jarOf});
 
   final _FakeJar jar;
+  final String? Function()? jarOf;
   final List<Object Function(RequestOptions)> script = [];
   final List<RequestOptions> calls = [];
 
   @override
   Future<Response<dynamic>> replay(RequestOptions options) async {
-    options.headers['Cookie'] = '_t=token; cf_clearance=${jar.value}';
+    final current = jarOf != null ? jarOf!() : jar.value;
+    options.headers['Cookie'] = '_t=token; cf_clearance=$current';
     calls.add(options);
     final result = script.removeAt(0)(options);
     if (result is DioException) throw result;
@@ -472,7 +488,6 @@ class _FakeRound implements CfRoundPort {
   Future<void> Function()? onAcquire;
   bool assertionsRan = false;
   int acquired = 0;
-  int resolved = 0;
 
   @override
   bool get isVerifying => false;
@@ -499,28 +514,16 @@ class _FakeRound implements CfRoundPort {
 
   @override
   void noteIneffective(String host) => ineffectiveHosts.add(host);
-
-  @override
-  void noteResolved() => resolved++;
 }
 
-/// 合流语义的替身：进行中时后来者加入同一轮。
-class _JoiningRound implements CfRoundPort {
-  _JoiningRound(this.jar);
+/// 用真实的 [CfVerificationRounds] 实现轮次端口（合流语义来自它）。
+class _RoundsPort implements CfRoundPort {
+  _RoundsPort(this.rounds);
 
-  final _FakeJar jar;
-  Completer<CfRoundOutcome>? _active;
-  int acquired = 0;
-  int started = 0;
-
-  void finish(CfRoundOutcome outcome) {
-    if (outcome case CfRoundPassed(:final clearance)) jar.value = clearance;
-    _active!.complete(outcome);
-    _active = null;
-  }
+  final CfVerificationRounds rounds;
 
   @override
-  bool get isVerifying => _active != null;
+  bool get isVerifying => rounds.active != null;
 
   @override
   bool get autoVerifyEnabled => true;
@@ -529,20 +532,24 @@ class _JoiningRound implements CfRoundPort {
   bool isCoolingDown(String host) => false;
 
   @override
-  Future<CfRoundOutcome> acquire(CfVerifyMode mode) {
-    acquired++;
-    if (_active == null) {
-      started++;
-      _active = Completer<CfRoundOutcome>();
-    }
-    return _active!.future;
-  }
+  Future<CfRoundOutcome> acquire(CfVerifyMode mode) =>
+      rounds.verify(mode: mode);
 
   @override
   void noteIneffective(String host) {}
+}
+
+class _EnvClearance implements CfClearancePort {
+  _EnvClearance(this.env);
+
+  final FakeRoundEnvironment env;
 
   @override
-  void noteResolved() {}
+  Future<String?> currentInJar() async => env.jar;
+
+  @override
+  Future<String?> swapInWebViewCandidate({required String? challenged}) async =>
+      null;
 }
 
 class _FakeCompat implements CfCompatPort {

@@ -41,9 +41,6 @@ abstract interface class CfRoundPort {
 
   /// 验证通过、定稿值也进了 jar，[host] 的重放却仍被撞：对它确定性无效。
   void noteIneffective(String host);
-
-  /// 过盾后的重放成功（供 BrowserTrust 等订阅「CF 已解决」）。
-  void noteResolved();
 }
 
 /// 会话级兼容模式端口（改用浏览器网络栈发主站请求）。
@@ -274,7 +271,6 @@ class CfChallengeRecovery {
       final _StillChallenged stillChallenged;
       switch (attempt) {
         case _Succeeded(:final response):
-          round.noteResolved();
           return CfRecovered(response);
         case _Failed(:final error):
           // 验证已通过，重放失败是其他原因：传递实际错误以便排查

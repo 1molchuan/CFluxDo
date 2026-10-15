@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 
@@ -36,8 +35,8 @@ import '../health/network_health_controller.dart';
 /// 恢复层的契约是"策略只产决策、Coordinator 统一执行重放",这对无状态恢复
 /// (限流等待、瞬态重放、会话自愈、引擎降级)成立,但 CF 的重试**之后**还有
 /// 三段有状态处置:
-/// 1. 重试成功 → 广播 [CfChallengeService.clearanceResolvedAt],
-///    BrowserTrustCoordinator 靠它 force 重跑被同一次 CF 挡下的 bootstrap;
+/// 1. 验证通过 → 广播 [CfChallengeService.clearanceResolvedAt](验证轮次是唯一
+///    写入方),BrowserTrustCoordinator 靠它 force 重跑被同一次 CF 挡下的 bootstrap;
 /// 2. 重试仍被拦 → 在同一上下文里判断能否切兼容、弹询问、撤 skipWebViewAdapter,
 ///    **换传输方式再重放一次**;
 /// 3. 兼容重放失败 → 回滚 sessionFallback,否则后续请求全锁死在坏通道上。
@@ -63,7 +62,7 @@ class CfChallengeInterceptor extends Interceptor {
         CfChallengeRecovery(
           replay: _DioReplayPort(dio, cookieJarService),
           clearance: _JarClearancePort(cookieJarService),
-          round: _ServiceRoundPort(cookieJarService),
+          round: _ServiceRoundPort(),
           compat: _SessionCompatPort(),
           notify: _showNotice,
         );
@@ -134,10 +133,9 @@ class CfChallengeInterceptor extends Interceptor {
     CfClearanceRefreshService().extractAndUpdateSitekey(
       err.response?.data?.toString() ?? '',
     );
-    // 撞盾说明 cf_clearance 已失效，停止自动续期（避免与手动验证冲突）。
-    // 这里不需要 await——真正要建验证 WebView 前，验证入口内部会自己再
-    // await 一次 stop()，确保销毁完成。
-    unawaited(CfClearanceRefreshService().stop());
+    // 续期服务的停/启归验证轮次：真正起验证 WebView 前它会 await stop()，
+    // 通过后错峰重启。这里不再提前停——换值/过期重放就能恢复时，以前续期
+    // 服务会一直停着，直到下一次 BrowserTrust 才重新拉起。
 
     final options = err.requestOptions;
     final requestTag = options.spec.requestTag;
@@ -264,15 +262,11 @@ class _JarClearancePort implements CfClearancePort {
   }
 }
 
+/// 验证轮次：直接用 [CfChallengeService.verify] 的结果。通过即「定稿值已在
+/// jar」，不再需要「等 1.5 秒 → 同步 → 重试 3×500ms」的兜底同步；失败计数、
+/// 合流、冷却判定都在轮次里（同一轮只记一次）。
 class _ServiceRoundPort implements CfRoundPort {
-  _ServiceRoundPort(this._jar);
-
-  final CookieJarService _jar;
-
   CfChallengeService get _cf => CfChallengeService();
-
-  /// 共享的 cookie 同步 Future：验证成功后只执行一次 sync
-  static Future<bool>? _activeSyncFuture;
 
   @override
   bool get isVerifying => _cf.isVerifying;
@@ -284,94 +278,11 @@ class _ServiceRoundPort implements CfRoundPort {
   bool isCoolingDown(String host) => _cf.isInCooldown;
 
   @override
-  Future<CfRoundOutcome> acquire(CfVerifyMode mode) async {
-    final result = switch (mode) {
-      CfVerifyMode.background => await _cf.showManualVerify(null, false),
-      CfVerifyMode.silentFirst => await _cf.showVerifySilentFirst(),
-      CfVerifyMode.foreground => await _cf.showManualVerify(null, true),
-    };
-    // 多个并发请求撞盾会合流到同一轮验证,却各自走后续处置 —— 失败计数
-    // 必须带上轮次去重,否则一次时序抖动会被记成 N 次失败。
-    final round = _cf.verifyRound;
-    if (result == null) {
-      return CfRoundFailed(
-        round: 0,
-        reason: _cf.isInCooldown ? CfRoundFailure.cooldown : CfRoundFailure.noUi,
-      );
-    }
-    if (!result) {
-      return CfRoundFailed(round: round, reason: CfRoundFailure.cancelled);
-    }
-    if (!await _syncCookiesOnce()) {
-      _cf.startCooldown(round: round);
-      debugPrint('[Dio] cf_clearance not found after sync, entering cooldown');
-      return CfRoundFailed(round: round, reason: CfRoundFailure.notLanded);
-    }
-    final clearance = await _jar.getCfClearance();
-    return CfRoundPassed(round: round, clearance: clearance ?? '');
-  }
+  Future<CfRoundOutcome> acquire(CfVerifyMode mode) => _cf.verify(mode: mode);
 
   @override
   void noteIneffective(String host) =>
       _cf.startIneffectiveClearanceCooldown();
-
-  @override
-  void noteResolved() {
-    // 广播:Dio 侧重试成功 = 新 cf_clearance 已生效。供 BrowserTrustCoordinator
-    // 感知"CF 已解决",从而 force 重跑因同一 CF 失败的 WebView session bootstrap。
-    _cf.clearanceResolvedAt.value = DateTime.now();
-  }
-
-  /// 验证成功后的共享 Cookie 同步（只执行一次）
-  Future<bool> _syncCookiesOnce() async {
-    // 如果已有同步任务在进行，复用结果
-    if (_activeSyncFuture != null) return _activeSyncFuture!;
-
-    _activeSyncFuture = _doSync();
-    try {
-      return await _activeSyncFuture!;
-    } finally {
-      _activeSyncFuture = null;
-    }
-  }
-
-  Future<bool> _doSync() async {
-    // showManualVerify 内部已通过 CDP 将新 cf_clearance 同步到 CookieJar，
-    // 先检查是否已存在，避免后续 syncFromWebView 在 Windows 上通过
-    // CookieManager.getCookies() 读取到旧值并覆盖（Bug #5 fix 会先删后写）。
-    String? cfClearance = await _jar.getCfClearance();
-    if (cfClearance != null && cfClearance.isNotEmpty) {
-      CfChallengeLogger.log(
-        '[INTERCEPTOR] cf_clearance already in CookieJar: ${cfClearance.length} chars',
-      );
-      return true;
-    }
-
-    // CookieJar 中未找到 cf_clearance，走 WebView 同步兜底
-    await Future.delayed(const Duration(milliseconds: 1500));
-    await BoundarySyncService.instance.syncFromWebView(
-      cookieNames: {'cf_clearance'},
-    );
-
-    for (var i = 0; i < 3; i++) {
-      cfClearance = await _jar.getCfClearance();
-      if (cfClearance != null && cfClearance.isNotEmpty) break;
-      debugPrint('[Dio] cf_clearance not found, retry ${i + 1}/3...');
-      await Future.delayed(const Duration(milliseconds: 500));
-      await BoundarySyncService.instance.syncFromWebView(
-        cookieNames: {'cf_clearance'},
-      );
-    }
-
-    if (cfClearance == null || cfClearance.isEmpty) {
-      CfChallengeLogger.log('[INTERCEPTOR] cf_clearance not found after sync');
-      return false;
-    }
-    CfChallengeLogger.log(
-      '[INTERCEPTOR] cf_clearance verified: ${cfClearance.length} chars',
-    );
-    return true;
-  }
 }
 
 class _SessionCompatPort implements CfCompatPort {
