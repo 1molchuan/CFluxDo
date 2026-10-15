@@ -15,6 +15,7 @@ import '../../../utils/fluxdo_render_callbacks.dart';
 import '../post_boost/boost_actions.dart';
 import '../post_boost/boost_danmaku.dart';
 import '../post_signature_block.dart';
+import 'post_render_prep.dart';
 import 'quote_selection_helper.dart';
 import 'render_parse_cache.dart';
 import 'widgets/post_footer_section/post_footer_section.dart';
@@ -42,6 +43,9 @@ class NewEngineLongPostData {
   int imageOffsetAt(int index) => parseData.imageOffsetAt(index);
 
   /// 长帖且可切多 chunk 时返回数据;否则 null(短帖走整段 PostItem)。
+  ///
+  /// 只做长短判定,不管系统帖:调用方一律经 [PostRenderPrep.planFor]
+  /// (系统帖判定在前),不要直接调这里。
   static NewEngineLongPostData? tryBuild(
     Post post, {
     // 链接点击追踪 + 图片引用菜单引用上下文(透传给 forPost → imageContentBuilder
@@ -192,9 +196,10 @@ class NewEngineLongPostData {
   }
 }
 
-/// 新引擎长帖的单个 chunk 段:用 [FluxdoRender] 渲染 chunk.html。
-/// 自带自研选区(chunk 内),图片/脚注靠 [imageIndexOffset]/[footnotesHtml]
-/// + 共享 [callbacks] 对齐整帖。
+/// 新引擎长帖的单个 chunk 段:用 [FluxdoRender] 渲染一个挂载单位
+/// ([PostRenderPlan.unitAt],与预热同源)。自带自研选区(chunk 内),
+/// 图片/脚注靠单位里的 imageIndexOffset / footnotesHtml + 共享 [callbacks]
+/// 对齐整帖。
 /// 首 chunk(chunkIndex == 0)在弹幕模式下叠加 [BoostDanmaku]:长帖的
 /// header/chunk/footer 是不同 sliver item,弹幕层只能落在正文段上。
 class NewEngineChunkSegment extends ConsumerWidget {
@@ -202,11 +207,9 @@ class NewEngineChunkSegment extends ConsumerWidget {
   final int topicId;
   final bool selected;
   final bool highlight;
-  final HtmlChunk chunk;
-  final int chunkIndex;
-  final int imageIndexOffset;
-  final List<BlockNode> parsedNodes;
-  final String? footnotesHtml;
+
+  /// 本 chunk 的挂载单位:html、解析好的 nodes、图片偏移、脚注区、接缝裁边
+  final PostRenderUnit unit;
   final FluxdoRenderCallbacks callbacks;
   final void Function(String plainText, Post post)? onQuoteSelection;
 
@@ -222,11 +225,7 @@ class NewEngineChunkSegment extends ConsumerWidget {
     required this.topicId,
     required this.selected,
     required this.highlight,
-    required this.chunk,
-    required this.chunkIndex,
-    required this.imageIndexOffset,
-    required this.parsedNodes,
-    required this.footnotesHtml,
+    required this.unit,
     required this.callbacks,
     required this.onQuoteSelection,
     this.highlightBoostUsername,
@@ -236,13 +235,14 @@ class NewEngineChunkSegment extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
+    final chunkIndex = unit.chunkIndex;
     FrameJankMonitor.noteBuild(
       'chk#${post.postNumber}:$chunkIndex/'
-      '${(chunk.html.length / 1000).toStringAsFixed(1)}k',
+      '${(unit.cookedHtml.length / 1000).toStringAsFixed(1)}k',
     );
     Widget content = FluxdoRender(
-          cookedHtml: chunk.html,
-          parsedNodes: parsedNodes,
+          cookedHtml: unit.cookedHtml,
+          parsedNodes: unit.nodes,
           // 正文字号注入 contentFontScale(与 PostItem 短帖路径一致):
           // 不传时 NodeFactory 回退 theme.bodyMedium,长帖 chunk 的字号设置失效。
           baseTextStyle: theme.textTheme.bodyMedium?.copyWith(
@@ -250,15 +250,15 @@ class NewEngineChunkSegment extends ConsumerWidget {
             fontSize: (theme.textTheme.bodyMedium?.fontSize ?? 14) *
                 ref.watch(preferencesProvider).contentFontScale,
           ),
-          imageIndexOffset: imageIndexOffset,
-          footnotesHtml: footnotesHtml,
+          imageIndexOffset: unit.imageIndexOffset,
+          footnotesHtml: unit.footnotesHtml,
           // 同 post 各 chunk 共享一个选区作用域 → 选区可跨 chunk。
           selectionScopeId: post.id,
           // chunk 文档序号 → 跨 chunk 选区按 (chunkIndex, docOrder) 逻辑序排序。
           chunkIndex: chunkIndex,
           // 被分块切断的单段落接缝:裁掉接缝侧外边距 → 与连续渲染无缝拼接。
-          trimTopMargin: chunk.joinsPrevious,
-          trimBottomMargin: chunk.joinsNext,
+          trimTopMargin: unit.trimTopMargin,
+          trimBottomMargin: unit.trimBottomMargin,
           linkHandler: callbacks.linkHandler,
           emojiImageBuilder: callbacks.emojiImageBuilder,
           mentionTapHandler: callbacks.mentionTapHandler,

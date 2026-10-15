@@ -1,9 +1,6 @@
-import 'dart:async' show Timer;
-
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
-import '../../../utils/idle_task.dart';
 import 'package:app_icons/app_icons.dart';
 import 'package:flutter/rendering.dart' show ScrollCacheExtent, ScrollDirection;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -21,18 +18,12 @@ import '../../../widgets/common/anchor_guard_sliver.dart';
 import '../../../widgets/post/post_item/widgets/post_voting_answer_header.dart';
 import 'package:m3e_ui/m3e_ui.dart';
 import 'package:fluxdo_render/fluxdo_render.dart'
-    show
-        HeadingAnchorRegistry,
-        HeadingAnchorScope,
-        HtmlChunk,
-        ParagraphWarmup,
-        ParagraphWarmupProbe,
-        countImageRuns;
+    show HeadingAnchorRegistry, HeadingAnchorScope;
 import '../../../widgets/post/post_item/post_item.dart';
-import '../../../widgets/post/post_item/render_parse_cache.dart';
+import '../../../widgets/post/post_item/post_render_prep.dart';
 import '../../../widgets/post/post_item/segmented_long_post.dart';
-import '../../../widgets/post/small_action_item.dart' show PostTypes;
 import '../../../widgets/post/quote_image_scope.dart';
+import '../controllers/post_warm_scheduler.dart';
 import 'topic_detail_header.dart';
 import 'shared_issue_button.dart';
 import 'topic_more_topics.dart';
@@ -218,7 +209,15 @@ class _TopicPostListState extends State<TopicPostList> {
   /// 锚定哨兵据此作废基线(sliver child 按 index 复用,结构变化 = 同一
   /// RenderBox 换内容,不能再按旧基线修正)。纯数据更新(点赞等)不改。
   int _segmentsStructureHash = 0;
-  final Map<int, _LongPostRenderCacheEntry> _longPostRenderCache = {};
+
+  /// 楼层渲染计划(形态判定 + 长帖分块数据),分段与预热共用这一份:
+  /// 预热热到的就是挂载要用的那份解析状态(见 PostRenderPlans)
+  final PostRenderPlans _renderPlans = PostRenderPlans();
+
+  /// 预热调度(队列/预算/代际在调度器里,这里只转发滚动与数据落地事件)
+  late final PostWarmScheduler _warm = PostWarmScheduler(
+    host: _ListWarmHost(this),
+  );
 
   /// shortPost 段的 widget 实例缓存(key: post.id):构建输入未变化时
   /// 返回同一实例,框架在 Element.updateChild 处短路,整楼子树跳过
@@ -230,7 +229,7 @@ class _TopicPostListState extends State<TopicPostList> {
   final Map<int, _ShortPostCacheEntry> _shortPostCache = {};
 
   /// 长帖正文 chunk 的 widget 实例缓存(key: (post.id, chunkIndex)),
-  /// 语义同上;data 实例由 [_longPostDataFor] 的内容签名保证稳定。
+  /// 语义同上;data 实例由 [PostRenderPlans] 的内容签名复用保证稳定。
   final Map<(int, int), _ChunkWidgetCacheEntry> _chunkWidgetCache = {};
 
   /// 渐进物化上限(段数,null = 不限制)。before/after 两条 SliverList
@@ -395,7 +394,7 @@ class _TopicPostListState extends State<TopicPostList> {
   @override
   void dispose() {
     widget.scrollController.removeListener(_scrollJumpProbe);
-    _warmUpRetry?.cancel();
+    _warm.dispose();
     super.dispose();
   }
 
@@ -567,15 +566,7 @@ class _TopicPostListState extends State<TopicPostList> {
       if (notification.depth == 0) {
         // 本帧 UI 工作起点(帧隙预热的余量从这里算);手指离开进入惯性的
         // 第一条更新起帧隙链,惯性中再被手指拖动则作废
-        _frameWatch
-          ..reset()
-          ..start();
-        final ballistic = notification.dragDetails == null;
-        if (ballistic && !_warmInFrameSlack) {
-          _scheduleWarmUp(frameSlack: true);
-        } else if (!ballistic && _warmInFrameSlack) {
-          _cancelWarmUp();
-        }
+        _warm.onScrollUpdate(ballistic: notification.dragDetails == null);
       }
       // 在滚动更新时检测可见帖子（节流 16ms）
       if (!_isThrottled) {
@@ -590,387 +581,17 @@ class _TopicPostListState extends State<TopicPostList> {
     } else if (notification is ScrollStartNotification) {
       // 只认本列表自己的滚动(depth 0);正文里代码块/表格的横向滚动
       // 冒泡上来也是 ScrollNotification,不该打断预热
-      if (notification.depth == 0) _cancelWarmUp();
+      if (notification.depth == 0) _warm.onScrollStart();
     } else if (notification is ScrollEndNotification) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
           _updateFirstVisiblePost();
         }
       });
-      if (notification.depth == 0) _scheduleWarmUp();
+      if (notification.depth == 0) _warm.onScrollEnd();
     }
 
     return result;
-  }
-
-  /// 预热流水线:把「首次滚到某楼层」原本要在滚动帧里付的解析、flatten、
-  /// 排版提前做完,产物落全局缓存(RenderParseCache / FlattenCache /
-  /// ParagraphLayoutCache),滚到时全程查表。
-  ///
-  /// 两种调度:
-  /// - **空闲链**(scheduleIdleTask,8ms 定时器链):列表静止时跑,每步一个
-  ///   原子单位(短帖解析一帖 / 长帖解析一块 / 一片 ≤4ms 的段落 flatten +
-  ///   排版),不超一帧预算。
-  /// - **帧隙链**(post-frame 回调,每帧一看):惯性滚动期间跑。连续甩动
-  ///   时手指一直在接惯性,ScrollEnd 根本不会来,空闲链没有机会;而真机
-  ///   录屏里的掉帧恰恰发生在甩动中新楼层进视口那几帧。这一帧的 UI 工作
-  ///   (从本帧滚动 tick 派发的 ScrollUpdate 起算)不到半帧才借剩余的一截
-  ///   做一个单位,帧本身已经吃紧就跳过;场景已提交合成,借的只是下一帧
-  ///   的起跑时间,按「半帧 − 已用 − 余量」封顶。
-  ///
-  /// 触发时机:
-  /// - **数据落地**(首屏 / 翻页 / gap 填充)后的下一帧,见
-  ///   [_scheduleWarmUpOnDataLanded]:静止 → 起空闲链;惯性中 → 帧隙链
-  ///   下一步按新楼层集合重建队列;手指拖动中 → 不动,松手进惯性再建;
-  /// - **滚动停止**(ScrollEnd):锚点楼层变了,按新位置起空闲链;
-  /// - **滚动开始**(ScrollStart):只作废不重建。手指拖动期间没有
-  ///   ticker,scheduleIdleTask 的「动画中让路」判定不生效,旧链会与
-  ///   拖动帧抢主线程;
-  /// - **进入惯性**(第一条 dragDetails == null 的 ScrollUpdate):起帧隙链;
-  ///   手指再按下接住惯性 → Hold 触发 ScrollEnd → 空闲链 → 拖动 ScrollStart
-  ///   → 作废,松手又进惯性,循环自洽。
-  ///
-  /// 队列按距离排序:锚点楼层起沿滚动方向 [_warmAheadPosts] 楼,再反向
-  /// [_warmBehindPosts] 楼(静止时默认向后)。惯性中锚点一直在走,离建队
-  /// 锚点超过 [_warmReanchorPosts] 楼就按新锚点重建;已热过的楼层一圈
-  /// 查表(<0.1ms)即过,重建不重复付费。
-  ///
-  /// 缓存 key 同源:(baseStyle, theme, flattener, env, 宽度) 取
-  /// [ParagraphWarmupProbe] 众数快照(由真实挂载登记,见其文档);
-  /// totalImagesInPost 按挂载侧同一公式 countImageRuns(该 FluxdoRender
-  /// 自己的 nodes) 计算 —— 之前固定传 0,凡含图楼层(恰是录屏里掉帧的
-  /// 那几楼)key 不等,预热全部白做。长帖每 chunk 一个 FluxdoRender,
-  /// 按 chunk 分别计数。
-  int _warmUpGeneration = 0;
-  Timer? _warmUpRetry;
-  static const int _warmAheadPosts = 16;
-  static const int _warmBehindPosts = 4;
-  static const int _warmReanchorPosts = 4;
-
-  /// 探针未收敛(首屏还没有直绘段落挂载)时整轮重试的间隔与上限
-  static const Duration _warmProbeRetryDelay = Duration(milliseconds: 250);
-  static const int _warmProbeRetryMax = 8;
-  static const int _warmStepBudgetMicros = 4000;
-
-  /// 帧隙链:不足 1ms 的余量不借;半帧线再留 0.5ms 给回调本身与帧收尾
-  static const int _warmSlackMinMicros = 1000;
-  static const int _warmSlackMarginMicros = 500;
-
-  /// 预热队列(postNumber,按距离排序;null = 下一步再建,好让 ScrollEnd
-  /// 之后的 post-frame 可见性上报先把锚点更新掉)、建队时的锚点与游标
-  List<int>? _warmQueue;
-  int? _warmQueueAnchor;
-  int _warmQueuePos = 0;
-  int _warmChunkCursor = 0;
-  int _warmNodeCursor = 0;
-  bool _warmProbeMissing = false;
-  int _warmProbeRetries = 0;
-
-  /// 当前是帧隙链(惯性滚动中)还是空闲链
-  bool _warmInFrameSlack = false;
-
-  /// 本帧 UI 工作起点:每条本列表的 ScrollUpdate 到达时重置。滚动 tick
-  /// 在 build 之前派发,post-frame 时读它就是本帧 build+layout+paint 的耗时
-  final Stopwatch _frameWatch = Stopwatch();
-
-  /// 诊断计数(WARMUP 事件,监控关闭时不拼串)
-  int _warmParsedPosts = 0;
-  int _warmParsedChunks = 0;
-  int _warmSteps = 0;
-  int _warmParagraphsAtStart = 0;
-  DateTime? _warmStartedAt;
-
-  bool get _isScrollActive =>
-      scrollController.hasClients &&
-      scrollController.position.isScrollingNotifier.value;
-
-  void _cancelWarmUp() {
-    // 帧隙链没有自然收尾(总是被 ScrollEnd / ScrollStart 作废),在这里记
-    // 一条,一次惯性一条
-    if (_warmInFrameSlack) _logWarmUpRound('帧隙');
-    _warmInFrameSlack = false;
-    _warmUpGeneration++;
-    _warmUpRetry?.cancel();
-    _warmUpRetry = null;
-  }
-
-  void _resetWarmQueue() {
-    _warmQueue = null;
-    _warmQueueAnchor = null;
-    _warmQueuePos = 0;
-    _warmChunkCursor = 0;
-    _warmNodeCursor = 0;
-  }
-
-  /// 数据落地后的预热入口(由 [_buildRenderSegments] 在 build 中调用,
-  /// 推迟到帧后再起链)。纯数据更新(点赞等换了 posts 实例但楼层集合
-  /// 没变)不重启,免得 message bus 一阵推送反复打断进行中的链。
-  void _scheduleWarmUpOnDataLanded(List<Post>? oldPosts, List<Post> posts) {
-    if (posts.isEmpty) return;
-    final unchanged =
-        oldPosts != null &&
-        oldPosts.length == posts.length &&
-        oldPosts.first.id == posts.first.id &&
-        oldPosts.last.id == posts.last.id;
-    if (unchanged) return;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      if (_isScrollActive) {
-        // 滚动中落地(翻页):惯性链在跑就让它下一步按新楼层集合重建队列;
-        // 手指拖动中没有链,松手进入惯性时会从头建
-        if (_warmInFrameSlack) _resetWarmQueue();
-        return;
-      }
-      _scheduleWarmUp();
-    });
-  }
-
-  /// 作废旧链、从当前锚点重新起一条预热链(空闲链或帧隙链)。
-  void _scheduleWarmUp({bool frameSlack = false}) {
-    _cancelWarmUp();
-    _resetWarmQueue();
-    _warmProbeMissing = false;
-    _warmProbeRetries = 0;
-    _warmParsedPosts = 0;
-    _warmParsedChunks = 0;
-    _warmSteps = 0;
-    _warmParagraphsAtStart = ParagraphWarmup.warmedParagraphs;
-    _warmStartedAt = DateTime.now();
-    _warmInFrameSlack = frameSlack;
-    if (frameSlack) {
-      _warmUpStepInFrame(_warmUpGeneration);
-    } else {
-      _warmUpStep(_warmUpGeneration);
-    }
-  }
-
-  List<int> _buildWarmQueue() {
-    final posts = detail.postStream.posts;
-    if (posts.isEmpty) return const [];
-    final anchorNumber = _lastReportedPostNumber;
-    final anchor =
-        (anchorNumber == null ? null : _postNumberToIndex[anchorNumber]) ??
-        widget.centerPostIndex.clamp(0, posts.length - 1);
-    _warmQueueAnchor = posts[anchor].postNumber;
-    // 正偏移方向(reverse)= 往后面的楼层走;静止(idle)也默认向后
-    final backwards =
-        scrollController.hasClients &&
-        scrollController.position.userScrollDirection ==
-            ScrollDirection.forward;
-    final step = backwards ? -1 : 1;
-    final queue = <int>[];
-    for (var i = 0; i <= _warmAheadPosts; i++) {
-      final index = anchor + i * step;
-      if (index < 0 || index >= posts.length) break;
-      queue.add(posts[index].postNumber);
-    }
-    for (var i = 1; i <= _warmBehindPosts; i++) {
-      final index = anchor - i * step;
-      if (index < 0 || index >= posts.length) break;
-      queue.add(posts[index].postNumber);
-    }
-    return queue;
-  }
-
-  /// 惯性滚动中锚点一直在走:离建队锚点超过 [_warmReanchorPosts] 楼就
-  /// 按新锚点、新方向重建。
-  void _maybeReanchorWarmQueue() {
-    final anchor = _lastReportedPostNumber;
-    final built = _warmQueueAnchor;
-    if (_warmQueue == null || anchor == null || built == null) return;
-    final a = _postNumberToIndex[anchor];
-    final b = _postNumberToIndex[built];
-    if (a == null || b == null || (a - b).abs() < _warmReanchorPosts) return;
-    _resetWarmQueue();
-  }
-
-  /// 沿队列找到下一个还有活干的楼层,做一个原子单位;一串已热楼层的查表
-  /// 也会累积,超预算就先交还主线程。返回 false = 队列已走完。
-  bool _warmRunUnit(int budgetMicros) {
-    final queue = _warmQueue ??= _buildWarmQueue();
-    final posts = detail.postStream.posts;
-    _warmSteps++;
-    final stepWatch = Stopwatch()..start();
-    while (_warmQueuePos < queue.length) {
-      if (stepWatch.elapsedMicroseconds > budgetMicros) return true;
-      final index = _postNumberToIndex[queue[_warmQueuePos]];
-      final post = index == null || index >= posts.length
-          ? null
-          : posts[index];
-      if (post != null && _warmPostOnce(post, stepWatch, budgetMicros)) {
-        return true;
-      }
-      _warmQueuePos++;
-      _warmChunkCursor = 0;
-      _warmNodeCursor = 0;
-    }
-    return false;
-  }
-
-  /// 空闲链的一步。scheduleIdleTask 是我们自己包的安全版:Flutter 3.44 的
-  /// SchedulerBinding.scheduleTask(idle) 撞上持续动画会让事件循环忙等
-  /// 活锁,原生 scheduleTask 不能用。
-  void _warmUpStep(int generation) {
-    scheduleIdleTask(
-      () {
-        if (!mounted || generation != _warmUpGeneration) return;
-        if (_warmRunUnit(_warmStepBudgetMicros)) {
-          _warmUpStep(generation);
-        } else {
-          _finishWarmUp(generation);
-        }
-      },
-      isCanceled: () => !mounted || generation != _warmUpGeneration,
-    );
-  }
-
-  /// 帧隙链的一步:每帧 post-frame 看一眼余量,够就做一个单位;队列走完
-  /// 不收工,锚点走远了重建接着做,直到被 ScrollEnd / ScrollStart 作废。
-  void _warmUpStepInFrame(int generation) {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || generation != _warmUpGeneration) return;
-      final budget = _frameSlackBudgetMicros();
-      if (budget >= _warmSlackMinMicros) {
-        _maybeReanchorWarmQueue();
-        if (!_warmRunUnit(budget) &&
-            _warmProbeMissing &&
-            _warmProbeRetries < _warmProbeRetryMax) {
-          // 探针缺失只跳过了段落:下一帧从头再走一遍(解析都已命中)
-          _warmProbeRetries++;
-          _warmProbeMissing = false;
-          _resetWarmQueue();
-        }
-      }
-      _warmUpStepInFrame(generation);
-    });
-  }
-
-  /// 本帧还能借给预热的时长(µs):本帧 UI 工作不到半帧才借,封顶
-  /// [_warmStepBudgetMicros];本帧没有 ScrollUpdate(秒表停在上一帧)
-  /// 则读数很大,自然不借。
-  int _frameSlackBudgetMicros() {
-    if (!_frameWatch.isRunning) return 0;
-    final refreshRate = View.maybeOf(context)?.display.refreshRate ?? 60;
-    final intervalMicros = (1e6 / (refreshRate > 0 ? refreshRate : 60))
-        .round();
-    final slack =
-        intervalMicros ~/ 2 -
-        _frameWatch.elapsedMicroseconds -
-        _warmSlackMarginMicros;
-    return slack.clamp(0, _warmStepBudgetMicros);
-  }
-
-  /// 空闲链队列走完:探针缺失时延后整轮重做(已解析部分都是命中,只补
-  /// 段落),否则记一条诊断事件收工。
-  void _finishWarmUp(int generation) {
-    if (_warmProbeMissing && _warmProbeRetries < _warmProbeRetryMax) {
-      _warmProbeRetries++;
-      _warmUpRetry?.cancel();
-      _warmUpRetry = Timer(_warmProbeRetryDelay, () {
-        if (!mounted || generation != _warmUpGeneration) return;
-        _warmQueuePos = 0;
-        _warmChunkCursor = 0;
-        _warmNodeCursor = 0;
-        _warmProbeMissing = false;
-        _warmUpStep(generation);
-      });
-      return;
-    }
-    _logWarmUpRound('空闲');
-  }
-
-  void _logWarmUpRound(String mode) {
-    if (!FrameJankMonitor.isRunning) return;
-    final startedAt = _warmStartedAt;
-    final elapsed = startedAt == null
-        ? 0
-        : DateTime.now().difference(startedAt).inMilliseconds;
-    final paragraphs = ParagraphWarmup.warmedParagraphs - _warmParagraphsAtStart;
-    final queue = _warmQueue ?? const <int>[];
-    FrameJankMonitor.logEvent(
-      'WARMUP',
-      '$mode 锚#${_lastReportedPostNumber ?? '-'} 队列${queue.length}楼 '
-          '解析 短帖$_warmParsedPosts 块$_warmParsedChunks '
-          '段落$paragraphs 步数$_warmSteps 历时${elapsed}ms'
-          '${_warmProbeMissing ? ' 探针缺失' : ''}',
-    );
-  }
-
-  /// 对一个楼层做一个原子单位的预热。返回 true = 做了活(本步到此为止,
-  /// 游标留在该楼层);false = 该楼层已无事可做(系统帖 / 全热完 /
-  /// 探针缺失只能跳过段落),游标移到下一楼层。
-  bool _warmPostOnce(Post post, Stopwatch stepWatch, int budgetMicros) {
-    // 系统操作帖走 SmallActionItem,不走正文渲染,不预热
-    if (post.postType == PostTypes.smallAction ||
-        (post.actionCode?.isNotEmpty ?? false)) {
-      return false;
-    }
-    final parseData = _longPostRenderCache[post.id]?.newEngineData?.parseData;
-    if (parseData != null) {
-      // 长帖:先逐块解析(每步一块,1~3ms),再按 chunk 预热段落
-      if (!parseData.fullyParsed) {
-        parseData.warmUpOneChunk();
-        _warmParsedChunks++;
-        return true;
-      }
-      final snapshot = ParagraphWarmupProbe.snapshot();
-      if (snapshot == null) {
-        _warmProbeMissing = true;
-        return false;
-      }
-      while (_warmChunkCursor < parseData.chunks.length) {
-        final remaining = budgetMicros - stepWatch.elapsedMicroseconds;
-        if (remaining <= 0) return true; // 预算用尽,下一步从同一位置续
-        final nodes = parseData.parsedChunkAt(_warmChunkCursor);
-        final next = ParagraphWarmup.warmParagraphs(
-          nodes: nodes,
-          ctx: snapshot,
-          context: context,
-          totalImagesInPost: countImageRuns(nodes),
-          startIndex: _warmNodeCursor,
-          budgetMicros: remaining,
-        );
-        if (next != -1) {
-          _warmNodeCursor = next;
-          return true;
-        }
-        _warmChunkCursor++;
-        _warmNodeCursor = 0;
-      }
-      return false;
-    }
-    // 短帖:未解析先解析(每步一帖,1~5ms),再预热段落
-    if (!RenderParseCache.hasShortPost(post)) {
-      RenderParseCache.shortPost(post);
-      _warmParsedPosts++;
-      return true;
-    }
-    final snapshot = ParagraphWarmupProbe.snapshot();
-    if (snapshot == null) {
-      _warmProbeMissing = true;
-      return false;
-    }
-    final remaining = budgetMicros - stepWatch.elapsedMicroseconds;
-    if (remaining <= 0) return true;
-    final nodes = RenderParseCache.shortPost(post).nodes;
-    // 预热产物按 (inlines 身份, style, theme, 图片数) 进全局缓存,handler
-    // 用共享 static(emoji/mention/localDate/math/download)+ 无 post
-    // 语境的兜底即可:内容同身份 → 命中的是 span/排版,recognizer 行为
-    // 经 mount 桥现取活 context,linkHandler 闭包冻结的 post.id 仅用于
-    // 点击追踪,预热段落全部来自「该 post 自己的 AST」,forPost 语义一致。
-    final next = ParagraphWarmup.warmParagraphs(
-      nodes: nodes,
-      ctx: snapshot,
-      context: context,
-      totalImagesInPost: countImageRuns(nodes),
-      startIndex: _warmNodeCursor,
-      budgetMicros: remaining,
-    );
-    if (next != -1) {
-      _warmNodeCursor = next;
-      return true;
-    }
-    return false;
   }
 
   String _segmentKey(_PostRenderSegment segment) {
@@ -1051,26 +672,21 @@ class _TopicPostListState extends State<TopicPostList> {
 
       // 长帖分段:新引擎用 NewEngineLongPostData(切预处理后 cooked,每 chunk 一个
       // FluxdoRender,sliver 虚拟化 → 不卡 + 滚动锚定原生)。
-      final NewEngineLongPostData? newEngineData;
-      final List<HtmlChunk> longChunks;
-      final longPostCache = _longPostDataFor(post);
-      newEngineData = longPostCache.newEngineData;
-      longChunks = longPostCache.chunks;
-      // discourse-assign 等插件的指定/取消指定系统帖,cooked 里塞几十个
-      // emoji <img> 就很容易超过长帖分段阈值——这条 chunk 化直出路径是
-      // topic_post_list.dart 自己直接调 LongPostHeaderSegment/Footer,完全
-      // 绕过 PostItem.build() 里"是不是系统操作帖"的判断,系统帖一旦被
-      // 判成"长帖"就会被当成能点赞/回复的普通帖子整个渲染出来。系统帖
-      // 永远走 shortPost(内部再分流到 SmallActionItem),不参与长帖分段。
-      final bool isSystemActionPost =
-          post.postType == PostTypes.smallAction ||
-          (post.actionCode?.isNotEmpty ?? false);
-      final useLongSegments = !isSystemActionPost && longChunks.isNotEmpty;
+      // 系统帖 / 短帖 / 长帖的判定只在 PostRenderPrep 一处(系统帖判定在前:
+      // discourse-assign 的指定帖 cooked 塞几十个 emoji <img> 就会超过分块
+      // 阈值,这条 chunk 化直出路径绕过 PostItem,判成长帖就会被当成能
+      // 点赞/回复的普通帖渲染出来)。系统帖永远走 shortPost(内部再分流到
+      // SmallActionItem),不参与长帖分段。
+      final plan = _renderPlans.planFor(
+        post,
+        topicId: detail.id,
+        onQuoteImage: onQuoteImage,
+      );
 
       postIndexToScrollIndex[postIndex] = segments.length;
       postNumberToIndex[post.postNumber] = postIndex;
 
-      if (!useLongSegments) {
+      if (!plan.isLong) {
         scrollIndexToPostNumber[segments.length] = post.postNumber;
         segments.add(
           _PostRenderSegment.shortPost(
@@ -1089,7 +705,7 @@ class _TopicPostListState extends State<TopicPostList> {
           ),
         );
 
-        for (var ci = 0; ci < longChunks.length; ci++) {
+        for (var ci = 0; ci < plan.unitCount; ci++) {
           scrollIndexToPostNumber[segments.length] = post.postNumber;
           segments.add(
             _PostRenderSegment.chunk(
@@ -1097,8 +713,7 @@ class _TopicPostListState extends State<TopicPostList> {
               postIndex: postIndex,
               post: post,
               chunkIndex: ci,
-              chunkData: longChunks[ci],
-              newEngineData: newEngineData,
+              plan: plan,
             ),
           );
         }
@@ -1135,9 +750,7 @@ class _TopicPostListState extends State<TopicPostList> {
       );
     }
 
-    _longPostRenderCache.removeWhere(
-      (postId, _) => !activePostIds.contains(postId),
-    );
+    _renderPlans.retainOnly(activePostIds);
     // widget 实例缓存同步淘汰:离开 posts 的帖子(整流刷新/过滤模式)
     // 不再持有 widget 配置树;翻页只增不减,不受影响
     _shortPostCache.removeWhere((postId, _) => !activePostIds.contains(postId));
@@ -1167,17 +780,21 @@ class _TopicPostListState extends State<TopicPostList> {
     widget.onScrollIndexMappingChanged?.call(postIndexToScrollIndex);
     widget.onScrollIndexToPostNumberChanged?.call(scrollIndexToPostNumber);
     widget.onPostSegmentRangesChanged?.call(postSegmentRanges);
+    final landing = _PostsLanding.of(oldPosts, posts);
     _maybeStartPagingMaterialize(
-      oldPosts,
-      posts,
+      landing,
+      posts.length - (oldPosts?.length ?? 0),
       oldSegmentsLength,
       oldIndexMap,
     );
-    _scheduleWarmUpOnDataLanded(oldPosts, posts);
+    // 数据落地(首屏 / 翻页 / gap 填充)后的下一帧起预热链。纯数据更新
+    // (点赞等换了 posts 实例但楼层集合没变)不重启,免得 message bus
+    // 一阵推送反复打断进行中的链
+    if (landing.landsNewPosts) _warm.onDataLanded();
   }
 
-  /// 翻页落地的渐进物化(新帖预热由 [_scheduleWarmUpOnDataLanded] 统一
-  /// 负责)。
+  /// 翻页落地的渐进物化(新帖预热由 [PostWarmScheduler.onDataLanded]
+  /// 统一负责)。
   ///
   /// loadMore/loadPrevious 一次落地十几帖时,落在 cacheExtent 内的新段
   /// 会被同帧全部物化(单帖 build 6~20ms,叠加即 UI 大帧/STALL 的组成
@@ -1186,21 +803,21 @@ class _TopicPostListState extends State<TopicPostList> {
   /// 滚动繁忙时每帧 +1、空闲时 +2 追平。中间 gap 填充(首尾都不变)
   /// 与整页替换(首尾都变)不启用,维持旧行为。
   void _maybeStartPagingMaterialize(
-    List<Post>? oldPosts,
-    List<Post> newPosts,
+    _PostsLanding landing,
+    int postsAdded,
     int oldSegmentsLength,
     Map<int, int> oldIndexMap,
   ) {
-    if (oldPosts == null || oldPosts.isEmpty || oldSegmentsLength == 0) return;
-    if (newPosts.length <= oldPosts.length) return;
-    final sameFirst = newPosts.first.id == oldPosts.first.id;
-    final sameLast = newPosts.last.id == oldPosts.last.id;
-    if (sameFirst == sameLast) return; // gap 填充(都同)/整页替换(都变)
+    // gap 填充(首尾都同)/整页替换(首尾都变)/首屏不启用
+    if (landing != _PostsLanding.append && landing != _PostsLanding.prepend) {
+      return;
+    }
+    if (oldSegmentsLength == 0) return;
 
     final addedSegments = _renderSegments.length - oldSegmentsLength;
     final fewAdded = addedSegments < _materializeMinPagingSegments;
 
-    if (sameFirst) {
+    if (landing == _PostsLanding.append) {
       // 尾部追加:append 不改 center 的 postIndex 与 scrollIndex
       if (!fewAdded && _materializeCapAfter == null) {
         final oldCenter = oldIndexMap[widget.centerPostIndex] ?? 0;
@@ -1218,9 +835,8 @@ class _TopicPostListState extends State<TopicPostList> {
       }
     } else {
       // 头部插入:prepend 使 centerPostIndex 平移了新增帖数
-      final shift = newPosts.length - oldPosts.length;
       if (!fewAdded && _materializeCapBefore == null) {
-        final oldCenter = oldIndexMap[widget.centerPostIndex - shift];
+        final oldCenter = oldIndexMap[widget.centerPostIndex - postsAdded];
         if (oldCenter != null) {
           _materializeCapBefore = oldCenter + _currentMaterializeStep;
           _scheduleMaterializeStep();
@@ -1231,74 +847,6 @@ class _TopicPostListState extends State<TopicPostList> {
         }
       }
     }
-  }
-
-  _LongPostRenderCacheEntry _longPostDataFor(Post post) {
-    final signature = _longPostRenderSignature(post);
-    final cached = _longPostRenderCache[post.id];
-    if (cached != null && identical(cached.post, post)) {
-      return cached;
-    }
-    // post 实例变了但渲染相关内容(cooked/mentions/links,即 signature
-    // 覆盖的字段)没变 —— 典型场景:message bus 单帖更新(点赞数等)
-    // copyWith 出新实例。复用解析产物,只刷新 post 引用;否则每次
-    // 点赞推送都会重新预处理 + 切 chunk + 丢掉全部已解析 chunk,
-    // 已挂载的 chunk 被迫同步重新解析,一次几十 ms。
-    if (cached != null && cached.signature == signature) {
-      final refreshed = _LongPostRenderCacheEntry(
-        post: post,
-        signature: signature,
-        newEngineData: cached.newEngineData,
-      );
-      _longPostRenderCache[post.id] = refreshed;
-      return refreshed;
-    }
-
-    final entry = _LongPostRenderCacheEntry(
-      post: post,
-      signature: signature,
-      newEngineData: NewEngineLongPostData.tryBuild(
-        post,
-        topicId: detail.id,
-        onQuoteImage: onQuoteImage,
-      ),
-    );
-    _longPostRenderCache[post.id] = entry;
-    return entry;
-  }
-
-  int _longPostRenderSignature(Post post) {
-    final mentionedUsers = post.mentionedUsers;
-    final linkCounts = post.linkCounts;
-    return Object.hash(
-      post.cooked.length,
-      post.cooked.hashCode,
-      mentionedUsers == null
-          ? 0
-          : Object.hashAll(
-              mentionedUsers.map(
-                (u) => Object.hash(
-                  u.id,
-                  u.username,
-                  u.statusEmoji,
-                  u.statusDescription,
-                ),
-              ),
-            ),
-      linkCounts == null
-          ? 0
-          : Object.hashAll(
-              linkCounts.map(
-                (l) => Object.hash(
-                  l.url,
-                  l.clicks,
-                  l.title,
-                  l.internal,
-                  l.reflection,
-                ),
-              ),
-            ),
-    );
   }
 
   @override
@@ -1639,7 +1187,7 @@ class _TopicPostListState extends State<TopicPostList> {
 
     switch (segment.type) {
       case _PostRenderSegmentType.shortPost:
-        Widget buildShortPost() => PostItem(
+        final item = PostItem(
           post: post,
           topicId: detail.id,
           categoryId: detail.categoryId,
@@ -1683,43 +1231,22 @@ class _TopicPostListState extends State<TopicPostList> {
 
         // OP 楼的 opSlot 依赖整个 detail 对象,签名无法稳定,不缓存
         if (post.postNumber == 1) {
-          child = buildShortPost();
+          child = item;
           break;
         }
 
         // 实例缓存:输入未变时复用同一 widget 实例,让整页 rebuild 时
         // 未变化的楼层在框架层短路(闭包回调经 State 转发,行为始终
-        // 跟随最新 widget,复用实例不会捕获旧数据)
-        // 签名必须覆盖 PostItem 的全部输入:漏一项,该项变化时就会复用旧实例
-        // (话题改分类、指派/取消指派、权限变化都曾因此不刷新)
-        final signature = (
-          post: post,
-          categoryId: detail.categoryId,
-          assignmentInfo: detail.indirectlyAssignedTo[post.id],
-          canAssignPost: widget.canAssignPost,
-          selected: isSelectedPost,
-          highlight: highlight,
-          boostUsername: boostUsername,
-          dateLabel: dateSeparatorLabel,
-          bottomDateLabel: bottomDateSeparatorLabel,
-          isTopicOwner: detail.createdBy?.username == post.username,
-          hasAcceptedAnswer: detail.hasAcceptedAnswer,
-          acceptedAnswers: detail.acceptedAnswers,
-          isLoggedIn: isLoggedIn,
-          useReplyDialog: useReplyDialog,
-          topicTitle: detail.title,
-          isPm: detail.isPrivateMessage,
-          pmNonHuman: detail.pmWithNonHumanUser,
-          canShareAsImage: onShareAsImage != null,
-          canShowDetail: widget.onShowPostDetail != null,
-          isPostVoting: detail.isPostVoting,
-          topicClosed: detail.closed || detail.archived,
-        );
+        // 跟随最新 widget,复用实例不会捕获旧数据)。
+        // 签名取 PostItem.reuseSignature:覆盖它的全部构造参数、与字段
+        // 声明放在一起,不再在这里手抄一份(手抄版漏过 categoryId /
+        // assignmentInfo / canAssignPost,话题改分类、指派变化时不刷新)
+        final signature = item.reuseSignature;
         final cached = _shortPostCache[post.id];
         if (cached != null && cached.signature == signature) {
           child = cached.widget;
         } else {
-          child = buildShortPost();
+          child = item;
           _shortPostCache[post.id] = _ShortPostCacheEntry(
             signature: signature,
             widget: child,
@@ -1740,10 +1267,11 @@ class _TopicPostListState extends State<TopicPostList> {
         );
         break;
       case _PostRenderSegmentType.longChunk:
-        final data = segment.newEngineData!;
+        final plan = segment.plan!;
+        final data = plan.longData!;
         final ci = segment.chunkIndex!;
         // 正文 chunk 的实例缓存:data(解析产物 + callbacks)实例稳定
-        // (见 _longPostDataFor 的签名复用)且选中/高亮态不变时,复用
+        // (见 PostRenderPlans 的签名复用)且选中/高亮态不变时,复用
         // widget 实例让框架整棵短路。单帖更新(点赞等)触发的整页
         // rebuild 里,正文富文本的重建是最大头,这里短路后更新只剩
         // header/footer 的轻量重建。
@@ -1766,13 +1294,10 @@ class _TopicPostListState extends State<TopicPostList> {
           topicId: detail.id,
           selected: isSelectedPost,
           highlight: highlight,
-          chunk: segment.chunkData!,
-          chunkIndex: ci,
-          // 懒解析:首次进入 cacheExtent 时才 parse 该 chunk(带前缀补齐),
-          // 避免进话题/分页落地帧一次性解析长帖所有 chunk
-          imageIndexOffset: data.imageOffsetAt(ci),
-          parsedNodes: data.parsedChunkAt(ci),
-          footnotesHtml: data.footnotesHtml,
+          // 挂载单位与预热同源(PostRenderPlan.unitAt)。懒解析:首次进入
+          // cacheExtent 时才 parse 该 chunk(带前缀补齐),避免进话题/分页
+          // 落地帧一次性解析长帖所有 chunk
+          unit: plan.unitAt(ci),
           callbacks: data.callbacks,
           onQuoteSelection: onQuoteSelection,
           highlightBoostUsername: ci == 0 ? boostUsername : null,
@@ -1934,17 +1459,113 @@ class _ChunkWidgetCacheEntry {
   });
 }
 
-class _LongPostRenderCacheEntry {
-  final Post post;
-  final int signature;
-  final NewEngineLongPostData? newEngineData;
-  const _LongPostRenderCacheEntry({
-    required this.post,
-    required this.signature,
-    this.newEngineData,
-  });
+/// 一次数据落地相对上次分段的楼层变化,由两份列表的首尾帖 id 与长度
+/// 推出(帖子流窗口自带的变化类型经屏蔽过滤后不再可用,且整页 rebuild
+/// 会把多次窗口变化合并成一次,只看最后一次会漏判 —— 这里直接比对
+/// 实际渲染的前后两份列表)。分页渐进物化与预热共用这一份判定。
+enum _PostsLanding {
+  /// 无楼层
+  empty,
 
-  List<HtmlChunk> get chunks => newEngineData?.chunks ?? const <HtmlChunk>[];
+  /// 首次分段 / 之前没有楼层
+  initial,
+
+  /// 楼层集合未变(点赞等单帖更新换了实例)
+  same,
+
+  /// 尾部追加
+  append,
+
+  /// 头部插入
+  prepend,
+
+  /// 其余:gap 填充(首尾都同)/ 整页替换(首尾都变)/ 移除
+  other;
+
+  static _PostsLanding of(List<Post>? oldPosts, List<Post> posts) {
+    if (posts.isEmpty) return empty;
+    if (oldPosts == null || oldPosts.isEmpty) return initial;
+    final sameFirst = oldPosts.first.id == posts.first.id;
+    final sameLast = oldPosts.last.id == posts.last.id;
+    if (oldPosts.length == posts.length && sameFirst && sameLast) return same;
+    if (posts.length > oldPosts.length && sameFirst != sameLast) {
+      return sameFirst ? append : prepend;
+    }
+    return other;
+  }
+
+  /// 楼层集合变了(要按新楼层起预热)
+  bool get landsNewPosts => this != empty && this != same;
+}
+
+/// 预热调度器看到的列表:楼层序、锚点、滚动状态读 State 的最新值;
+/// 单元预热落在分段用的同一份渲染计划上(PostRenderPrep.warmOneUnit)。
+class _ListWarmHost implements PostWarmHost {
+  _ListWarmHost(this._state);
+
+  final _TopicPostListState _state;
+
+  List<Post> get _posts => _state.detail.postStream.posts;
+
+  @override
+  int get postCount => _posts.length;
+
+  @override
+  int postNumberAt(int index) => _posts[index].postNumber;
+
+  @override
+  int? indexOfPostNumber(int postNumber) =>
+      _state._postNumberToIndex[postNumber];
+
+  @override
+  int? get anchorPostNumber => _state._lastReportedPostNumber;
+
+  @override
+  int get fallbackAnchorIndex => _state.centerPostIndex;
+
+  @override
+  bool get scrollingTowardEarlierPosts {
+    // 正偏移方向(reverse)= 往后面的楼层走
+    final controller = _state.scrollController;
+    return controller.hasClients &&
+        controller.position.userScrollDirection == ScrollDirection.forward;
+  }
+
+  @override
+  bool get isScrollActive {
+    final controller = _state.scrollController;
+    return controller.hasClients &&
+        controller.position.isScrollingNotifier.value;
+  }
+
+  @override
+  double get refreshRate =>
+      View.maybeOf(_state.context)?.display.refreshRate ?? 60;
+
+  @override
+  PostWarmOutcome warmUnit(
+    int postNumber,
+    PostWarmCursor cursor,
+    WarmBudget budget,
+  ) {
+    final posts = _posts;
+    final index = _state._postNumberToIndex[postNumber];
+    final post = index == null || index >= posts.length ? null : posts[index];
+    if (post == null) return PostWarmOutcome.done;
+    // 分段时已为每帖建好计划,这里是同一份(实例未变直接命中)
+    final plan = _state._renderPlans.planFor(
+      post,
+      topicId: _state.detail.id,
+      onQuoteImage: _state.onQuoteImage,
+    );
+    return PostRenderPrep.warmOneUnit(
+      plan,
+      cursor,
+      budget,
+      paragraphWarmer: () =>
+          PostRenderPrep.probeParagraphWarmer(_state.context),
+    );
+  }
 }
 
 class _PostRenderSegment {
@@ -1953,8 +1574,9 @@ class _PostRenderSegment {
   final int postIndex;
   final Post post;
   final int? chunkIndex;
-  final HtmlChunk? chunkData;
-  final NewEngineLongPostData? newEngineData;
+
+  /// 长帖 chunk 段所属楼层的渲染计划(挂载单位从这里取)
+  final PostRenderPlan? plan;
   final int gapCount; // gap 段中隐藏帖子的数量
 
   const _PostRenderSegment._({
@@ -1963,8 +1585,7 @@ class _PostRenderSegment {
     required this.postIndex,
     required this.post,
     this.chunkIndex,
-    this.chunkData,
-    this.newEngineData,
+    this.plan,
     this.gapCount = 0,
   });
   factory _PostRenderSegment.shortPost({
@@ -1998,8 +1619,7 @@ class _PostRenderSegment {
     required int postIndex,
     required Post post,
     required int chunkIndex,
-    required HtmlChunk chunkData,
-    NewEngineLongPostData? newEngineData,
+    required PostRenderPlan plan,
   }) {
     return _PostRenderSegment._(
       type: _PostRenderSegmentType.longChunk,
@@ -2007,8 +1627,7 @@ class _PostRenderSegment {
       postIndex: postIndex,
       post: post,
       chunkIndex: chunkIndex,
-      chunkData: chunkData,
-      newEngineData: newEngineData,
+      plan: plan,
     );
   }
 

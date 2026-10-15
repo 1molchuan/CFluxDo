@@ -5,8 +5,7 @@ import 'package:flutter/widgets.dart';
 import 'package:fluxdo_render/fluxdo_render.dart';
 
 import '../../../models/topic.dart';
-import '../../../widgets/post/post_item/render_parse_cache.dart';
-import '../../../widgets/post/post_item/segmented_long_post.dart';
+import '../../../widgets/post/post_item/post_render_prep.dart';
 import 'topic_detail_controller.dart';
 
 /// 话题目录(TOC)状态与滚动编排 —— 对齐 DiscoTOC(theme component)。
@@ -98,14 +97,14 @@ class TopicTocController extends ChangeNotifier {
     _apply(data);
   }
 
-  /// 从 1 楼提取 TOC:长帖按渲染 chunk 逐块解析(命中渲染同款
-  /// LRU,不重复付费),短帖整帖提取。
+  /// 从 1 楼提取 TOC:长短判定与挂载单位都经 [PostRenderPrep](与列表
+  /// 分段同一处判定 —— 目录项的 chunkIndex 才对得上实际渲染的段)。长帖
+  /// 按渲染 chunk 逐块解析(命中渲染同款 LRU,不重复付费),否则整帖提取。
   TocData? _extract(Post post, {required int topicId}) {
-    final longData = NewEngineLongPostData.tryBuild(post, topicId: topicId);
-    if (longData != null) {
+    final plan = PostRenderPrep.planFor(post, topicId: topicId);
+    if (plan.isLong) {
       final chunks = <List<BlockNode>>[
-        for (var i = 0; i < longData.chunks.length; i++)
-          longData.parsedChunkAt(i),
+        for (var i = 0; i < plan.unitCount; i++) plan.unitAt(i).nodes,
       ];
       return TocExtractor.buildFromChunks(
         chunks,
@@ -114,7 +113,7 @@ class TopicTocController extends ChangeNotifier {
       );
     }
     return TocExtractor.build(
-      RenderParseCache.shortPost(post).nodes,
+      PostRenderPrep.shortUnit(post).nodes,
       postId: post.id,
       minHeadings: post.cooked.contains(tocMarker) ? 1 : minHeadings,
     );

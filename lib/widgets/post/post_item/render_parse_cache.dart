@@ -37,6 +37,9 @@ class RenderParseCache {
 
   /// 帖子渲染内容签名:cooked + mention 状态 + 链接点击数
   /// (preprocessCookedForRender 的全部输入)。
+  ///
+  /// 全项目唯一定义:列表级渲染计划复用等外部用途一律经
+  /// PostRenderPrep.signatureOf,不要再抄一份。
   static int signatureOf(Post post) {
     final mentionedUsers = post.mentionedUsers;
     final linkCounts = post.linkCounts;
