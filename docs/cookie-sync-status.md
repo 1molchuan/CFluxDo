@@ -8,6 +8,9 @@
 > WebView → jar 的边界同步从不写 `_t`（登录收口由 `SessionTokenAuthority.adoptLoginToken` 写）；
 > 各 WebView 使用方的「准备 → 使用 → 回写 → 交 `_t`」统一由 `WebViewUses`
 > （`lib/services/session/webview_use.dart`）按用途与结果决定。
+> 冷启动顺序（存储就绪 → `_t` 认证接线 → priming → 预加载 → 会话判定 → 登录后启动项）
+> 与回前台子集由 `AppStartup`（`lib/services/startup/app_startup.dart`）编排，
+> 「是否已登录」只读它的会话判定。
 > 现状以 `lib/services/network/cookie/` 源码为准。
 
 ## 版本历史

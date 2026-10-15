@@ -528,6 +528,10 @@ acquire lock(name) → await timeout(10s)
 
 **职责**：取代 `RawSetCookieQueue` 的"冷启动 + WV 打开时 cookie 准备"职责。
 
+> 2026-10-15 注：冷启动那次 priming 由 `AppStartup` 在 `_t` 认证接线（服务端探测 /
+> User API Key 自愈）之后发起，priming 里的 `_t` 对账一定有探测可用；以前靠
+> DiscourseService 构造时顺手接线，碰巧早于 priming。
+
 ```dart
 class WebViewCookiePriming {
   static WebViewCookiePriming get instance;
