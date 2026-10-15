@@ -54,6 +54,10 @@ class AccelDohApi {
   static const Duration _connectTimeout = Duration(seconds: 5);
   static const Duration _requestTimeout = Duration(seconds: 10);
 
+  /// Rust 路径的外层超时要盖过它内部的最坏情况（reqwest 单次 10 s，连接层失败换路再来一次），
+  /// 否则 Dart 这边提前放弃、改用自己的客户端再发一次，换码 / 续期这类一次性请求会被重复提交
+  static const Duration _nativeTimeout = Duration(seconds: 25);
+
   /// 服务端没给 expires_in 时按这个有效期算
   static const Duration _defaultLifetime = Duration(hours: 24);
 
@@ -96,14 +100,25 @@ class AccelDohApi {
   }
 
   /// 用 Connect 回调里的 code/state 换加速令牌，服务端负责去 Connect 核验身份
+  ///
+  /// code 只能用一次：Rust 侧超时时请求可能已经到了服务端，不再用 Dart 客户端重发
   Future<AccelDohIssueResult> exchangeCode({
     required String code,
     required String state,
-  }) => _issue('/v1/token', body: {'code': code, 'state': state});
+  }) => _issue(
+    '/v1/token',
+    body: {'code': code, 'state': state},
+    resendAfterTimeout: false,
+  );
 
   /// 令牌续期；401/403 说明旧令牌已失效，要重新走 Connect
-  Future<AccelDohIssueResult> refresh(String token) =>
-      _issue('/v1/token/refresh', bearer: token);
+  ///
+  /// 服务端每次续期都换新令牌：Rust 侧超时后若用旧令牌重发，会被当成已失效而误判
+  Future<AccelDohIssueResult> refresh(String token) => _issue(
+    '/v1/token/refresh',
+    bearer: token,
+    resendAfterTimeout: false,
+  );
 
   /// 通知服务端作废令牌，尽力而为，失败不影响本地
   Future<void> revoke(String token) async {
@@ -118,9 +133,15 @@ class AccelDohApi {
     String path, {
     Map<String, Object?>? body,
     String? bearer,
+    bool resendAfterTimeout = true,
   }) async {
     try {
-      final (status, text) = await _post(path, body: body, bearer: bearer);
+      final (status, text) = await _post(
+        path,
+        body: body,
+        bearer: bearer,
+        resendAfterTimeout: resendAfterTimeout,
+      );
       if (status == HttpStatus.unauthorized || status == HttpStatus.forbidden) {
         debugPrint('[DOH] 加速服务端拒绝发放令牌: $path HTTP $status');
         return const AccelDohIssueResult.rejected();
@@ -147,15 +168,23 @@ class AccelDohApi {
     }
   }
 
+  /// [resendAfterTimeout] 为 false 时，Rust 侧超时直接抛出 [TimeoutException]，
+  /// 不退回 Dart 客户端（一次性请求不能重复提交）
   Future<(int, String)> _post(
     String path, {
     Map<String, Object?>? body,
     String? bearer,
+    bool resendAfterTimeout = true,
   }) async {
     // 有 Rust 库的平台走 Rust 的 reqwest 客户端，和 DoH 查询同一套 TLS 栈；
     // Rust 那边失败（库没加载、请求异常）再退回 Dart 自己的 HttpClient
     if (DohProxyFfi.isAvailable) {
-      final native = await _postViaNative(path, body: body, bearer: bearer);
+      final native = await _postViaNative(
+        path,
+        body: body,
+        bearer: bearer,
+        resendAfterTimeout: resendAfterTimeout,
+      );
       if (native != null) return native;
     }
     final client = _createClient();
@@ -185,6 +214,7 @@ class AccelDohApi {
     String path, {
     Map<String, Object?>? body,
     String? bearer,
+    required bool resendAfterTimeout,
   }) async {
     final headers = <String, String>{
       HttpHeaders.acceptHeader: 'application/json',
@@ -199,9 +229,16 @@ class AccelDohApi {
             headers: headers,
             body: body == null ? null : jsonEncode(body),
           )
-          .timeout(_requestTimeout);
+          .timeout(_nativeTimeout);
       if (result == null) return null;
       return (result.status, result.body);
+    } on TimeoutException {
+      if (!resendAfterTimeout) {
+        debugPrint('[DOH] Rust 侧请求加速接口超时，一次性请求不重发: $path');
+        rethrow;
+      }
+      debugPrint('[DOH] Rust 侧请求加速接口超时，改用 Dart 客户端: $path');
+      return null;
     } catch (e) {
       debugPrint('[DOH] Rust 侧请求加速接口失败，改用 Dart 客户端: $path $e');
       return null;

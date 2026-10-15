@@ -144,11 +144,14 @@ class CfhubApi {
   }
 
   /// 用 Connect 回调里的 code/state 换探针令牌，cfhub 负责去 Connect 核验身份
+  ///
+  /// code 只能用一次：Rust 侧超时时请求可能已经到了 cfhub，不再用 Dart 客户端重发
   Future<CfhubTokenResult> exchangeCode(String code, String state) async {
     try {
       final (status, text) = await _send(
         _tokenPath,
         body: {'code': code, 'state': state},
+        resendAfterTimeout: false,
       );
       if (status == HttpStatus.unauthorized || status == HttpStatus.forbidden) {
         debugPrint('[CFHUB] cfhub 拒绝发放探针令牌: HTTP $status');
@@ -193,20 +196,34 @@ class CfhubApi {
     String path, {
     Map<String, Object?>? body,
     String? bearer,
+    bool resendAfterTimeout = true,
   }) {
     final custom = _customPost;
     if (custom != null) return custom(path, body: body, bearer: bearer);
-    return _post(path, body: body, bearer: bearer);
+    return _post(
+      path,
+      body: body,
+      bearer: bearer,
+      resendAfterTimeout: resendAfterTimeout,
+    );
   }
 
+  /// [resendAfterTimeout] 为 false 时，Rust 侧超时直接抛出 [TimeoutException]，
+  /// 不退回 Dart 客户端（一次性请求不能重复提交）
   Future<(int, String)> _post(
     String path, {
     Map<String, Object?>? body,
     String? bearer,
+    bool resendAfterTimeout = true,
   }) async {
     // 有 Rust 库的平台走 Rust 的 reqwest 客户端；Rust 那边失败再退回 Dart 的 HttpClient
     if (DohProxyFfi.isAvailable) {
-      final native = await _postViaNative(path, body: body, bearer: bearer);
+      final native = await _postViaNative(
+        path,
+        body: body,
+        bearer: bearer,
+        resendAfterTimeout: resendAfterTimeout,
+      );
       if (native != null) return native;
     }
     final client = _createClient();
@@ -237,6 +254,7 @@ class CfhubApi {
     String path, {
     Map<String, Object?>? body,
     String? bearer,
+    required bool resendAfterTimeout,
   }) async {
     final headers = <String, String>{
       HttpHeaders.acceptHeader: 'application/json',
@@ -254,6 +272,13 @@ class CfhubApi {
           .timeout(_nativeTimeout);
       if (result == null) return null;
       return (result.status, result.body);
+    } on TimeoutException {
+      if (!resendAfterTimeout) {
+        debugPrint('[CFHUB] Rust 侧请求 cfhub 超时，一次性请求不重发: $path');
+        rethrow;
+      }
+      debugPrint('[CFHUB] Rust 侧请求 cfhub 超时，改用 Dart 客户端: $path');
+      return null;
     } catch (e) {
       debugPrint('[CFHUB] Rust 侧请求 cfhub 失败，改用 Dart 客户端: $path $e');
       return null;
