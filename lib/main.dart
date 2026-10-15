@@ -55,7 +55,7 @@ import 'services/network/vpn_auto_toggle_service.dart';
 import 'services/network/doh_proxy/proxy_certificate.dart';
 import 'services/cf_challenge_logger.dart';
 import 'services/browser_trust_coordinator.dart';
-import 'services/discourse/discourse_service.dart';
+import 'services/startup/app_startup.dart';
 import 'services/update_service.dart';
 import 'services/update_checker_helper.dart';
 import 'package:fluxdo_render/fluxdo_render.dart'
@@ -76,7 +76,6 @@ import 'services/migration_service.dart';
 import 'services/navigation/app_route_observer.dart';
 import 'services/navigation/back_exit_guard.dart';
 import 'services/navigation/keyboard_focus_guard.dart';
-import 'services/session/webview_use.dart';
 import 'services/webview_settings.dart';
 import 'services/windows_webview_environment_service.dart';
 import 'services/user_presence_service.dart';
@@ -258,9 +257,9 @@ Future<void> main() async {
   ];
   final results = await Future.wait(futures);
   final prefs = results[0] as SharedPreferences;
-  // jar 已就绪：先把 _t 的服务端探测 / 自愈 / 认证回调接给 SessionTokenAuthority，
-  // 之后无论谁先构造 DiscourseService，priming 的对账都有探测可用
-  DiscourseService.attachSessionTokenAuthority();
+  // 启动序列阶段 1→2：存储（含 jar）已就绪，接上 _t 的服务端探测 / 自愈 /
+  // 认证回调。之后无论谁先构造 DiscourseService，priming 的对账都有探测可用
+  AppStartup.instance.storesReady();
   await AuthIssueNoticeService.instance.initialize(prefs);
 
   // release 下按设置开关启用性能监控(debug/profile 已在上方无条件启用)
@@ -332,10 +331,12 @@ Future<void> main() async {
     debugPrint('[Main] 初始 VPN 状态同步失败: $e');
   }
 
+  // 启动序列阶段 3→6：priming → 预加载（与 runApp 并行，PreheatGate 复用这个
+  // 进行中的预加载）→ 会话判定 → 登录后启动项，全部在后台进行。
   // 必须等 DoH / 系统代理 / VPN 自动切换全部落定后再预热 Cookie。
   // Windows 设置本地代理会销毁并重建 WebView2 Environment；若提前预热，
   // 任务会继续操作已销毁的旧环境并反复重试，显著拉长开屏时间。
-  BrowserTrustCoordinator.instance.prepareStartup(reason: 'startup');
+  AppStartup.instance.launch(reason: 'startup');
 
   // 初始化下载服务（依赖网络栈已就绪）
   DownloadService().initialize();
@@ -363,14 +364,6 @@ Future<void> main() async {
   if (Platform.isAndroid) {
     unawaited(_applyAndroidDisplayMode(prefs));
   }
-
-  // 提前触发预加载数据请求，与 runApp 并行执行。
-  // PreheatGate 中的 ensurePreloaded() 会复用这个已在进行的请求。
-  unawaited(
-    BrowserTrustCoordinator.instance
-        .ensurePreloaded(reason: 'startup')
-        .catchError((Object _) {}),
-  );
 
   // 记录应用启动日志
   LogWriter.instance.write({
@@ -857,6 +850,52 @@ class MainPage extends ConsumerStatefulWidget {
 
 enum _AuthErrorDialogAction { confirm, clearData }
 
+/// MessageBus 相关频道的订阅，作为登录后启动项交给 [AppStartup] 启停。
+///
+/// 频道 provider 需要 [WidgetRef]，所以订阅挂在 MainPage 上；何时开 / 关只看
+/// 启动序列的会话判定。
+class _MessageBusChannels implements PostLoginStart {
+  _MessageBusChannels(this._state);
+
+  final _MainPageState _state;
+  final List<ProviderSubscription<void>> _subs = [];
+  bool _active = false;
+
+  @override
+  String get name => 'message_bus_channels';
+
+  @override
+  void start(SessionVerdict verdict) {
+    if (_active) return;
+    _active = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_active || !_state.mounted) return;
+      _closeAll();
+      final ref = _state.ref;
+      _subs.addAll([
+        ref.listenManual<void>(messageBusInitProvider, (_, _) {}),
+        ref.listenManual<void>(notificationChannelProvider, (_, _) {}),
+        ref.listenManual<void>(notificationAlertChannelProvider, (_, _) {}),
+        ref.listenManual<void>(chatNotificationAlertProvider, (_, _) {}),
+        ref.listenManual<void>(logoutChannelProvider, (_, _) {}),
+      ]);
+    });
+  }
+
+  @override
+  void stop() {
+    _active = false;
+    _closeAll();
+  }
+
+  void _closeAll() {
+    for (final sub in _subs) {
+      sub.close();
+    }
+    _subs.clear();
+  }
+}
+
 class _MainPageState extends ConsumerState<MainPage>
     with WidgetsBindingObserver {
   // 当前活跃 tab 按稳定 id 跟踪，不用 pageEntries 数字下标：登录态变化
@@ -865,14 +904,13 @@ class _MainPageState extends ConsumerState<MainPage>
   String _currentEntryId = NavEntryIds.home;
   ProviderSubscription<AsyncValue<String>>? _authErrorSub;
   ProviderSubscription<AsyncValue<void>>? _authStateSub;
-  ProviderSubscription<AsyncValue<User?>>? _currentUserSub;
-  ProviderSubscription<void>? _messageBusSub;
-  ProviderSubscription<void>? _notificationChannelSub;
-  ProviderSubscription<void>? _notificationAlertChannelSub;
-  ProviderSubscription<void>? _chatAlertChannelSub;
-  ProviderSubscription<void>? _logoutChannelSub;
   ProviderSubscription<AsyncValue<bool>>? _connectivitySub;
-  bool _messageBusInitialized = false;
+
+  /// MessageBus 频道订阅：何时启停由启动序列的会话判定决定（登录后启动项）
+  late final _MessageBusChannels _messageBusChannels = _MessageBusChannels(
+    this,
+  );
+  VoidCallback? _unregisterMessageBusChannels;
   int? _lastTappedIndex;
   DateTime? _lastTapTime;
   Timer? _pendingSingleTap;
@@ -943,61 +981,12 @@ class _MainPageState extends ConsumerState<MainPage>
         });
       });
     });
-    _currentUserSub = ref.listenManual<AsyncValue<User?>>(currentUserProvider, (
-      previous,
-      next,
-    ) {
-      final previousUser = previous?.value;
-      final user = next.value;
-      if (previousUser == null && user != null) {
-        BrowserTrustCoordinator.instance.startClearanceRefresh(
-          reason: 'current_user_ready',
-        );
-      }
-      if (user != null && !_messageBusInitialized) {
-        _messageBusInitialized = true;
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (!mounted) return;
-          _messageBusSub?.close();
-          _messageBusSub = ref.listenManual<void>(
-            messageBusInitProvider,
-            (_, _) {},
-          );
-          _notificationChannelSub?.close();
-          _notificationChannelSub = ref.listenManual<void>(
-            notificationChannelProvider,
-            (_, _) {},
-          );
-          _notificationAlertChannelSub?.close();
-          _notificationAlertChannelSub = ref.listenManual<void>(
-            notificationAlertChannelProvider,
-            (_, _) {},
-          );
-          _chatAlertChannelSub?.close();
-          _chatAlertChannelSub = ref.listenManual<void>(
-            chatNotificationAlertProvider,
-            (_, _) {},
-          );
-          _logoutChannelSub?.close();
-          _logoutChannelSub = ref.listenManual<void>(
-            logoutChannelProvider,
-            (_, _) {},
-          );
-        });
-      } else if (user == null) {
-        _messageBusInitialized = false;
-        _messageBusSub?.close();
-        _messageBusSub = null;
-        _notificationChannelSub?.close();
-        _notificationChannelSub = null;
-        _notificationAlertChannelSub?.close();
-        _notificationAlertChannelSub = null;
-        _chatAlertChannelSub?.close();
-        _chatAlertChannelSub = null;
-        _logoutChannelSub?.close();
-        _logoutChannelSub = null;
-      }
-    }, fireImmediately: true);
+    // 登录后启动项：会话判定为已登录时开 MessageBus 频道，判定为未登录时关。
+    // cf_clearance 续期等其余启动项由启动序列自己启动，这里不再按
+    // currentUserProvider 的变化各自判定「是否已登录」。
+    _unregisterMessageBusChannels = AppStartup.instance.registerPostLogin(
+      _messageBusChannels,
+    );
   }
 
   Future<void> _autoCheckUpdate() async {
@@ -1221,12 +1210,8 @@ class _MainPageState extends ConsumerState<MainPage>
     _pendingSingleTap?.cancel();
     _authErrorSub?.close();
     _authStateSub?.close();
-    _currentUserSub?.close();
-    _messageBusSub?.close();
-    _notificationChannelSub?.close();
-    _notificationAlertChannelSub?.close();
-    _chatAlertChannelSub?.close();
-    _logoutChannelSub?.close();
+    _unregisterMessageBusChannels?.call();
+    _messageBusChannels.stop();
     _connectivitySub?.close();
     super.dispose();
   }
@@ -1283,31 +1268,17 @@ class _MainPageState extends ConsumerState<MainPage>
   }
 
   Future<void> _resumeFromBackground() async {
-    // App 回到前台 — 停止后台保活 + 恢复所有频道 + 刷新通知。
-    try {
-      await BackgroundNotificationService().disable();
-      if (Platform.isIOS) {
-        // iOS 后台轮询任务在独立 isolate 写 cookie 文件，回前台时重载
-        // 磁盘值，避免主 isolate 用旧缓存覆盖后台轮换的 token
-        CookieJarService().reloadPersistedCookies();
-      }
-      // 后台期间 WebView（站内页 / 适配器）可能自己轮换过 _t，而 jar 没跟上；
-      // 先对账再恢复 message-bus 等原生请求，避免用落后的值去碰服务端
-      // （WebView 没有 _t 时把 jar 的推过去；有上限时长，超时按原流程继续）。
-      await WebViewUses.instance.reconcileAfterBackground();
-      MessageBusService().exitBackgroundMode();
-      if (!mounted) return;
-      ref.invalidate(notificationListProvider);
-      // 检查 DOH 代理是否在后台期间失效，若失效则自动重启
-      NetworkSettingsService.instance.ensureProxyAlive();
-      // 回到前台时主动检查连通性（等同 Discourse 的 visibilitychange）
-      unawaited(ConnectivityService().check());
-      unawaited(_checkClipboardTopicLink());
-    } catch (e) {
-      debugPrint('[MainPage] 恢复前台失败: $e');
-    } finally {
-      BrowserTrustCoordinator.instance.resumeFromBackground(reason: 'resume');
-    }
+    // App 回到前台：停后台保活 → WebView 对账 → 恢复前台轮询 → 刷新通知 →
+    // 网络栈保活 → 浏览器信任恢复，顺序由启动序列的回前台子集负责
+    await AppStartup.instance.resumeFromBackground(
+      reason: 'resume',
+      afterSessionReady: () {
+        if (!mounted) return;
+        ref.invalidate(notificationListProvider);
+      },
+    );
+    if (!mounted) return;
+    unawaited(_checkClipboardTopicLink());
   }
 
   bool _handlePresenceKeyEvent(KeyEvent event) {

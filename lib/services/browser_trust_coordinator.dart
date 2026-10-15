@@ -19,6 +19,7 @@ import 'network/cookie/cookie_jar_service.dart';
 import 'network/cookie/webview_cookie_priming.dart';
 import 'preloaded_data_service.dart';
 import 'session/webview_use.dart';
+import 'startup/app_startup.dart';
 import 'startup_progress.dart';
 import 'webview_session_cookie_refresh_service.dart';
 import 'webview_settings.dart';
@@ -113,10 +114,8 @@ class BrowserTrustCoordinator {
   /// 只用于启动页向用户解释为什么没走直连。
   StartupDetourReason? _nativeUntrustedReason;
 
-  /// 启动页进度发布者。
-  StartupProgressReporter get _progress => StartupProgressReporter.instance;
-
-  /// 本轮预加载的进度出口:阶段推进写这里,首页请求也挂上它旁观重试与撞盾。
+  /// 本轮预加载的进度出口(启动序列传入):阶段推进写这里,首页请求也挂上
+  /// 它旁观重试与撞盾。启动页的开始 / 结束由启动序列负责。
   StartupPreloadProgress? _preloadProgress;
 
   void setNavigatorContext(BuildContext context) {
@@ -167,11 +166,13 @@ class BrowserTrustCoordinator {
   /// 确保预加载完成。可信时走 native Dio；不可信时只在启动期临时 WebView 中
   /// 加载一次首页并复用 HTML hydrate。
   ///
-  /// [progress] 由启动序列（AppStartup）传入时，启动页的开始 / 结束由它负责；
-  /// 不传时这里自己开始 / 清空启动页状态。
+  /// 只由启动序列（AppStartup）调用：它负责启动页的开始 / 结束，[progress]
+  /// 是它给的进度出口。预加载之后的登录后启动项（浏览器会话补同步、
+  /// cf_clearance 续期）也由它在会话判定之后启动，这里不再按预加载里的
+  /// 当前用户自行判定。
   Future<void> ensurePreloaded({
     String reason = 'unknown',
-    StartupPreloadProgress? progress,
+    required StartupPreloadProgress progress,
   }) {
     if (_preload.isLoaded) return Future.value();
 
@@ -182,20 +183,15 @@ class BrowserTrustCoordinator {
     }
 
     late final Future<void> future;
-    final ownsSplash = progress == null;
-    if (ownsSplash) _progress.begin();
-    final sink = progress ?? ReporterPreloadProgress(_progress);
-    _preloadProgress = sink;
-    future = _ensurePreloadedInternal(reason: reason, progress: sink)
+    _preloadProgress = progress;
+    future = _ensurePreloadedInternal(reason: reason, progress: progress)
         .whenComplete(() {
           if (identical(_activePreload, future)) {
             _activePreload = null;
           }
-          if (identical(_preloadProgress, sink)) {
+          if (identical(_preloadProgress, progress)) {
             _preloadProgress = null;
           }
-          // 无论成功失败都清掉启动页状态,避免下次手动重试时先显示旧阶段
-          if (ownsSplash) _progress.clear();
         });
     _activePreload = future;
     return future;
@@ -317,7 +313,6 @@ class BrowserTrustCoordinator {
       try {
         await _preload.ensureLoaded(observer: progress);
         _log('native preload success reason=$reason');
-        _startBrowserTrustAfterNativePreload(reason: reason);
         return;
       } catch (e) {
         _log(
@@ -357,7 +352,6 @@ class BrowserTrustCoordinator {
     if (hydrated) {
       _lastPreloadPath = BrowserTrustPreloadPath.webView;
       _log('startup WebView preload success reason=$reason');
-      _startClearanceRefreshIfLoggedIn();
       return;
     }
 
@@ -375,29 +369,6 @@ class BrowserTrustCoordinator {
     );
     await _preload.ensureLoaded(observer: progress);
     _log('fallback native preload success reason=$reason');
-    _startBrowserTrustAfterNativePreload(reason: reason);
-  }
-
-  void _startBrowserTrustAfterNativePreload({required String reason}) {
-    if (!_preload.isLoaded) return;
-    if (_preload.currentUserSync == null) {
-      _log('skip native preload browser trust settle: not logged in');
-      return;
-    }
-
-    unawaited(() async {
-      try {
-        final synced = await ensureBrowserTrust(
-          reason: '$reason:native_preload_settle',
-        );
-        _log('native preload browser trust settled=$synced reason=$reason');
-      } catch (e) {
-        _log(
-          'native preload browser trust settle failed: $e',
-          level: 'warning',
-        );
-      }
-    }());
   }
 
   Future<bool> _ensureBrowserTrustInternal({
@@ -823,8 +794,10 @@ class BrowserTrustCoordinator {
     return _ledger.status(CfClearanceAuthority.mainHost, purpose: purpose);
   }
 
+  /// 是否已登录只读启动序列的会话判定（以前读预加载里的当前用户，与
+  /// CurrentUserNotifier / MainPage 各判各的）。
   void _startClearanceRefreshIfLoggedIn({String reason = 'preload_logged_in'}) {
-    if (_preload.currentUserSync != null) {
+    if (AppStartup.instance.isLoggedIn) {
       final pendingReason = _pendingClearanceRefreshReason;
       _pendingClearanceRefreshReason = null;
       _startClearanceRefreshNow(

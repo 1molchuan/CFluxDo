@@ -12,9 +12,9 @@ import '../providers/app_icon_provider.dart';
 import '../services/network/doh/accel_doh_auth_service.dart';
 import '../services/browser_trust_coordinator.dart';
 import '../services/discourse/discourse_service.dart';
-import '../services/emoji_handler.dart';
 import '../services/log/log_writer.dart';
 import '../services/migration_service.dart';
+import '../services/startup/app_startup.dart';
 import '../services/startup_progress.dart';
 import '../utils/dialog_utils.dart';
 import '../widgets/common/ambient_background.dart';
@@ -63,12 +63,9 @@ class _PreheatGateState extends State<PreheatGate> {
         await _showReloginDialog();
       }
 
-      await BrowserTrustCoordinator.instance.ensurePreloaded(
-        reason: 'preheat_gate',
-      );
-
-      DiscourseService().getEnabledReactions();
-      EmojiHandler().init();
+      // 只等预加载（复用 main() 里启动序列已在进行的那次）；预热、会话判定
+      // 与登录后启动项都由启动序列自己接着做，不在这里
+      await AppStartup.instance.ensurePreloaded(reason: 'preheat_gate');
 
       _error = null;
       return true;

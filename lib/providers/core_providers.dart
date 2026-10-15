@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/user.dart';
 import '../services/discourse/discourse_service.dart';
 import '../services/preloaded_data_service.dart';
+import '../services/startup/app_startup.dart';
 
 /// Discourse 服务 Provider
 final discourseServiceProvider = Provider((ref) => DiscourseService());
@@ -23,8 +24,15 @@ final authStateProvider = StreamProvider<void>((ref) {
   return service.authStateStream;
 });
 
+/// 启动序列：全 App 唯一的「是否已登录」来源（测试可覆盖）。
+final appStartupProvider = Provider<AppStartup>((ref) => AppStartup.instance);
+
 /// 当前用户 Provider
-/// 优先使用预加载数据同步返回，避免启动时短暂显示未登录状态
+///
+/// 是否已登录只读启动序列的会话判定（[AppStartup.verdictNow] /
+/// [AppStartup.verdict]，含启动恢复链），这里只负责用户资料：判定里带着
+/// 预加载的当前用户时同步返回（避免启动时短暂显示未登录），否则缓存先行、
+/// 再拉接口。
 class CurrentUserNotifier extends AsyncNotifier<User?> {
   static const String _cacheKey = 'current_user_cache';
   static const String _cacheUserKey = 'current_user_cache_username';
@@ -33,23 +41,20 @@ class CurrentUserNotifier extends AsyncNotifier<User?> {
 
   @override
   FutureOr<User?> build() {
-    final service = ref.read(discourseServiceProvider);
-    final preloaded = PreloadedDataService().currentUserSync;
-    if (preloaded != null) {
-      final preloadedUser = User.fromJson(preloaded);
-      service.currentUserNotifier.value = preloadedUser;
-      _refreshUser(service, preloadedUser);
-      return preloadedUser;
+    final startup = ref.read(appStartupProvider);
+    final verdictUser = startup.verdictNow?.user;
+    if (verdictUser != null) {
+      _refreshUser(verdictUser);
+      return verdictUser;
     }
-    return _loadUserWithCache(service);
+    return _loadUserWithCache(startup);
   }
 
-  Future<User?> _loadUserWithCache(DiscourseService service) async {
+  Future<User?> _loadUserWithCache(AppStartup startup) async {
     // 先把上次会话的缓存亮出来(毫秒级,登出时缓存会被清,存在即上次已
-    // 登录):本 provider 可能在预加载完成前就被 watch(如根部印记层第一
-    // 帧即 watch,早于 PreheatGate 放行),此时 build 的同步快路径拿不到
-    // preloaded;而下面的 isLoggedIn 含服务端校验、getCurrentUser 是全量
-    // 接口,若等它们串行完成才给首值,头像/发帖入口要白等数秒。
+    // 登录):会话判定可能还在进行(预加载是匿名的,要走含服务端校验的本地
+    // 会话检查),getCurrentUser 又是全量接口,若等它们串行完成才给首值,
+    // 头像/发帖入口要白等数秒。
     // 渐进 emit:缓存 → preloaded → 接口终态。
     final prefs = await SharedPreferences.getInstance();
     final cached = prefs.getString(_cacheKey);
@@ -64,13 +69,19 @@ class CurrentUserNotifier extends AsyncNotifier<User?> {
       }
     }
 
-    final hasToken = await service.isLoggedIn();
-    if (!hasToken) {
+    final verdict = await startup.verdict();
+    if (!verdict.loggedIn) {
       await prefs.remove(_cacheKey);
       await prefs.remove(_cacheUserKey);
       return null;
     }
+    final verdictUser = verdict.user;
+    if (verdictUser != null) {
+      _refreshUser(verdictUser);
+      return verdictUser;
+    }
 
+    final service = ref.read(discourseServiceProvider);
     try {
       final preloadedUser = await service.getPreloadedCurrentUser();
       if (preloadedUser != null) {
@@ -86,7 +97,7 @@ class CurrentUserNotifier extends AsyncNotifier<User?> {
       }
       // 网络返回 null 但本地有缓存时，保守处理：保留缓存返回，
       // 避免短暂鉴权抖动把 UI 误判成已登出。
-      // 只有在已确认没有 token 的分支（第 48-53 行）才清理缓存。
+      // 只有会话判定为未登录时才清理缓存。
       if (cachedUser != null) return cachedUser;
       return null;
     } catch (e) {
@@ -133,9 +144,10 @@ class CurrentUserNotifier extends AsyncNotifier<User?> {
     }
   }
 
-  void _refreshUser(DiscourseService service, User preloadedUser) {
+  void _refreshUser(User preloadedUser) {
     Future(() async {
       try {
+        final service = ref.read(discourseServiceProvider);
         final user = await service.getCurrentUser();
         if (user == null) return;
         final merged = _mergeUser(user, preloadedUser);

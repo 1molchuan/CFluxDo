@@ -280,6 +280,26 @@ void main() {
       expect(ports.log, isNot(contains('message_bus:start')));
     });
 
+    test('预加载完成前的登录 / 登出广播不另起判定，由启动判定读最新状态', () async {
+      ports = FakeStartupPorts(storedSession: false)
+        ..preloadGate = Completer<void>();
+      startup = build(ports);
+      startup.storesReady();
+      startup.launch();
+
+      // 例如首启引导页里登录：登录收口备好预加载数据后广播
+      ports.auth.add(null);
+      await settle();
+      expect(ports.storedSessionChecks, 0);
+
+      ports.preloadedUser = aliceJson;
+      ports.preloadGate!.complete();
+      await settle();
+      expect(startup.isLoggedIn, isTrue);
+      expect(startup.verdictNow!.source, SessionVerdictSource.preload);
+      expect(ports.storedSessionChecks, 0);
+    });
+
     test('已登录后注册的启动项立即启动，注销时停止', () async {
       ports = FakeStartupPorts(preloadedUser: aliceJson);
       startup = build(ports);

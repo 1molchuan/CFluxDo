@@ -223,6 +223,9 @@ class AppStartup {
       _log('launch() before storesReady(): attach session hooks now');
       _attachSessionHooks();
     }
+    // 登录成功 / 登出广播从这里开始跟踪（此时网络栈已就绪，DiscourseService
+    // 早已构造）；启动判定开始前的广播只推进纪元，由启动判定读最新状态
+    _authSub ??= _ports.authStateChanges.listen((_) => _onAuthStateChanged());
     _enter(StartupPhase.prime);
     _ports.prime(reason: reason);
     unawaited(ensurePreloaded(reason: reason).catchError((Object _) {}));
@@ -318,6 +321,11 @@ class AppStartup {
 
   void _onAuthStateChanged() {
     _epoch++;
+    if (_launched && !_startupVerdictStarted) {
+      // 预加载还没完成：启动判定稍后会读到最新状态，不在这里另起一次
+      _log('auth state changed before startup verdict (epoch=$_epoch)');
+      return;
+    }
     _log('auth state changed: re-resolve session (epoch=$_epoch)');
     unawaited(
       _resolve(reason: 'auth_state').then<void>(
