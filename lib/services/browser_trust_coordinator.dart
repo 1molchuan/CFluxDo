@@ -166,7 +166,13 @@ class BrowserTrustCoordinator {
 
   /// 确保预加载完成。可信时走 native Dio；不可信时只在启动期临时 WebView 中
   /// 加载一次首页并复用 HTML hydrate。
-  Future<void> ensurePreloaded({String reason = 'unknown'}) {
+  ///
+  /// [progress] 由启动序列（AppStartup）传入时，启动页的开始 / 结束由它负责；
+  /// 不传时这里自己开始 / 清空启动页状态。
+  Future<void> ensurePreloaded({
+    String reason = 'unknown',
+    StartupPreloadProgress? progress,
+  }) {
     if (_preload.isLoaded) return Future.value();
 
     final active = _activePreload;
@@ -176,22 +182,41 @@ class BrowserTrustCoordinator {
     }
 
     late final Future<void> future;
-    _progress.begin();
-    final progress = ReporterPreloadProgress(_progress);
-    _preloadProgress = progress;
-    future = _ensurePreloadedInternal(reason: reason, progress: progress)
+    final ownsSplash = progress == null;
+    if (ownsSplash) _progress.begin();
+    final sink = progress ?? ReporterPreloadProgress(_progress);
+    _preloadProgress = sink;
+    future = _ensurePreloadedInternal(reason: reason, progress: sink)
         .whenComplete(() {
           if (identical(_activePreload, future)) {
             _activePreload = null;
           }
-          if (identical(_preloadProgress, progress)) {
+          if (identical(_preloadProgress, sink)) {
             _preloadProgress = null;
           }
           // 无论成功失败都清掉启动页状态,避免下次手动重试时先显示旧阶段
-          _progress.clear();
+          if (ownsSplash) _progress.clear();
         });
     _activePreload = future;
     return future;
+  }
+
+  /// 直连预加载（含 WebView 预加载失败后的直连回退）拿到登录态后，补一次
+  /// 浏览器会话同步（priming + session bootstrap）。由启动序列在会话判定为
+  /// 已登录后调用；预加载没完成时不做。
+  void settleAfterNativePreload({required String reason}) {
+    if (!_preload.isLoaded) return;
+    unawaited(() async {
+      try {
+        final synced = await ensureBrowserTrust(reason: reason);
+        _log('native preload browser trust settled=$synced reason=$reason');
+      } catch (e) {
+        _log(
+          'native preload browser trust settle failed: $e',
+          level: 'warning',
+        );
+      }
+    }());
   }
 
   Future<bool> ensureBrowserTrust({
