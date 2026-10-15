@@ -28,6 +28,10 @@ class CookieJarService {
 
   CookieJar? _cookieJar;
   bool _initialized = false;
+
+  /// 进行中的初始化：并发调用共用这一次，不会建出两个 jar
+  /// （第二次还会撞上 [_strategy] 的 late final 重复赋值）。
+  Future<void>? _initializing;
   late final PlatformCookieStrategy _strategy;
 
   /// Discourse 论坛登录 session(仅 _t / _forum_session)。
@@ -79,9 +83,17 @@ class CookieJarService {
   bool get isInitialized => _initialized;
 
   /// 初始化 CookieJar（应用启动时调用）
-  Future<void> initialize() async {
-    if (_initialized) return;
+  ///
+  /// 可并发调用：启动批次与「jar 就绪前建出的 Dio」可能同时触发初始化，
+  /// 进行中的那一次会被复用。
+  Future<void> initialize() {
+    if (_initialized) return Future.value();
+    return _initializing ??= _initialize().whenComplete(() {
+      _initializing = null;
+    });
+  }
 
+  Future<void> _initialize() async {
     try {
       final directory = await getApplicationDocumentsDirectory();
       final cookiePath = path.join(directory.path, '.cookies');

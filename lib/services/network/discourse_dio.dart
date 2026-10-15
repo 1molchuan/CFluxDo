@@ -1,6 +1,8 @@
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 
 import '../../constants.dart';
+import '../app_logger.dart';
 import 'adapters/platform_adapter.dart';
 import 'cookie/app_cookie_manager.dart';
 import 'cookie/cookie_jar_service.dart';
@@ -169,14 +171,19 @@ class DiscourseDio {
     // - 5xx 只对幂等方法重放,POST 重放会造成重复发帖;
     // - 429 区分挑战型(交 CF 盾)与真限流,并尊重 Retry-After;
     // - 尝试预算集中防环,不再靠各重放点自觉打 skip 标记。
+    //
+    // Cookie 管理与会话自愈只看调用方要不要 cookie，不看 jar 此刻是否已初始化：
+    // 以前 jar 没就绪就**静默**少装这两个拦截器，这个 Dio 一辈子不带 cookie、
+    // 也不自愈，而调用点完全看不出来（单例在启动早期被提前构造就会中招）。
+    // 现在 jar 未就绪时由 [JarReadyCookieManager] 先等 jar 初始化再处理请求。
     final cookieJarService = CookieJarService();
-    final cookiesEnabled = enableCookies && cookieJarService.isInitialized;
     if (kind.recovery) {
       dio.interceptors.add(
         RecoveryCoordinator(
           dio: dio,
           policies: [
-            if (cookiesEnabled) SessionSelfHealPolicy(),
+            // 自愈读 jar 快照时会自行等待 jar 初始化
+            if (enableCookies) SessionSelfHealPolicy(),
             RateLimitPolicy(
               isChallengeResponse: CfChallengeClassifier.isChallengeResponse,
             ),
@@ -190,8 +197,18 @@ class DiscourseDio {
     }
 
     // 5. Cookie 管理
-    if (cookiesEnabled) {
-      dio.interceptors.add(AppCookieManager(cookieJarService.cookieJar));
+    if (enableCookies) {
+      if (cookieJarService.isInitialized) {
+        dio.interceptors.add(AppCookieManager(cookieJarService.cookieJar));
+      } else {
+        // 启动顺序出了偏差：留下记录，但链路照常完整（等 jar 就绪）
+        AppLogger.warning(
+          'Dio 在 cookie jar 初始化前创建（baseUrl=${dio.options.baseUrl}），'
+          'Cookie 管理改为等 jar 就绪后再处理请求',
+          tag: 'DiscourseDio',
+        );
+        dio.interceptors.add(JarReadyCookieManager(cookieJarService));
+      }
     }
 
     // 6. 请求头拦截器
@@ -233,5 +250,76 @@ class DiscourseDio {
       attempt: outcome.attemptIndex + 1,
       detail: describeStartupFailure(err),
     );
+  }
+}
+
+/// jar 尚未初始化时建出的 Dio 用的 Cookie 管理：第一次经过时等 jar 初始化
+/// 完成，之后把请求 / 响应 / 错误原样交给真正的 [AppCookieManager]。
+///
+/// 位置与 [AppCookieManager] 相同（恢复协调器之后），所以拦截器顺序契约不变。
+@visibleForTesting
+class JarReadyCookieManager extends Interceptor {
+  JarReadyCookieManager(this._jarService);
+
+  final CookieJarService _jarService;
+  AppCookieManager? _inner;
+
+  Future<AppCookieManager> _resolve() async {
+    final inner = _inner;
+    if (inner != null) return inner;
+    await _jarService.initialize();
+    return _inner ??= AppCookieManager(_jarService.cookieJar);
+  }
+
+  @override
+  Future<void> onRequest(
+    RequestOptions options,
+    RequestInterceptorHandler handler,
+  ) async {
+    final AppCookieManager inner;
+    try {
+      inner = await _resolve();
+    } catch (e, s) {
+      // 等不到 jar 也不能把请求挂死：按 AppCookieManager 加载失败的口径拒绝
+      handler.reject(
+        DioException(
+          requestOptions: options,
+          type: DioExceptionType.unknown,
+          error: e,
+          stackTrace: s,
+          message: 'Cookie jar is not available for the request.',
+        ),
+        true,
+      );
+      return;
+    }
+    await inner.onRequest(options, handler);
+  }
+
+  @override
+  Future<void> onResponse(
+    Response response,
+    ResponseInterceptorHandler handler,
+  ) async {
+    final inner = _inner;
+    if (inner == null) {
+      // 请求阶段没经过本拦截器（例如被前面的拦截器直接 resolve）
+      handler.next(response);
+      return;
+    }
+    await inner.onResponse(response, handler);
+  }
+
+  @override
+  Future<void> onError(
+    DioException err,
+    ErrorInterceptorHandler handler,
+  ) async {
+    final inner = _inner;
+    if (inner == null) {
+      handler.next(err);
+      return;
+    }
+    await inner.onError(err, handler);
   }
 }

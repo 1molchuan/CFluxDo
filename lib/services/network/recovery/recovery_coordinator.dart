@@ -32,6 +32,10 @@ class RecoveryCoordinator extends Interceptor {
   final List<RecoveryPolicy> _policies;
   final AttemptBudget Function() _budgetFactory;
 
+  /// 装配进来的策略（只读，供装配契约测试检查）。
+  @visibleForTesting
+  List<RecoveryPolicy> get policies => List.unmodifiable(_policies);
+
   /// 标记请求已由本协调器接管,防止重放请求再次进入恢复流程
   /// (重放走 dio.fetch 会重跑整条拦截器链)。
   static const String _managedKey = '_recoveryManaged';
