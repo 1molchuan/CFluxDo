@@ -3,7 +3,6 @@ import 'dart:collection' show UnmodifiableListView;
 import 'dart:io' as io;
 import 'dart:math' as math;
 
-import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:app_icons/app_icons.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
@@ -439,82 +438,8 @@ class CfChallengeService {
     }
   }
 
-  /// 综合响应头 + 响应体判断 dio Response 是否是 CF 验证响应。
-  ///
-  /// CF 根据请求的 Accept header 决定 challenge 响应格式:
-  /// - 浏览器请求 (Accept: text/html) → 返 text/html "Just a moment..." 页面
-  /// - API 请求 (Accept: application/json, text/plain) → 返 text/plain 简短挑战
-  /// 但**两者都带 `cf-mitigated: challenge` header**, 这是 CF 官方权威信号。
-  ///
-  /// 状态码可能是 403 也可能是 429:
-  /// - 普通 CF 盾(WAF / bot fight 等)→ 403 + cf-mitigated: challenge
-  /// - 速率限制规则 action 配 managed_challenge / js_challenge / challenge → 429 + cf-mitigated: challenge
-  /// 两种情况都应该交由 CfChallengeInterceptor 走验证流程,不能当成普通 403/429 处理。
-  ///
-  /// 历史上这里曾把 content-type 必须 text/html 作为前置条件,导致 dio 这种
-  /// 默认 `Accept: application/json, text/plain, */*` 的客户端拿到 text/plain
-  /// 时被漏掉, CfChallengeInterceptor 不弹手动验证。
-  static bool isCfChallengeResponse(Response? response) {
-    if (response == null) return false;
-    final headers = response.headers;
-
-    // 1. cf-mitigated: challenge — CF 官方权威信号,单独命中即判定。
-    //    不再把 server 头当前置闸:部分传输通道下响应头可能缺失/走样,
-    //    server 头一票否决会让挑战型 429 永远进不了验证自愈链路。
-    final cfMitigated = headers.value('cf-mitigated') ?? '';
-    if (cfMitigated.contains('challenge')) return true;
-
-    // 2. fallback: 不带 cf-mitigated 时用 body 兜底。挑战页一定是 text/html,
-    //    content-type 明确为其他类型则排除(避免误判 Discourse 自己的
-    //    plaintext/JSON 403);content-type 缺失时放行 body 判定,
-    //    isCfChallenge 的标记(cf_chl_opt 等)足够特异,不会误伤业务响应。
-    final contentType = headers.value('content-type') ?? '';
-    if (contentType.isNotEmpty && !contentType.contains('text/html')) {
-      return false;
-    }
-
-    return isCfChallenge(response.data);
-  }
-
-  /// CF 挑战可能使用的状态码：
-  /// - 403：普通 CF 盾（WAF / bot fight / managed challenge）
-  /// - 429：速率限制规则配 challenge 类动作
-  /// - 503：「I'm Under Attack」等 JS 挑战的历史形态
-  static const _challengeStatusCodes = {403, 429, 503};
-
-  /// 错误响应是否是需要过盾的 CF 挑战（含状态码判定）。
-  ///
-  /// `cf-mitigated: challenge` 是 CF 官方权威信号，任意状态码命中都算；
-  /// 没有该头时只在 403/429/503 上用 body 兜底——其他状态码的 HTML
-  /// （如 404 页面恰好引用了挑战脚本）不应被拖进验证流程。
-  ///
-  /// 历史上拦截器只认 403/429，503 挑战会先被 TransientRetry 白白重放
-  /// 三轮，再以"服务器暂不可用"收场，永远进不了验证。
-  static bool isCfChallengeError(Response? response) {
-    if (response == null) return false;
-    final cfMitigated = response.headers.value('cf-mitigated') ?? '';
-    if (cfMitigated.contains('challenge')) return true;
-    if (!_challengeStatusCodes.contains(response.statusCode)) return false;
-    return isCfChallengeResponse(response);
-  }
-
-  /// 检测是否是 CF 验证页面（用于 403 响应体判断）
-  static bool isCfChallenge(dynamic responseData) {
-    if (responseData == null) return false;
-    final str = responseData.toString();
-    // cf_chl_opt 是 CF 验证页面的可靠标记（challenge options JS 变量）
-    if (str.contains('cf_chl_opt')) return true;
-    // challenge-platform 路径需配合 cloudflare 标记，避免误匹配
-    if (str.contains('challenge-platform') && str.contains('cloudflare')) {
-      return true;
-    }
-    // "Just a moment" 需配合 CF 特征，避免误匹配用户内容
-    if (str.contains('Just a moment') &&
-        (str.contains('cloudflare') || str.contains('cf-challenge'))) {
-      return true;
-    }
-    return false;
-  }
+  // 「响应是不是 CF 挑战」的判定统一在 CfChallengeClassifier，这里只保留
+  // 验证页自身用到的 DOM 状态判定（挑战是否仍在运行、是否落到源站 404）。
 
   /// 检测页面 HTML 中是否有活跃的 CF 验证盾
   /// 用于判断已加载的页面是否仍在展示验证挑战

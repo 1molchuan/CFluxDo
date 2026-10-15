@@ -4,8 +4,8 @@ import '../../constants.dart';
 import 'adapters/platform_adapter.dart';
 import 'cookie/app_cookie_manager.dart';
 import 'cookie/cookie_jar_service.dart';
-import '../cf_challenge_service.dart';
 import 'cookie/csrf_token_service.dart';
+import 'cf/cf_challenge_classifier.dart';
 import 'flux_request_spec.dart';
 import '../startup_progress.dart';
 import 'interceptors/cf_challenge_interceptor.dart';
@@ -93,10 +93,10 @@ class DiscourseDio {
           policies: [
             if (cookiesEnabled) SessionSelfHealPolicy(),
             RateLimitPolicy(
-              isChallengeResponse: CfChallengeService.isCfChallengeError,
+              isChallengeResponse: CfChallengeClassifier.isChallengeResponse,
             ),
             TransientRetryPolicy(
-              isChallengeResponse: CfChallengeService.isCfChallengeError,
+              isChallengeResponse: CfChallengeClassifier.isChallengeResponse,
               onRetry: _reportStartupRetry,
             ),
           ],

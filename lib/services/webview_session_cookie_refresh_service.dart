@@ -8,6 +8,7 @@ import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import '../constants.dart';
 import '../utils/frame_jank_monitor.dart';
 import 'log/log_writer.dart';
+import 'network/cf/cf_challenge_classifier.dart';
 import 'network/cookie/boundary_sync_service.dart';
 import 'network/cookie/cookie_jar_service.dart';
 import 'network/cookie/webview_cookie_priming.dart';
@@ -575,9 +576,19 @@ class WebViewSessionCookieRefreshService {
               ),
             ]);
       final ok = result['ok'] == true;
-      final cfBlocked = result['cfBlocked'] == true;
       final endpoint = result['endpoint']?.toString();
       final status = (result['status'] as num?)?.toInt();
+      // 是否被 CF 挑战拦下:脚本只回传原始信号,口径与 Dio 侧同一个分类器。
+      // (以前脚本里写死 403 || 429,Discourse 的 BAD CSRF 403、真限流 429
+      // 也会被当成撞盾去拉验证页。)
+      final cfBlocked =
+          !ok &&
+          CfChallengeClassifier.isChallenge(
+            statusCode: status,
+            cfMitigated: result['cfMitigated']?.toString(),
+            contentType: result['contentType']?.toString(),
+            body: result['bodyHead']?.toString(),
+          );
       final phase = result['phase']?.toString();
       if (ok) {
         _forceFreshPlugin = false;
@@ -682,6 +693,17 @@ document.close();
     } catch (e) {}
   }
 
+  // 失败响应只带回原始信号（状态码 / cf-mitigated / content-type / 响应体开头），
+  // 是不是 CF 挑战由 dart 侧 CfChallengeClassifier 统一判定。
+  function httpError(label, response, text) {
+    const err = new Error(label + ' -> ' + response.status + ': ' + text.slice(0, 160));
+    err.httpStatus = response.status;
+    err.cfMitigated = response.headers.get('cf-mitigated') || '';
+    err.contentType = response.headers.get('content-type') || '';
+    err.bodyHead = text.slice(0, 4096);
+    return err;
+  }
+
   async function readCsrfToken() {
     try {
       const response = await fetch('/session/csrf', {
@@ -723,7 +745,7 @@ document.close();
     });
     const text = await response.text();
     if (!response.ok) {
-      throw new Error('POST ' + url + ' -> ' + response.status + ': ' + text.slice(0, 160));
+      throw httpError('POST ' + url, response, text);
     }
     return {
       url,
@@ -762,7 +784,7 @@ document.close();
     });
     const html = await response.text();
     if (!response.ok) {
-      throw new Error('home fetch -> ' + response.status + ': ' + html.slice(0, 120));
+      throw httpError('home fetch', response, html);
     }
 
     const assetPattern = /(https?:\\/\\/[^"'\\s<>]+\\/assets\\/[^"'\\s<>]*plugins\\/[^"'\\s<>]+?\\.js(?:\\?[^"'\\s<>]*)?|\\/assets\\/[^"'\\s<>]*plugins\\/[^"'\\s<>]+?\\.js(?:\\?[^"'\\s<>]*)?)/g;
@@ -857,11 +879,17 @@ document.close();
     });
   } catch (e) {
     var msg = String(e && e.message ? e.message : e);
-    // home fetch / postForm 失败时 throw 的 message 形如 "... -> 403: ...",
-    // 从中解析出 HTTP status,把 403/429 标记为 CF 拦截,供 dart 侧统一处理。
-    var statusMatch = msg.match(/->\\s*(\\d{3})/);
-    var st = statusMatch ? parseInt(statusMatch[1], 10) : null;
-    return done({ ok: false, phase: 'exception', error: msg, status: st, cfBlocked: st === 403 || st === 429 });
+    // home fetch / postForm 失败时带回原始信号;其余异常(网络错误等)没有状态码。
+    var st = e && typeof e.httpStatus === 'number' ? e.httpStatus : null;
+    return done({
+      ok: false,
+      phase: 'exception',
+      error: msg,
+      status: st,
+      cfMitigated: e && e.cfMitigated ? String(e.cfMitigated) : '',
+      contentType: e && e.contentType ? String(e.contentType) : '',
+      bodyHead: e && e.bodyHead ? String(e.bodyHead) : ''
+    });
   }
 })();
 ''';

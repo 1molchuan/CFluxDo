@@ -9,6 +9,7 @@ import '../../cf_clearance_authority.dart';
 import '../../app_logger.dart';
 import '../../startup_progress.dart';
 import '../adapters/platform_adapter.dart';
+import '../cf/cf_challenge_classifier.dart';
 import '../cookie/boundary_sync_service.dart';
 import '../cookie/cookie_jar_service.dart';
 import '../system_proxy_service.dart';
@@ -194,7 +195,7 @@ class CfChallengeInterceptor extends Interceptor {
       );
       return _WebViewClearanceReplay(response: response);
     } catch (e) {
-      if (e is DioException && CfChallengeService.isCfChallengeError(e.response)) {
+      if (e is DioException && CfChallengeClassifier.isChallengeResponse(e.response)) {
         // 换上的值也被撞：登记为已死，继续走验证流程
         authority.noteIncumbentChallenged(candidate);
         CfChallengeLogger.log(
@@ -232,9 +233,9 @@ class CfChallengeInterceptor extends Interceptor {
 
     // CF 速率限制规则的 action 配为 managed_challenge / js_challenge / challenge 时,
     // 触发后返回 429 + cf-mitigated: challenge + 挑战页,而不是 403;
-    // Under Attack 等模式还会用 503。状态码判定统一收口在 isCfChallengeError。
+    // Under Attack 等模式还会用 503。状态码判定统一收口在 CfChallengeClassifier。
     if (!skipCfChallenge &&
-        CfChallengeService.isCfChallengeError(err.response)) {
+        CfChallengeClassifier.isChallengeResponse(err.response)) {
       // 备选提取 sitekey（从 403 响应体中）
       CfClearanceRefreshService().extractAndUpdateSitekey(
         err.response?.data?.toString() ?? '',
@@ -308,7 +309,7 @@ class CfChallengeInterceptor extends Interceptor {
           return handler.resolve(response);
         } catch (e) {
           if (e is DioException &&
-              CfChallengeService.isCfChallengeError(e.response)) {
+              CfChallengeClassifier.isChallengeResponse(e.response)) {
             // jar 里的当前值也被撞了：按它在位被撞处理，继续走验证流程
             CfChallengeLogger.log(
               '[INTERCEPTOR] Replay with current cf_clearance still '
@@ -488,7 +489,7 @@ class CfChallengeInterceptor extends Interceptor {
         } catch (e) {
           final retryStillBlockedByCf =
               e is DioException &&
-              CfChallengeService.isCfChallengeError(e.response);
+              CfChallengeClassifier.isChallengeResponse(e.response);
 
           if (retryStillBlockedByCf &&
               !isSilent &&

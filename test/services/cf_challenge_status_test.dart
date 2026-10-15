@@ -1,6 +1,7 @@
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:fluxdo/services/cf_challenge_service.dart';
+import 'package:fluxdo/services/network/cf/cf_challenge_classifier.dart';
+import 'package:fluxdo/services/network/exceptions/api_exception.dart';
 
 /// 挑战识别不能只认 403/429。
 ///
@@ -28,7 +29,7 @@ void main() {
   group('识别为挑战', () {
     test('503 + cf-mitigated: challenge', () {
       expect(
-        CfChallengeService.isCfChallengeError(
+        CfChallengeClassifier.isChallengeResponse(
           response(
             503,
             headers: {
@@ -42,7 +43,7 @@ void main() {
 
     test('503 挑战页 HTML(缺 cf-mitigated 头)', () {
       expect(
-        CfChallengeService.isCfChallengeError(
+        CfChallengeClassifier.isChallengeResponse(
           response(
             503,
             headers: {
@@ -57,7 +58,7 @@ void main() {
 
     test('cf-mitigated 是权威信号,任意状态码命中都算', () {
       expect(
-        CfChallengeService.isCfChallengeError(
+        CfChallengeClassifier.isChallengeResponse(
           response(
             400,
             headers: {
@@ -72,7 +73,7 @@ void main() {
     test('原有 403/429 识别不受影响', () {
       for (final status in [403, 429]) {
         expect(
-          CfChallengeService.isCfChallengeError(
+          CfChallengeClassifier.isChallengeResponse(
             response(
               status,
               headers: {
@@ -92,7 +93,7 @@ void main() {
     test('非挑战状态码的 HTML 即使引用挑战脚本也不算', () {
       // 例如 404 页面或帖子内容恰好包含 cf_chl_opt 字样
       expect(
-        CfChallengeService.isCfChallengeError(
+        CfChallengeClassifier.isChallengeResponse(
           response(
             404,
             headers: {
@@ -107,17 +108,17 @@ void main() {
 
     test('普通 503 / 502 / Discourse 自己的 403', () {
       expect(
-        CfChallengeService.isCfChallengeError(
+        CfChallengeClassifier.isChallengeResponse(
           response(503, data: 'service unavailable'),
         ),
         isFalse,
       );
       expect(
-        CfChallengeService.isCfChallengeError(response(502)),
+        CfChallengeClassifier.isChallengeResponse(response(502)),
         isFalse,
       );
       expect(
-        CfChallengeService.isCfChallengeError(
+        CfChallengeClassifier.isChallengeResponse(
           response(
             403,
             headers: {
@@ -131,7 +132,86 @@ void main() {
     });
 
     test('无响应', () {
-      expect(CfChallengeService.isCfChallengeError(null), isFalse);
+      expect(CfChallengeClassifier.isChallengeResponse(null), isFalse);
+    });
+  });
+
+  // 以前 WebView bootstrap 脚本与关注列表轮询各自写死 `403 || 429`,
+  // 把 Discourse 的 BAD CSRF 403、真限流 429 也当成撞盾。现在它们与拦截器
+  // 问的是同一个分类器。
+  group('原始信号与失败判定(bootstrap / 业务层共用口径)', () {
+    test('Discourse 自己的 403 / 真限流 429 不是挑战', () {
+      expect(
+        CfChallengeClassifier.isChallenge(
+          statusCode: 403,
+          contentType: 'application/json; charset=utf-8',
+          body: '["BAD CSRF"]',
+        ),
+        isFalse,
+      );
+      expect(
+        CfChallengeClassifier.isChallenge(
+          statusCode: 429,
+          contentType: 'application/json',
+          body: '{"error_type":"rate_limit"}',
+        ),
+        isFalse,
+      );
+    });
+
+    test('cf-mitigated 头或挑战页标记命中即是挑战', () {
+      expect(
+        CfChallengeClassifier.isChallenge(
+          statusCode: 403,
+          cfMitigated: 'challenge',
+        ),
+        isTrue,
+      );
+      expect(
+        CfChallengeClassifier.isChallenge(
+          statusCode: 429,
+          contentType: 'text/html; charset=UTF-8',
+          body: challengeHtml,
+        ),
+        isTrue,
+      );
+    });
+
+    test('CF 拦截器收口后的无 response 异常也算撞盾', () {
+      final options = RequestOptions(path: '/u/a.json');
+      expect(
+        CfChallengeClassifier.isChallengeFailure(
+          DioException(
+            requestOptions: options,
+            error: CfChallengeException(inCooldown: true),
+          ),
+        ),
+        isTrue,
+      );
+      expect(
+        CfChallengeClassifier.isChallengeFailure(
+          CfChallengeException(userCancelled: true),
+        ),
+        isTrue,
+      );
+      expect(
+        CfChallengeClassifier.isChallengeFailure(
+          DioException.badResponse(
+            statusCode: 403,
+            requestOptions: options,
+            response: response(
+              403,
+              headers: {
+                'content-type': ['application/json'],
+              },
+              data: {'error_type': 'invalid_access'},
+            ),
+          ),
+        ),
+        isFalse,
+        reason: '资料隐藏等业务 403 不该让轮询整体挂起',
+      );
+      expect(CfChallengeClassifier.isChallengeFailure(StateError('x')), isFalse);
     });
   });
 }

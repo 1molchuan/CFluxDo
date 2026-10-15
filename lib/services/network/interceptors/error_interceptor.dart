@@ -1,8 +1,8 @@
 import 'package:dio/dio.dart';
 
 import '../../../l10n/s.dart';
-import '../../cf_challenge_service.dart';
 import '../../toast_service.dart';
+import '../cf/cf_challenge_classifier.dart';
 import '../exceptions/api_exception.dart';
 import '../flux_request_spec.dart';
 import '../recovery/retry_after.dart';
@@ -26,7 +26,7 @@ class ErrorInterceptor extends Interceptor {
     // CF 速率限制规则配 managed_challenge 时返回 429 + 挑战页,不是真正的速率限制,
     // 不能落入下方 429 分支弹"请等待 N 秒"toast、抛 RateLimitException;
     // 503 挑战同理,不能落入 5xx 分支弹"服务器暂不可用"。
-    if (CfChallengeService.isCfChallengeError(err.response)) {
+    if (CfChallengeClassifier.isChallengeResponse(err.response)) {
       handler.next(err);
       return;
     }

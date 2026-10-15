@@ -155,7 +155,7 @@ class CsrfTokenService {
               0,
               responseText.length > 200 ? 200 : responseText.length,
             );
-      // 诊断 CF 挑战判定:这三个头决定 isCfChallengeResponse 是否命中,
+      // 诊断 CF 挑战判定:这三个头决定 CfChallengeClassifier 是否命中,
       // 某些传输通道下头部可能缺失/走样,失败日志里必须留痕。
       final headers = e.response?.headers;
       final serverHeader = headers?.value('server');

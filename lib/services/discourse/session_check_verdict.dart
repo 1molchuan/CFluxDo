@@ -1,6 +1,6 @@
 import 'package:dio/dio.dart';
 
-import '../cf_challenge_service.dart';
+import '../network/cf/cf_challenge_classifier.dart';
 
 /// 登录态检查（`/session/current.json`）失败响应的判定结果。
 enum SessionCheckVerdict {
@@ -30,7 +30,7 @@ enum SessionCheckVerdict {
 ///   这里保守放过不会造成"假在线"长期滞留。
 SessionCheckVerdict classifySessionCheckFailure(Response? response) {
   if (response == null) return SessionCheckVerdict.inconclusive;
-  if (CfChallengeService.isCfChallengeResponse(response)) {
+  if (CfChallengeClassifier.isChallengeResponse(response)) {
     return SessionCheckVerdict.cfChallenge;
   }
 
