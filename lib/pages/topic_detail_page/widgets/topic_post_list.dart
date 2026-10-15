@@ -21,17 +21,10 @@ import '../../../widgets/common/anchor_guard_sliver.dart';
 import '../../../widgets/post/post_item/widgets/post_voting_answer_header.dart';
 import 'package:m3e_ui/m3e_ui.dart';
 import 'package:fluxdo_render/fluxdo_render.dart'
-    show
-        HeadingAnchorRegistry,
-        HeadingAnchorScope,
-        HtmlChunk,
-        ParagraphWarmup,
-        ParagraphWarmupProbe,
-        countImageRuns;
+    show HeadingAnchorRegistry, HeadingAnchorScope, ParagraphWarmup;
 import '../../../widgets/post/post_item/post_item.dart';
-import '../../../widgets/post/post_item/render_parse_cache.dart';
+import '../../../widgets/post/post_item/post_render_prep.dart';
 import '../../../widgets/post/post_item/segmented_long_post.dart';
-import '../../../widgets/post/small_action_item.dart' show PostTypes;
 import '../../../widgets/post/quote_image_scope.dart';
 import 'topic_detail_header.dart';
 import 'shared_issue_button.dart';
@@ -218,7 +211,10 @@ class _TopicPostListState extends State<TopicPostList> {
   /// 锚定哨兵据此作废基线(sliver child 按 index 复用,结构变化 = 同一
   /// RenderBox 换内容,不能再按旧基线修正)。纯数据更新(点赞等)不改。
   int _segmentsStructureHash = 0;
-  final Map<int, _LongPostRenderCacheEntry> _longPostRenderCache = {};
+
+  /// 楼层渲染计划(形态判定 + 长帖分块数据),分段与预热共用这一份:
+  /// 预热热到的就是挂载要用的那份解析状态(见 PostRenderPlans)
+  final PostRenderPlans _renderPlans = PostRenderPlans();
 
   /// shortPost 段的 widget 实例缓存(key: post.id):构建输入未变化时
   /// 返回同一实例,框架在 Element.updateChild 处短路,整楼子树跳过
@@ -230,7 +226,7 @@ class _TopicPostListState extends State<TopicPostList> {
   final Map<int, _ShortPostCacheEntry> _shortPostCache = {};
 
   /// 长帖正文 chunk 的 widget 实例缓存(key: (post.id, chunkIndex)),
-  /// 语义同上;data 实例由 [_longPostDataFor] 的内容签名保证稳定。
+  /// 语义同上;data 实例由 [PostRenderPlans] 的内容签名复用保证稳定。
   final Map<(int, int), _ChunkWidgetCacheEntry> _chunkWidgetCache = {};
 
   /// 渐进物化上限(段数,null = 不限制)。before/after 两条 SliverList
@@ -635,12 +631,8 @@ class _TopicPostListState extends State<TopicPostList> {
   /// 锚点超过 [_warmReanchorPosts] 楼就按新锚点重建;已热过的楼层一圈
   /// 查表(<0.1ms)即过,重建不重复付费。
   ///
-  /// 缓存 key 同源:(baseStyle, theme, flattener, env, 宽度) 取
-  /// [ParagraphWarmupProbe] 众数快照(由真实挂载登记,见其文档);
-  /// totalImagesInPost 按挂载侧同一公式 countImageRuns(该 FluxdoRender
-  /// 自己的 nodes) 计算 —— 之前固定传 0,凡含图楼层(恰是录屏里掉帧的
-  /// 那几楼)key 不等,预热全部白做。长帖每 chunk 一个 FluxdoRender,
-  /// 按 chunk 分别计数。
+  /// 缓存 key 同源:每个原子单位做什么、key 输入取自哪里,全在
+  /// [PostRenderPrep.warmOneUnit](与挂载 widget 取同一个挂载单位)。
   int _warmUpGeneration = 0;
   Timer? _warmUpRetry;
   static const int _warmAheadPosts = 16;
@@ -661,8 +653,7 @@ class _TopicPostListState extends State<TopicPostList> {
   List<int>? _warmQueue;
   int? _warmQueueAnchor;
   int _warmQueuePos = 0;
-  int _warmChunkCursor = 0;
-  int _warmNodeCursor = 0;
+  final PostWarmCursor _warmCursor = PostWarmCursor();
   bool _warmProbeMissing = false;
   int _warmProbeRetries = 0;
 
@@ -698,8 +689,7 @@ class _TopicPostListState extends State<TopicPostList> {
     _warmQueue = null;
     _warmQueueAnchor = null;
     _warmQueuePos = 0;
-    _warmChunkCursor = 0;
-    _warmNodeCursor = 0;
+    _warmCursor.reset();
   }
 
   /// 数据落地后的预热入口(由 [_buildRenderSegments] 在 build 中调用,
@@ -791,18 +781,18 @@ class _TopicPostListState extends State<TopicPostList> {
     final posts = detail.postStream.posts;
     _warmSteps++;
     final stepWatch = Stopwatch()..start();
+    final budget = WarmBudget(budgetMicros, () => stepWatch.elapsedMicroseconds);
     while (_warmQueuePos < queue.length) {
-      if (stepWatch.elapsedMicroseconds > budgetMicros) return true;
+      if (budget.elapsedMicros > budgetMicros) return true;
       final index = _postNumberToIndex[queue[_warmQueuePos]];
       final post = index == null || index >= posts.length
           ? null
           : posts[index];
-      if (post != null && _warmPostOnce(post, stepWatch, budgetMicros)) {
+      if (post != null && _warmPostOnce(post, budget)) {
         return true;
       }
       _warmQueuePos++;
-      _warmChunkCursor = 0;
-      _warmNodeCursor = 0;
+      _warmCursor.reset();
     }
     return false;
   }
@@ -869,8 +859,7 @@ class _TopicPostListState extends State<TopicPostList> {
       _warmUpRetry = Timer(_warmProbeRetryDelay, () {
         if (!mounted || generation != _warmUpGeneration) return;
         _warmQueuePos = 0;
-        _warmChunkCursor = 0;
-        _warmNodeCursor = 0;
+        _warmCursor.reset();
         _warmProbeMissing = false;
         _warmUpStep(generation);
       });
@@ -896,81 +885,35 @@ class _TopicPostListState extends State<TopicPostList> {
     );
   }
 
-  /// 对一个楼层做一个原子单位的预热。返回 true = 做了活(本步到此为止,
-  /// 游标留在该楼层);false = 该楼层已无事可做(系统帖 / 全热完 /
-  /// 探针缺失只能跳过段落),游标移到下一楼层。
-  bool _warmPostOnce(Post post, Stopwatch stepWatch, int budgetMicros) {
-    // 系统操作帖走 SmallActionItem,不走正文渲染,不预热
-    if (post.postType == PostTypes.smallAction ||
-        (post.actionCode?.isNotEmpty ?? false)) {
-      return false;
-    }
-    final parseData = _longPostRenderCache[post.id]?.newEngineData?.parseData;
-    if (parseData != null) {
-      // 长帖:先逐块解析(每步一块,1~3ms),再按 chunk 预热段落
-      if (!parseData.fullyParsed) {
-        parseData.warmUpOneChunk();
-        _warmParsedChunks++;
-        return true;
-      }
-      final snapshot = ParagraphWarmupProbe.snapshot();
-      if (snapshot == null) {
-        _warmProbeMissing = true;
-        return false;
-      }
-      while (_warmChunkCursor < parseData.chunks.length) {
-        final remaining = budgetMicros - stepWatch.elapsedMicroseconds;
-        if (remaining <= 0) return true; // 预算用尽,下一步从同一位置续
-        final nodes = parseData.parsedChunkAt(_warmChunkCursor);
-        final next = ParagraphWarmup.warmParagraphs(
-          nodes: nodes,
-          ctx: snapshot,
-          context: context,
-          totalImagesInPost: countImageRuns(nodes),
-          startIndex: _warmNodeCursor,
-          budgetMicros: remaining,
-        );
-        if (next != -1) {
-          _warmNodeCursor = next;
-          return true;
-        }
-        _warmChunkCursor++;
-        _warmNodeCursor = 0;
-      }
-      return false;
-    }
-    // 短帖:未解析先解析(每步一帖,1~5ms),再预热段落
-    if (!RenderParseCache.hasShortPost(post)) {
-      RenderParseCache.shortPost(post);
-      _warmParsedPosts++;
-      return true;
-    }
-    final snapshot = ParagraphWarmupProbe.snapshot();
-    if (snapshot == null) {
-      _warmProbeMissing = true;
-      return false;
-    }
-    final remaining = budgetMicros - stepWatch.elapsedMicroseconds;
-    if (remaining <= 0) return true;
-    final nodes = RenderParseCache.shortPost(post).nodes;
-    // 预热产物按 (inlines 身份, style, theme, 图片数) 进全局缓存,handler
-    // 用共享 static(emoji/mention/localDate/math/download)+ 无 post
-    // 语境的兜底即可:内容同身份 → 命中的是 span/排版,recognizer 行为
-    // 经 mount 桥现取活 context,linkHandler 闭包冻结的 post.id 仅用于
-    // 点击追踪,预热段落全部来自「该 post 自己的 AST」,forPost 语义一致。
-    final next = ParagraphWarmup.warmParagraphs(
-      nodes: nodes,
-      ctx: snapshot,
-      context: context,
-      totalImagesInPost: countImageRuns(nodes),
-      startIndex: _warmNodeCursor,
-      budgetMicros: remaining,
+  /// 对一个楼层做一个原子单位的预热(做什么见 [PostRenderPrep.warmOneUnit],
+  /// 与分段同一份渲染计划)。返回 true = 本步到此为止,游标留在该楼层;
+  /// false = 该楼层已无事可做(系统帖 / 全热完 / 探针缺失只能跳过段落),
+  /// 游标移到下一楼层。
+  bool _warmPostOnce(Post post, WarmBudget budget) {
+    final plan = _renderPlans.planFor(
+      post,
+      topicId: detail.id,
+      onQuoteImage: onQuoteImage,
     );
-    if (next != -1) {
-      _warmNodeCursor = next;
-      return true;
+    final outcome = PostRenderPrep.warmOneUnit(
+      plan,
+      _warmCursor,
+      budget,
+      paragraphWarmer: () => PostRenderPrep.probeParagraphWarmer(context),
+    );
+    switch (outcome) {
+      case PostWarmOutcome.parsedPost:
+        _warmParsedPosts++;
+      case PostWarmOutcome.parsedChunk:
+        _warmParsedChunks++;
+      case PostWarmOutcome.probeMissing:
+        _warmProbeMissing = true;
+      case PostWarmOutcome.warmedParagraphs:
+      case PostWarmOutcome.outOfBudget:
+      case PostWarmOutcome.done:
+        break;
     }
-    return false;
+    return outcome.staysOnPost;
   }
 
   String _segmentKey(_PostRenderSegment segment) {
@@ -1051,26 +994,21 @@ class _TopicPostListState extends State<TopicPostList> {
 
       // 长帖分段:新引擎用 NewEngineLongPostData(切预处理后 cooked,每 chunk 一个
       // FluxdoRender,sliver 虚拟化 → 不卡 + 滚动锚定原生)。
-      final NewEngineLongPostData? newEngineData;
-      final List<HtmlChunk> longChunks;
-      final longPostCache = _longPostDataFor(post);
-      newEngineData = longPostCache.newEngineData;
-      longChunks = longPostCache.chunks;
-      // discourse-assign 等插件的指定/取消指定系统帖,cooked 里塞几十个
-      // emoji <img> 就很容易超过长帖分段阈值——这条 chunk 化直出路径是
-      // topic_post_list.dart 自己直接调 LongPostHeaderSegment/Footer,完全
-      // 绕过 PostItem.build() 里"是不是系统操作帖"的判断,系统帖一旦被
-      // 判成"长帖"就会被当成能点赞/回复的普通帖子整个渲染出来。系统帖
-      // 永远走 shortPost(内部再分流到 SmallActionItem),不参与长帖分段。
-      final bool isSystemActionPost =
-          post.postType == PostTypes.smallAction ||
-          (post.actionCode?.isNotEmpty ?? false);
-      final useLongSegments = !isSystemActionPost && longChunks.isNotEmpty;
+      // 系统帖 / 短帖 / 长帖的判定只在 PostRenderPrep 一处(系统帖判定在前:
+      // discourse-assign 的指定帖 cooked 塞几十个 emoji <img> 就会超过分块
+      // 阈值,这条 chunk 化直出路径绕过 PostItem,判成长帖就会被当成能
+      // 点赞/回复的普通帖渲染出来)。系统帖永远走 shortPost(内部再分流到
+      // SmallActionItem),不参与长帖分段。
+      final plan = _renderPlans.planFor(
+        post,
+        topicId: detail.id,
+        onQuoteImage: onQuoteImage,
+      );
 
       postIndexToScrollIndex[postIndex] = segments.length;
       postNumberToIndex[post.postNumber] = postIndex;
 
-      if (!useLongSegments) {
+      if (!plan.isLong) {
         scrollIndexToPostNumber[segments.length] = post.postNumber;
         segments.add(
           _PostRenderSegment.shortPost(
@@ -1089,7 +1027,7 @@ class _TopicPostListState extends State<TopicPostList> {
           ),
         );
 
-        for (var ci = 0; ci < longChunks.length; ci++) {
+        for (var ci = 0; ci < plan.unitCount; ci++) {
           scrollIndexToPostNumber[segments.length] = post.postNumber;
           segments.add(
             _PostRenderSegment.chunk(
@@ -1097,8 +1035,7 @@ class _TopicPostListState extends State<TopicPostList> {
               postIndex: postIndex,
               post: post,
               chunkIndex: ci,
-              chunkData: longChunks[ci],
-              newEngineData: newEngineData,
+              plan: plan,
             ),
           );
         }
@@ -1135,9 +1072,7 @@ class _TopicPostListState extends State<TopicPostList> {
       );
     }
 
-    _longPostRenderCache.removeWhere(
-      (postId, _) => !activePostIds.contains(postId),
-    );
+    _renderPlans.retainOnly(activePostIds);
     // widget 实例缓存同步淘汰:离开 posts 的帖子(整流刷新/过滤模式)
     // 不再持有 widget 配置树;翻页只增不减,不受影响
     _shortPostCache.removeWhere((postId, _) => !activePostIds.contains(postId));
@@ -1231,74 +1166,6 @@ class _TopicPostListState extends State<TopicPostList> {
         }
       }
     }
-  }
-
-  _LongPostRenderCacheEntry _longPostDataFor(Post post) {
-    final signature = _longPostRenderSignature(post);
-    final cached = _longPostRenderCache[post.id];
-    if (cached != null && identical(cached.post, post)) {
-      return cached;
-    }
-    // post 实例变了但渲染相关内容(cooked/mentions/links,即 signature
-    // 覆盖的字段)没变 —— 典型场景:message bus 单帖更新(点赞数等)
-    // copyWith 出新实例。复用解析产物,只刷新 post 引用;否则每次
-    // 点赞推送都会重新预处理 + 切 chunk + 丢掉全部已解析 chunk,
-    // 已挂载的 chunk 被迫同步重新解析,一次几十 ms。
-    if (cached != null && cached.signature == signature) {
-      final refreshed = _LongPostRenderCacheEntry(
-        post: post,
-        signature: signature,
-        newEngineData: cached.newEngineData,
-      );
-      _longPostRenderCache[post.id] = refreshed;
-      return refreshed;
-    }
-
-    final entry = _LongPostRenderCacheEntry(
-      post: post,
-      signature: signature,
-      newEngineData: NewEngineLongPostData.tryBuild(
-        post,
-        topicId: detail.id,
-        onQuoteImage: onQuoteImage,
-      ),
-    );
-    _longPostRenderCache[post.id] = entry;
-    return entry;
-  }
-
-  int _longPostRenderSignature(Post post) {
-    final mentionedUsers = post.mentionedUsers;
-    final linkCounts = post.linkCounts;
-    return Object.hash(
-      post.cooked.length,
-      post.cooked.hashCode,
-      mentionedUsers == null
-          ? 0
-          : Object.hashAll(
-              mentionedUsers.map(
-                (u) => Object.hash(
-                  u.id,
-                  u.username,
-                  u.statusEmoji,
-                  u.statusDescription,
-                ),
-              ),
-            ),
-      linkCounts == null
-          ? 0
-          : Object.hashAll(
-              linkCounts.map(
-                (l) => Object.hash(
-                  l.url,
-                  l.clicks,
-                  l.title,
-                  l.internal,
-                  l.reflection,
-                ),
-              ),
-            ),
-    );
   }
 
   @override
@@ -1740,10 +1607,11 @@ class _TopicPostListState extends State<TopicPostList> {
         );
         break;
       case _PostRenderSegmentType.longChunk:
-        final data = segment.newEngineData!;
+        final plan = segment.plan!;
+        final data = plan.longData!;
         final ci = segment.chunkIndex!;
         // 正文 chunk 的实例缓存:data(解析产物 + callbacks)实例稳定
-        // (见 _longPostDataFor 的签名复用)且选中/高亮态不变时,复用
+        // (见 PostRenderPlans 的签名复用)且选中/高亮态不变时,复用
         // widget 实例让框架整棵短路。单帖更新(点赞等)触发的整页
         // rebuild 里,正文富文本的重建是最大头,这里短路后更新只剩
         // header/footer 的轻量重建。
@@ -1766,13 +1634,10 @@ class _TopicPostListState extends State<TopicPostList> {
           topicId: detail.id,
           selected: isSelectedPost,
           highlight: highlight,
-          chunk: segment.chunkData!,
-          chunkIndex: ci,
-          // 懒解析:首次进入 cacheExtent 时才 parse 该 chunk(带前缀补齐),
-          // 避免进话题/分页落地帧一次性解析长帖所有 chunk
-          imageIndexOffset: data.imageOffsetAt(ci),
-          parsedNodes: data.parsedChunkAt(ci),
-          footnotesHtml: data.footnotesHtml,
+          // 挂载单位与预热同源(PostRenderPlan.unitAt)。懒解析:首次进入
+          // cacheExtent 时才 parse 该 chunk(带前缀补齐),避免进话题/分页
+          // 落地帧一次性解析长帖所有 chunk
+          unit: plan.unitAt(ci),
           callbacks: data.callbacks,
           onQuoteSelection: onQuoteSelection,
           highlightBoostUsername: ci == 0 ? boostUsername : null,
@@ -1934,27 +1799,15 @@ class _ChunkWidgetCacheEntry {
   });
 }
 
-class _LongPostRenderCacheEntry {
-  final Post post;
-  final int signature;
-  final NewEngineLongPostData? newEngineData;
-  const _LongPostRenderCacheEntry({
-    required this.post,
-    required this.signature,
-    this.newEngineData,
-  });
-
-  List<HtmlChunk> get chunks => newEngineData?.chunks ?? const <HtmlChunk>[];
-}
-
 class _PostRenderSegment {
   final _PostRenderSegmentType type;
   final int scrollIndex;
   final int postIndex;
   final Post post;
   final int? chunkIndex;
-  final HtmlChunk? chunkData;
-  final NewEngineLongPostData? newEngineData;
+
+  /// 长帖 chunk 段所属楼层的渲染计划(挂载单位从这里取)
+  final PostRenderPlan? plan;
   final int gapCount; // gap 段中隐藏帖子的数量
 
   const _PostRenderSegment._({
@@ -1963,8 +1816,7 @@ class _PostRenderSegment {
     required this.postIndex,
     required this.post,
     this.chunkIndex,
-    this.chunkData,
-    this.newEngineData,
+    this.plan,
     this.gapCount = 0,
   });
   factory _PostRenderSegment.shortPost({
@@ -1998,8 +1850,7 @@ class _PostRenderSegment {
     required int postIndex,
     required Post post,
     required int chunkIndex,
-    required HtmlChunk chunkData,
-    NewEngineLongPostData? newEngineData,
+    required PostRenderPlan plan,
   }) {
     return _PostRenderSegment._(
       type: _PostRenderSegmentType.longChunk,
@@ -2007,8 +1858,7 @@ class _PostRenderSegment {
       postIndex: postIndex,
       post: post,
       chunkIndex: chunkIndex,
-      chunkData: chunkData,
-      newEngineData: newEngineData,
+      plan: plan,
     );
   }
 

@@ -12,7 +12,7 @@ import '../../utils/fluxdo_render_callbacks.dart';
 import '../../widgets/topic/assign_sheet.dart';
 import '../common/relative_time_text.dart';
 import '../common/smart_avatar.dart';
-import 'post_item/render_parse_cache.dart';
+import 'post_item/post_render_prep.dart';
 import 'post_item/widgets/post_segment_frame.dart';
 
 /// 还有"活的"指定可编辑(受理人/备注/状态)的 code——unassign 类的 code
@@ -298,7 +298,7 @@ class SmallActionItem extends ConsumerWidget {
   /// 同一套 cook 管线——可能带模糊剧透([spoiler])、图片、@提及等任意
   /// 富文本样式。之前直接拿正则把 HTML 标签砸掉当纯文本显示,剧透内容
   /// 会被直接拆穿曝光,链接/图片也全丢了。这里换成跟正文完全同一份渲染
-  /// 引擎(FluxdoRenderCallbacks + RenderParseCache),该模糊模糊、该能点
+  /// 引擎(FluxdoRenderCallbacks + PostRenderPrep.shortUnit),该模糊模糊、该能点
   /// 开点开,不再自己另糊一套阉割版展示。
   ///
   /// 不再按 action_code 白名单判断"这条该不该有内容"——插件默认
@@ -307,16 +307,16 @@ class SmallActionItem extends ConsumerWidget {
   /// 大段 emoji + 文字);cooked 有内容就该显示,不该靠猜代码含义过滤掉。
   Widget? _buildNote(BuildContext context) {
     if (post.cooked.trim().isEmpty) return null;
-    final parsed = RenderParseCache.shortPost(post);
+    final unit = PostRenderPrep.shortUnit(post);
     final callbacks = FluxdoRenderCallbacks.forPost(
       post: post,
       topicId: topicId,
-      preprocessedCooked: parsed.preprocessed,
-      parsedNodes: parsed.nodes,
+      preprocessedCooked: unit.cookedHtml,
+      parsedNodes: unit.nodes,
     );
     return callbacks.render(
-      cookedHtml: parsed.preprocessed,
-      parsedNodes: parsed.nodes,
+      cookedHtml: unit.cookedHtml,
+      parsedNodes: unit.nodes,
       baseTextStyle: Theme.of(context).textTheme.bodySmall?.copyWith(
         color: Theme.of(context).colorScheme.onSurface,
       ),

@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:app_icons/app_icons.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:fluxdo_render/fluxdo_render.dart';
 import '../../../models/topic.dart';
 import '../../../l10n/s.dart';
 import '../../../providers/preferences_provider.dart';
@@ -20,7 +19,7 @@ import '../../crypto/crypto_decrypt_sheet.dart';
 import '../../topic/assign_sheet.dart';
 import 'quote_selection_helper.dart';
 import '../../../../services/crypto/crypto_cipher_format.dart';
-import 'render_parse_cache.dart';
+import 'post_render_prep.dart';
 import 'widgets/post_footer_section/post_footer_section.dart';
 import 'widgets/post_header_section.dart';
 import 'widgets/post_notice_widget.dart';
@@ -146,19 +145,19 @@ class _PostItemState extends ConsumerState<PostItem> {
 
     // 解析产物走全局 LRU(RenderParseCache):item 滚出 cacheExtent 被回收后
     // 再滚回来,preprocess + DOM parse 直接命中,不重付(State 级缓存随
-    // dispose 丢失,来回滚动即反复解析 —— 之前滚动卡顿的主要来源之一)
-    final parsed = RenderParseCache.shortPost(post);
+    // dispose 丢失,来回滚动即反复解析 —— 之前滚动卡顿的主要来源之一)。
+    // 挂载单位经 PostRenderPrep 取:与预热同源,段落缓存 key 一致
+    final unit = PostRenderPrep.shortUnit(post);
     final callbacks = FluxdoRenderCallbacks.forPost(
       post: post,
       topicId: widget.topicId,
       onQuoteImage: widget.onQuoteImage,
-      preprocessedCooked: parsed.preprocessed,
-      parsedNodes: parsed.nodes,
+      preprocessedCooked: unit.cookedHtml,
+      parsedNodes: unit.nodes,
     );
     return _newEngineRenderData = _ShortPostNewEngineRenderData(
       post: post,
-      preprocessedCooked: parsed.preprocessed,
-      parsedNodes: parsed.nodes,
+      unit: unit,
       callbacks: callbacks,
     );
   }
@@ -202,8 +201,8 @@ class _PostItemState extends ConsumerState<PostItem> {
     // 这些互动,点了就出错。action_code 才是 Discourse 真正用来标记"这是
     // 系统生成的操作记录帖"的字段,不管 post_type 是 3 还是 4 都会带上,
     // 普通用户帖永远不会有这个字段——用它兜底判断更准。
-    if (post.postType == PostTypes.smallAction ||
-        (post.actionCode?.isNotEmpty ?? false)) {
+    // 判定见 PostRenderPrep.isSystemPost(与列表分段、预热同一处)
+    if (PostRenderPrep.isSystemPost(post)) {
       return SmallActionItem(
         post: post,
         topicId: widget.topicId,
@@ -321,8 +320,8 @@ class _PostItemState extends ConsumerState<PostItem> {
                           // toolbar)。引用:toolbar 点「引用」→ onQuoteRequest
                           // (plainText) → QuoteSelectionHelper 在原始 cooked 匹配。
                           return data.callbacks.render(
-                            cookedHtml: data.preprocessedCooked,
-                            parsedNodes: data.parsedNodes,
+                            cookedHtml: data.unit.cookedHtml,
+                            parsedNodes: data.unit.nodes,
                             // 正文字号经 baseTextStyle 注入 contentFontScale
                             // (此前新引擎分支未接入,顺带修复)。
                             baseTextStyle: theme.textTheme.bodyMedium?.copyWith(
@@ -490,14 +489,12 @@ class _PostItemState extends ConsumerState<PostItem> {
 
 class _ShortPostNewEngineRenderData {
   final Post post;
-  final String preprocessedCooked;
-  final List<BlockNode> parsedNodes;
+  final PostRenderUnit unit;
   final FluxdoRenderCallbacks callbacks;
 
   const _ShortPostNewEngineRenderData({
     required this.post,
-    required this.preprocessedCooked,
-    required this.parsedNodes,
+    required this.unit,
     required this.callbacks,
   });
 }
