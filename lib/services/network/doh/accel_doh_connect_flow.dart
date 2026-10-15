@@ -152,6 +152,9 @@ class AccelDohConnectFlow {
           FluxRequestKeys.skipAuthCheck: true,
           FluxRequestKeys.allowRedirectSetCookie: allowRedirectSetCookie,
           FluxRequestKeys.isSilent: silent,
+          // 用户手动授权时按「操作」对待：撞 CF 盾弹验证页让用户过盾，
+          // 而不是像数据请求那样静默失败让用户再点一次
+          if (!silent) FluxRequestKeys.showErrorToast: true,
           FluxRequestKeys.requestTag: 'accel_doh_connect',
         },
       ),

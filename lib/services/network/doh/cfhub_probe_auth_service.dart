@@ -87,6 +87,10 @@ class CfhubProbeAuthService extends ChangeNotifier {
   int? _userId;
   Future<CfhubEnableResult>? _inflight;
 
+  /// 上一次关闭时发出的作废请求：cfhub 按账号作废，重新开启前要等它落地，
+  /// 否则它可能晚于新令牌到达、把新令牌一起作废
+  Future<void>? _pendingRevoke;
+
   CfhubApi get _effectiveApi => _api ??= CfhubApi();
 
   AccelDohConnectFlow get _effectiveFlow => _flow ??= AccelDohConnectFlow();
@@ -148,8 +152,9 @@ class CfhubProbeAuthService extends ChangeNotifier {
     if (existing != null) {
       // 别的账号留下的令牌，先作废
       await _clearStored();
-      unawaited(_effectiveApi.revoke(existing));
+      _pendingRevoke = _effectiveApi.revoke(existing);
     }
+    await _awaitPendingRevoke();
 
     final start = await _effectiveApi.startConnect();
     if (start.unavailable) return _fail(CfhubEnableResult.hubUnavailable);
@@ -206,11 +211,23 @@ class CfhubProbeAuthService extends ChangeNotifier {
   Future<void> disable({bool revoke = true}) async {
     final token = _token;
     if (revoke && token != null) {
-      unawaited(_effectiveApi.revoke(token));
+      _pendingRevoke = _effectiveApi.revoke(token);
     }
     await _clearStored();
     await _setShare(false);
     notifyListeners();
+  }
+
+  /// 等上一次的作废请求结束（最多几秒，失败也不管），避免它压掉随后发的新令牌
+  Future<void> _awaitPendingRevoke() async {
+    final pending = _pendingRevoke;
+    if (pending == null) return;
+    try {
+      await pending.timeout(const Duration(seconds: 5));
+    } catch (_) {
+      // revoke 本来就是尽力而为
+    }
+    if (identical(_pendingRevoke, pending)) _pendingRevoke = null;
   }
 
   /// Rust 侧上报被 cfhub 拒绝（401/403）：令牌已失效，清掉并关上报，通知 UI 提示一次

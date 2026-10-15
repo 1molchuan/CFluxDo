@@ -205,7 +205,8 @@ Future<void> main() async {
   // Release 模式下禁用 debugPrint 输出：全项目有数百处 debugPrint 调试输出，
   // 它们在 release 下默认仍会写 logcat/console，徒增 I/O 开销。
   // 需要持久化的日志统一走 AppLogger（落盘到统一 JSONL）。
-  if (kReleaseMode) {
+  // 诊断包用 --dart-define=CFLUXDO_VERBOSE=true 构建可保留 debugPrint
+  if (kReleaseMode && !const bool.fromEnvironment('CFLUXDO_VERBOSE')) {
     debugPrint = (String? message, {int? wrapWidth}) {};
   }
 
