@@ -425,12 +425,12 @@ flowchart TD
 
 **关键决策 `[选]`**：Android 上 jar 永远是兜底 winner，等同于"Android 路径上 jar 是最终权威源"。
 
-> 2026-10-15 注：`_t` 已不按这条规则。`lib/services/network/cookie/session_token_lineage.dart`
-> （`SessionTokenLineage` 类注释）明确废弃了「jar 永远赢」：两端 `_t` 分叉时按最后一次一致的值
-> （血缘）判断哪边往前走了，再由服务端探测决定采纳 WebView 的值还是把 jar 的值推回。
-> 但 `SessionCookieSentinel._pickWinner`（auth cookie 只要 jar 有值就取 jar）和 Nuclear Reset
-> （§5.1.2，从 jar 重灌 WebView）仍按「jar 赢」实现。两套规则不一致，是已知问题，
-> 留待计划中的 session token 重构统一。
+> 2026-10-15 注：`_t` 已不按这条规则。`_t` 的唯一真相来源是
+> `lib/services/session/session_token_authority.dart`（`SessionTokenAuthority`）：两端 `_t`
+> 分叉时由服务端探测决定采纳 WebView 的值还是把 jar 的值推回，探测无结论两端都不动；
+> jar / WebView 只在无需探测时按血缘决胜。Sentinel 收敛多枚 `_t`、Nuclear Reset 能否清空
+> 重灌 `_t`、会话自愈都改问它（WebView 那枚「不可能比 jar 新」才让 jar 赢），不再「jar 永远赢」。
+> 本节规则仍适用于 `_forum_session` 等其他 cookie。
 
 #### 5.1.2 Nuclear Reset 流程
 
