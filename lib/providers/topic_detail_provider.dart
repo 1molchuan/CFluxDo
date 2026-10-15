@@ -12,6 +12,11 @@ import '../widgets/common/anchor_guard_sliver.dart';
 import 'bookmark_sync_controller.dart';
 import 'core_providers.dart';
 import 'message_bus/models.dart';
+import 'topic_detail/post_stream_window.dart';
+import 'topic_detail/topic_view_mode.dart';
+
+export 'topic_detail/post_stream_window.dart';
+export 'topic_detail/topic_view_mode.dart';
 
 part 'topic_detail/_loading_methods.dart';
 part 'topic_detail/_filter_methods.dart';
@@ -59,9 +64,6 @@ class TopicDetailNotifier extends AsyncNotifier<TopicDetail> {
   static TopicDetailParams? activeParamsFor(int topicId) =>
       _activeParams[topicId]?.lastOrNull;
 
-  bool _hasMoreAfter = true;
-  bool _hasMoreBefore = true;
-
   /// 分页状态改由 ValueNotifier 驱动:加载指示器/重试按钮由列表内
   /// ValueListenableBuilder 就地切换,分页起止不再发射
   /// AsyncLoading.copyWithPrevious(那会触发整页 rebuild,滚动中掉帧)。
@@ -86,69 +88,123 @@ class TopicDetailNotifier extends AsyncNotifier<TopicDetail> {
   List<Topic> _cachedSuggestedTopics = const [];
   List<Topic> _cachedRelatedTopics = const [];
 
-  String? _filter;  // 当前过滤模式（如 'summary' 表示热门回复）
-  String? _usernameFilter;  // 当前用户名过滤（如只看题主）
-  bool _filterTopLevelReplies = false;  // 只看顶层回复
+  /// 当前视图模式(热门回复/只看某人/顶层回复/按活动排序/全部)。所有
+  /// 整体重载点都按它取请求参数,见 [TopicViewMode]。
+  TopicViewMode _viewMode = TopicViewMode.all;
+
+  /// 整体重载纪元:首屏、刷新、跳楼层、切换视图在发起与落地时各开一个新
+  /// 纪元。翻页/补 gap/新回复请求发出时记下纪元,返回时纪元已变就丢弃
+  /// 结果 —— 旧窗口的一页不能拼进新窗口,也不能盖掉新窗口。
+  int _epoch = 0;
+
   /// 待加载的新帖子 ID 队列（对齐 Discourse _newPostsInStream）
   final List<int> _pendingNewPostIds = [];
+  /// 正在拉取内容的新帖子 ID(已出队、未落地)
+  final Set<int> _loadingNewPostIds = {};
   bool _isLoadingNewPosts = false;
   /// 新回复拉取的连续失败次数:指数退避,超过上限停止自动重试(队列保留,
   /// 下一条 created 消息或刷新再拉)。无上限时断网会每 3 秒打一次请求直到
   /// 离开页面,期间还挡住用户自己的翻页。
   int _newPostLoadFailures = 0;
   static const int _maxNewPostLoadRetries = 5;
-  /// 过滤模式分页用的 stream 位置表,随 stream 列表实例缓存
-  List<int>? _streamPositionSource;
-  Map<int, int>? _streamPositions;
+  /// 过滤视图按 stream id 翻页时每页条数
+  static const int _streamPageSize = 20;
 
-  bool get hasMoreAfter => _hasMoreAfter;
-  bool get hasMoreBefore => _hasMoreBefore;
+  /// 当前帖子流窗口(state 无数据时为 null)
+  PostStreamWindow? get _window {
+    final detail = state.value;
+    return detail == null ? null : PostStreamWindow.of(detail.postStream);
+  }
+
+  /// 边界由 state 里的窗口推出;无数据(整体重载中)时视为两侧都还有
+  bool get hasMoreAfter => _window?.hasMoreAfter ?? true;
+  bool get hasMoreBefore => _window?.hasMoreBefore ?? true;
   bool get isLoadingPrevious => _isLoadingPrevious;
   bool get isLoadingMore => _isLoadingMore;
   bool get isLoadMoreFailed => _isLoadMoreFailed;
   bool get isLoadPreviousFailed => _isLoadPreviousFailed;
-  bool get isSummaryMode => _filter == 'summary';
-  bool get isActivityMode => _filter == 'activity';
-  bool get isAuthorOnlyMode => _usernameFilter != null;
-  /// 当前按用户过滤的用户名(null = 未启用)。isAuthorOnlyMode 历史上
-  /// 只用于楼主,现已泛化为任意参与者,靠这个字段区分过滤对象。
-  String? get usernameFilter => _usernameFilter;
-  bool get isTopLevelMode => _filterTopLevelReplies;
-  bool get _isFilteredMode => _filter != null || _usernameFilter != null || _filterTopLevelReplies;
+  TopicViewMode get viewMode => _viewMode;
 
-  /// 根据 posts 和 stream 统一计算边界状态
+  /// 把一次窗口变化应用到**最新** state 并发射;窗口没变时不发射。
   ///
-  /// 所有需要更新 hasMoreBefore/hasMoreAfter 的地方都应该调用此方法，
-  /// 确保判断逻辑的一致性。
-  void _updateBoundaryState(List<Post> posts, List<int> stream) {
-    if (posts.isEmpty || stream.isEmpty) {
-      _hasMoreBefore = false;
-      _hasMoreAfter = false;
-      return;
-    }
-
-    final firstPostId = posts.first.id;
-    final firstIndex = stream.indexOf(firstPostId);
-    _hasMoreBefore = firstIndex > 0;
-
-    final lastPostId = posts.last.id;
-    final lastIndex = stream.indexOf(lastPostId);
-    _hasMoreAfter = lastIndex != -1 && lastIndex < stream.length - 1;
+  /// 网络请求一律在返回后经这里落地:[epoch] 传发起请求时的纪元,期间
+  /// 发生过整体重载就丢弃。[detail] 顺带改话题级字段(推荐话题、
+  /// postsCount 等),同样基于最新 detail。返回是否发射了新 state。
+  bool _applyWindow(
+    PostStreamWindow Function(PostStreamWindow window) change, {
+    int? epoch,
+    TopicDetail Function(TopicDetail detail)? detail,
+  }) {
+    if (!ref.mounted) return false;
+    if (epoch != null && epoch != _epoch) return false;
+    final current = state.value;
+    if (current == null) return false;
+    final window = PostStreamWindow.of(current.postStream);
+    final next = change(window);
+    if (identical(next, window)) return false;
+    var updated = current.copyWith(postStream: next);
+    if (detail != null) updated = detail(updated);
+    state = AsyncValue.data(updated);
+    return true;
   }
 
-  /// stream id → 下标。过滤模式每翻一页都要按 stream 顺序排新页,表随
-  /// stream 实例缓存,不再每页重建(stream 可达数千条)。
-  Map<int, int> _streamPositionsOf(List<int> stream) {
-    final cached = _streamPositions;
-    if (cached != null && identical(stream, _streamPositionSource)) {
-      return cached;
-    }
-    final positions = <int, int>{
-      for (var i = 0; i < stream.length; i++) stream[i]: i,
-    };
-    _streamPositionSource = stream;
-    _streamPositions = positions;
-    return positions;
+  /// 开始一次整体重载:纪元 +1,在途的翻页/补 gap/新回复结果随之作废,
+  /// 分页状态与待拉新回复一并清零(新数据本身就包含它们)。
+  int _beginEpoch() {
+    _epoch++;
+    _isLoadingMore = false;
+    _isLoadingPrevious = false;
+    _isLoadMoreFailed = false;
+    _isLoadPreviousFailed = false;
+    _isLoadingNewPosts = false;
+    _pendingNewPostIds.clear();
+    _loadingNewPostIds.clear();
+    _newPostLoadFailures = 0;
+    return _epoch;
+  }
+
+  /// 当前已加载的 1 楼(只看顶层回复补 1 楼时复用,省一次请求)
+  Post? get _loadedFirstPost =>
+      state.value?.postStream.posts.where((p) => p.postNumber == 1).firstOrNull;
+
+  /// 按视图模式整页拉取话题详情并建窗口。
+  ///
+  /// 所有整体重载点(首屏、跳楼层、刷新、切换视图)都经这里,请求参数
+  /// 一律取自 [mode]:此前三个过滤参数在各处手传,刷新漏过顶层过滤、
+  /// 取消过滤跳楼层也漏传。只看顶层回复的视图不含 1 楼,在这里统一补回
+  /// (此前只有切入该视图时补,下拉刷新后 1 楼就没了)。
+  Future<TopicDetail> _fetchDetail(
+    TopicViewMode mode, {
+    int? postNumber,
+    bool trackVisit = false,
+    Post? firstPost,
+  }) async {
+    final service = ref.read(discourseServiceProvider);
+    // 手上没有 1 楼就与详情并发单独拉;拉不到不影响主流程
+    final firstPostFuture = mode.restoresFirstPost && firstPost == null
+        ? service
+              .getPostByNumber(arg.topicId, 1)
+              .then<Post?>((post) => post, onError: (_) => null)
+        : null;
+    final detail = await service.getTopicDetail(
+      arg.topicId,
+      postNumber: postNumber,
+      trackVisit: trackVisit,
+      filter: mode.filter,
+      usernameFilters: mode.usernameFilters,
+      filterTopLevelReplies: mode.filterTopLevelReplies,
+    );
+    final pinnedFirstPost = mode.restoresFirstPost
+        ? firstPost ?? await firstPostFuture
+        : null;
+    return _withSuggestedCache(
+      detail.copyWith(
+        postStream: PostStreamWindow.fromPostStream(
+          detail.postStream,
+          pinnedFirstPost: pinnedFirstPost,
+        ),
+      ),
+    );
   }
 
   /// 用缓存补齐详情里的推荐话题(新响应带了就刷新缓存,没带就回填)
@@ -172,31 +228,19 @@ class TopicDetailNotifier extends AsyncNotifier<TopicDetail> {
 
   /// 更新单个帖子的辅助方法
   void _updatePostById(int postId, Post Function(Post) updater) {
-    final currentDetail = state.value;
-    if (currentDetail == null) return;
-
-    final currentPosts = currentDetail.postStream.posts;
-    final index = currentPosts.indexWhere((p) => p.id == postId);
-    if (index == -1) return;
-
-    final oldPost = currentPosts[index];
-    final newPost = updater(oldPost);
-
-    // 数据没变则跳过，避免触发不必要的 rebuild
-    if (oldPost == newPost) return;
+    final applied = _applyWindow(
+      (window) => window.updatePost(postId, (oldPost) {
+        final newPost = updater(oldPost);
+        // 数据没变则跳过，避免触发不必要的 rebuild
+        return oldPost == newPost ? oldPost : newPost;
+      }),
+    );
 
     // 单帖状态落地(msgbus liked/boost 本地更新等):武装锚定哨兵,
     // 视口上方帖子的高度位移在下一帧被同帧补偿。用户主动操作(自己
     // 点赞/书签)也会经过这里 —— 无害:被操作的帖子必然可见,高度
     // 变化发生在锚(视口上沿 segment)的盒内或下方,锚不动、不修正。
-    AnchorGuardSliver.arm();
-
-    final newPosts = [...currentPosts];
-    newPosts[index] = newPost;
-
-    state = AsyncValue.data(currentDetail.copyWith(
-      postStream: PostStream(posts: newPosts, stream: currentDetail.postStream.stream, gaps: currentDetail.postStream.gaps),
-    ));
+    if (applied) AnchorGuardSliver.arm();
   }
 
   /// 将成员移出当前私信，并同步首楼与底部的成员面板。
@@ -392,20 +436,29 @@ class TopicDetailNotifier extends AsyncNotifier<TopicDetail> {
       disposeTimer?.cancel();
     });
 
-    _hasMoreAfter = true;
-    _hasMoreBefore = true;
-    _isLoadMoreFailed = false;
-    _isLoadPreviousFailed = false;
-    final service = ref.read(discourseServiceProvider);
-    final detail = await service.getTopicDetail(arg.topicId, postNumber: arg.postNumber, trackVisit: true);
-
-    _updateBoundaryState(detail.postStream.posts, detail.postStream.stream);
-
+    // build 重跑(invalidate / 出错重试)沿用当前视图模式:此前固定拉未过滤
+    // 数据,过滤标记却还亮着,翻页又按过滤视图的 stream id 走
+    final mode = _viewMode;
+    final epoch = _beginEpoch();
+    final detail = await _fetchDetail(
+      mode,
+      postNumber: mode.refreshesNearAnchor ? arg.postNumber : null,
+      trackVisit: true,
+      firstPost: _loadedFirstPost,
+    );
     // 记录话题级插件扩展字段，供分散在深层组件里的回复入口按 topicId 取用
     // （如 linux.do 回复扣积分的 reply_cost）
     TopicPluginData.put(arg.topicId, detail.pluginExtras);
 
-    return _withSuggestedCache(detail);
+    if (epoch != _epoch) {
+      // 首屏在途时已开始新的整体重载(跳楼层/切换视图):build 的返回值
+      // 仍会写进 state,新数据已落地就交回它,别让旧响应盖掉
+      return state.value ?? detail;
+    }
+    // 落地时再开一个纪元(同 _reload):重建期间旧列表可见,基于旧窗口
+    // 发出的翻页不能拼进新窗口
+    _beginEpoch();
+    return detail;
   }
 }
 

@@ -20,75 +20,54 @@ extension _FilterActions on _TopicDetailPageState {
     return false;
   }
 
+  /// 跳到不在当前窗口的楼层:按视图模式的跳转策略重载
+  /// (保持视图 / 先按视图重载再核对 / 直接退回全部回复)
+  Future<void> _reloadForJump({required int postNumber, int? postId}) async {
+    final notifier = ref.read(topicDetailProvider(_params).notifier);
+    if (notifier.viewMode.jumpPolicy == TopicJumpPolicy.reloadInPlace) {
+      await notifier.reloadWithPostNumber(postNumber);
+      return;
+    }
+    await _reloadWithFilterFallback(postNumber: postNumber, postId: postId);
+  }
+
   Future<void> _reloadWithFilterFallback({
     required int postNumber,
     int? postId,
   }) async {
     final params = _params;
     final notifier = ref.read(topicDetailProvider(params).notifier);
-    final wasSummaryMode = notifier.isSummaryMode;
-    final wasUsernameFilter = notifier.usernameFilter;
-    final wasTopLevelMode = notifier.isTopLevelMode;
+    final mode = notifier.viewMode;
 
     setState(() => _isSwitchingMode = true);
     _controller.resetVisibility();
 
     try {
-      await notifier.reloadWithPostNumber(postNumber);
-      if (!mounted) return;
+      // 先按当前视图重载再核对;只看顶层回复(cancelFilter 策略)按过滤
+      // 视图重载后必然要退回,省掉这次请求直接取消过滤
+      if (mode.jumpPolicy == TopicJumpPolicy.reloadThenVerify) {
+        await notifier.reloadWithPostNumber(postNumber);
+        if (!mounted) return;
 
-      final detail = ref.read(topicDetailProvider(params)).value;
-      final hasTarget =
-          detail != null &&
-          _detailHasTargetPost(detail, postNumber: postNumber, postId: postId);
-      final shouldFallback =
-          detail != null &&
-          _shouldFallbackFilter(
-            detail,
-            wasSummaryMode,
-            wasUsernameFilter,
-            wasTopLevelMode,
-          );
-      if (!hasTarget || shouldFallback) {
+        final detail = ref.read(topicDetailProvider(params)).value;
+        final hasTarget =
+            detail != null &&
+            _detailHasTargetPost(
+              detail,
+              postNumber: postNumber,
+              postId: postId,
+            );
+        if (hasTarget && !mode.shouldFallbackAfterJump(detail)) return;
         _controller.resetVisibility();
-        _controller.prepareJumpToPost(postNumber);
-        await notifier.cancelFilterAndReloadWithPostNumber(postNumber);
       }
+      _controller.prepareJumpToPost(postNumber);
+      await notifier.setViewMode(TopicViewMode.all, postNumber: postNumber);
     } finally {
       if (mounted) {
         setState(() => _isSwitchingMode = false);
         _scheduleCheckTitleVisibility();
       }
     }
-  }
-
-  bool _shouldFallbackFilter(
-    TopicDetail detail,
-    bool wasSummaryMode,
-    String? wasUsernameFilter,
-    bool wasTopLevelMode,
-  ) {
-    if (wasSummaryMode) {
-      if (!detail.hasSummary) return true;
-      if (detail.postsCount > 0 &&
-          detail.postStream.stream.length >= detail.postsCount) {
-        return true;
-      }
-    }
-
-    if (wasUsernameFilter != null && wasUsernameFilter.isNotEmpty) {
-      // 服务端 username_filters 恒保留 1 楼(主帖作者未必是被过滤用户),
-      // 判定"过滤是否真的生效"时要把主帖排除在外。
-      final hasOtherUsers = detail.postStream.posts.any(
-        (p) => p.postNumber != 1 && p.username != wasUsernameFilter,
-      );
-      if (hasOtherUsers) return true;
-    }
-
-    // 只看顶层模式下跳转到楼中楼帖子时需要取消过滤
-    if (wasTopLevelMode) return true;
-
-    return false;
   }
 
   Future<void> _handleShowTopReplies() async {
@@ -105,7 +84,7 @@ extension _FilterActions on _TopicDetailPageState {
     _controller.skipNextJumpHighlight = true;
     _controller.resetVisibility();
 
-    await notifier.showTopReplies();
+    await notifier.setViewMode(TopicViewMode.summary);
 
     if (mounted) {
       setState(() => _isSwitchingMode = false);
@@ -127,7 +106,7 @@ extension _FilterActions on _TopicDetailPageState {
     _controller.skipNextJumpHighlight = true;
     _controller.resetVisibility();
 
-    await notifier.showByActivity();
+    await notifier.setViewMode(TopicViewMode.activity);
 
     if (mounted) {
       setState(() => _isSwitchingMode = false);
@@ -152,7 +131,7 @@ extension _FilterActions on _TopicDetailPageState {
     _controller.skipNextJumpHighlight = true;
     _controller.resetVisibility();
 
-    await notifier.cancelFilter();
+    await notifier.setViewMode(TopicViewMode.all);
 
     if (mounted) {
       setState(() => _isSwitchingMode = false);
@@ -175,7 +154,7 @@ extension _FilterActions on _TopicDetailPageState {
     _controller.resetVisibility();
 
     try {
-      await notifier.showTopLevelReplies();
+      await notifier.setViewMode(TopicViewMode.topLevel);
     } finally {
       if (mounted) {
         setState(() => _isSwitchingMode = false);
@@ -200,7 +179,8 @@ extension _FilterActions on _TopicDetailPageState {
     if (username.isEmpty) return;
     final params = _params;
     final notifier = ref.read(topicDetailProvider(params).notifier);
-    if (notifier.usernameFilter == username) return;
+    final mode = TopicViewMode.user(username);
+    if (notifier.viewMode == mode) return;
 
     // 四项互斥单选：激活内容筛选时退出树形视图
     setState(() {
@@ -212,7 +192,7 @@ extension _FilterActions on _TopicDetailPageState {
     _controller.skipNextJumpHighlight = true;
     _controller.resetVisibility();
 
-    await notifier.showAuthorOnly(username);
+    await notifier.setViewMode(mode);
 
     if (mounted) {
       setState(() => _isSwitchingMode = false);
@@ -225,15 +205,11 @@ extension _FilterActions on _TopicDetailPageState {
     final params = _params;
     final notifier = ref.read(topicDetailProvider(params).notifier);
     final detail = ref.read(topicDetailProvider(params)).value;
-    final hasActiveFilter =
-        notifier.isSummaryMode ||
-        notifier.isActivityMode ||
-        notifier.isAuthorOnlyMode ||
-        notifier.isTopLevelMode ||
-        _isNestedView;
+    final mode = notifier.viewMode;
+    final hasActiveFilter = mode.isFiltered || _isNestedView;
     // 用户过滤分两种:过滤对象=楼主 → 命中「只看作者」项;过滤对象=
     // 其他参与者(用户卡片发起) → 单列一项显示具体用户名
-    final userFilter = notifier.usernameFilter;
+    final userFilter = mode.username;
     final isAuthorFilter =
         userFilter != null && userFilter == detail?.createdBy?.username;
     final isOtherUserFilter = userFilter != null && !isAuthorFilter;
@@ -251,12 +227,12 @@ extension _FilterActions on _TopicDetailPageState {
               ListTile(
                 leading: const Icon(Symbols.history_rounded),
                 title: Text(context.l10n.topicDetail_sortByActivity),
-                trailing: notifier.isActivityMode
+                trailing: mode.isActivity
                     ? Icon(Symbols.check_rounded, color: theme.colorScheme.primary)
                     : null,
                 onTap: () {
                   Navigator.pop(ctx);
-                  if (notifier.isActivityMode) {
+                  if (mode.isActivity) {
                     _handleCancelFilter();
                   } else {
                     _handleShowByActivity();
@@ -266,17 +242,17 @@ extension _FilterActions on _TopicDetailPageState {
             if (detail?.hasSummary ?? false)
               ListTile(
                 leading: Icon(
-                  notifier.isSummaryMode
+                  mode.isSummary
                       ? Symbols.local_fire_department_rounded
                       : Symbols.local_fire_department_rounded,
                 ),
                 title: Text(context.l10n.topicDetail_hotOnly),
-                trailing: notifier.isSummaryMode
+                trailing: mode.isSummary
                     ? Icon(Symbols.check_rounded, color: theme.colorScheme.primary)
                     : null,
                 onTap: () {
                   Navigator.pop(ctx);
-                  if (notifier.isSummaryMode) {
+                  if (mode.isSummary) {
                     _handleCancelFilter();
                   } else {
                     _handleShowTopReplies();
@@ -316,17 +292,17 @@ extension _FilterActions on _TopicDetailPageState {
               ),
             ListTile(
               leading: Icon(
-                notifier.isTopLevelMode
+                mode.isTopLevel
                     ? Symbols.account_tree_rounded
                     : Symbols.account_tree_rounded,
               ),
               title: Text(context.l10n.topicDetail_topLevelOnly),
-              trailing: notifier.isTopLevelMode
+              trailing: mode.isTopLevel
                   ? Icon(Symbols.check_rounded, color: theme.colorScheme.primary)
                   : null,
               onTap: () {
                 Navigator.pop(ctx);
-                if (notifier.isTopLevelMode) {
+                if (mode.isTopLevel) {
                   _handleCancelFilter();
                 } else {
                   _handleShowTopLevelReplies();
