@@ -690,6 +690,131 @@ void main() {
     }
   });
 
+  group('线上复现：只改坏 WebView 的 _t（Tbad）、jar 仍是 T1，冷启动撞上 CF 盾', () {
+    test(
+      '盾期间所有探测无结论 → jar 的 T1 始终不被替换；过盾后 Tbad 被拒 → WebView 修回 T1，不登出',
+      () async {
+        final jarExpiry = DateTime.utc(2026, 12, 10);
+        final rig = SessionTokenRig(
+          jar: 'T1',
+          jarExpires: jarExpiry,
+          webView: 'Tbad',
+          webViewExpires: jarExpiry,
+        );
+        rig.server.challenged = true;
+
+        // 冷启动 priming：对账无结论，本轮不碰 WebView 的 _t
+        final plan = await rig.authority.planPriming('https://linux.do');
+        expect(plan.injectJarToken, isFalse);
+
+        // 启动期间各路报告 WebView 的 _t：BrowserTrust 首页 / bootstrap、
+        // WebView 会话刷新、Sentinel 单变体（以前前三处会把 Tbad 可信写进 jar）
+        for (final reason in [
+          'browser_trust_home',
+          'browser_trust_bootstrap',
+          'webview_session_refresh',
+          'sentinel_noop',
+        ]) {
+          rig.later();
+          expect(
+            await rig.authority.reconcile(reason: reason),
+            SessionTokenReconcileOutcome.inconclusive,
+            reason: reason,
+          );
+        }
+        // 过盾前：不许探测，没有血缘 → 无结论
+        rig.later();
+        expect(
+          await rig.authority.reconcile(
+            reason: 'cf_challenge_prepare',
+            allowProbe: false,
+            pushIfWebViewEmpty: true,
+          ),
+          SessionTokenReconcileOutcome.inconclusive,
+        );
+        // 盾期间的登录态检查 / auth 信号：恢复链也无结论，什么都不写
+        final during = await rig.authority.recover(
+          source: 'startup_session_check',
+          signalRequestOptions: requestCarrying('T1'),
+        );
+        expect(during.kind, SessionTokenVerdictKind.inconclusive);
+
+        // 整个盾期间 jar 的 T1 原封不动：值、过期时间都没变，没有任何写入
+        expect(rig.jarStore.value, 'T1');
+        expect(rig.jarStore.expires, jarExpiry);
+        expect(rig.jarStore.writes, isEmpty);
+        expect(rig.webViewStore.value, 'Tbad');
+        expect(rig.webViewStore.writes, isEmpty);
+
+        // 过盾：探测恢复，Tbad 被拒、T1 有效
+        rig.server
+          ..challenged = false
+          ..valid.add('T1')
+          ..rejected.add('Tbad');
+        rig.later();
+        expect(
+          await rig.authority.reconcile(
+            reason: 'cf_challenge_passed',
+            pushIfWebViewEmpty: true,
+          ),
+          SessionTokenReconcileOutcome.repushedJar,
+        );
+        expect(rig.webViewStore.value, 'T1');
+        expect(rig.jarStore.value, 'T1');
+        expect(rig.jarStore.writes, isEmpty);
+        expect(rig.authority.agreedValueForTest, 'T1');
+
+        // 之后的登录态检查：T1 有效，不登出
+        final after = await rig.authority.recover(
+          source: 'startup_session_check',
+          signalRequestOptions: requestCarrying('T1'),
+        );
+        expect(after.kind, SessionTokenVerdictKind.valid);
+        expect(after.source, SessionTokenSource.jarSession);
+      },
+    );
+
+    test(
+      '验证页带着 Tbad 加载、服务端删了 WebView 的 _t → 过盾后把 jar 的 T1 推回空 WebView',
+      () async {
+        final rig = SessionTokenRig(jar: 'T1', webView: 'Tbad');
+        rig.server.challenged = true;
+        await rig.authority.planPriming('https://linux.do');
+
+        rig.webViewStore.value = null;
+        rig.server
+          ..challenged = false
+          ..valid.add('T1');
+        rig.later();
+        expect(
+          await rig.authority.reconcile(
+            reason: 'cf_challenge_passed',
+            pushIfWebViewEmpty: true,
+          ),
+          SessionTokenReconcileOutcome.repushedJar,
+        );
+        expect(rig.webViewStore.value, 'T1');
+        expect(rig.jarStore.writes, isEmpty);
+      },
+    );
+
+    test('对照：Tbad 实际上是 WebView 轮换到的活值 → 过盾后探测确认才采纳', () async {
+      final rig = SessionTokenRig(jar: 'T1', webView: 'T2');
+      rig.server.challenged = true;
+      rig.later();
+      await rig.authority.reconcile(reason: 'browser_trust_home');
+      expect(rig.jarStore.value, 'T1');
+
+      rig.server
+        ..challenged = false
+        ..valid.add('T2');
+      rig.later();
+      await rig.authority.reconcile(reason: 'cf_challenge_passed');
+      expect(rig.jarStore.value, 'T2');
+      expect(rig.jarStore.persisted, isTrue);
+    });
+  });
+
   group('候选环与一致记录', () {
     test('环保留最近 4 枚，新的在前，重复值移到最前', () {
       final rig = SessionTokenRig();

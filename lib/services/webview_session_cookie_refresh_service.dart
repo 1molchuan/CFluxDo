@@ -13,6 +13,7 @@ import 'network/cookie/boundary_sync_service.dart';
 import 'network/cookie/cookie_jar_service.dart';
 import 'network/cookie/webview_cookie_priming.dart';
 import 'preloaded_data_service.dart';
+import 'session/session_token_authority.dart';
 import 'webview_settings.dart';
 import 'windows_webview_environment_service.dart';
 
@@ -329,12 +330,20 @@ class WebViewSessionCookieRefreshService {
       final c = controller;
       if (c == null) return;
 
+      // _t 不在其中（BoundarySync 只在登录收口写 _t）：bootstrap 期间 WebView
+      // 可能轮换了 _t，交 SessionTokenAuthority 对账，服务端探测决定谁对、
+      // 无结论两端都不动（以前这里不经探测就把 WebView 的 _t 可信写进 jar）。
       await BoundarySyncService.instance.syncFromWebView(
         currentUrl: AppConstants.baseUrl,
         controller: c,
         cookieNames: null,
         allowLowConfidenceSessionCookies: true,
         trusted: true,
+      );
+      unawaited(
+        SessionTokenAuthority.instance.reconcile(
+          reason: 'webview_session_refresh',
+        ),
       );
     }
 

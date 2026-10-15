@@ -863,13 +863,16 @@ class _ServiceRoundEnvironment implements CfRoundEnvironment {
     // 广播:一次 CF 挑战被成功解决,定稿 cf_clearance 已落 jar。
     _service.clearanceResolvedAt.value = DateTime.now();
     // 过盾后验证 WebView 会加载站内页，Discourse 可能借此轮换了 _t；
-    // 交给血缘对账（必要时探测服务端）。不 await：对账可能正等着
-    // 另一次对账的探测，而那个探测恰恰在等这次验证结束。
+    // 交给 SessionTokenAuthority 对账（必要时探测服务端）。WebView 若带着
+    // 坏值 / 旧值去加载、被服务端删了 _t，就把 jar 的推回去，让 WebView 尽快
+    // 恢复登录态。不 await：对账可能正等着另一次对账的探测，而那个探测
+    // 恰恰在等这次验证结束。
     unawaited(
       SessionTokenAuthority.instance
           .reconcile(
             url: CfChallengeService._verifyUrl,
             reason: 'cf_challenge_passed',
+            pushIfWebViewEmpty: true,
           )
           .catchError((Object e) {
             debugPrint('[CfChallenge] 过盾后 _t 对账失败: $e');

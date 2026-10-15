@@ -145,6 +145,32 @@ class BoundarySyncService {
     return ordered;
   }
 
+  /// 登录会话 token。WebView 里的 `_t` 只在登录收口（新会话）由这里写进
+  /// jar；其余时机一律不写，交 SessionTokenAuthority 对账（服务端探测决定
+  /// jar 与 WebView 谁对）。
+  static const String _sessionTokenName = '_t';
+
+  /// 本次同步是否写 [name]（纯函数，便于测试）。
+  ///
+  /// `_t` 只有 [includeSessionToken] 为 true（登录收口）才写：以前任何
+  /// 「全量可信同步」（BrowserTrust 启动预载、WebView 会话刷新）都会把
+  /// WebView 里的 `_t` 不经探测可信写进 jar——WebView 的值坏掉（或是旧值）
+  /// 时，jar 里的活值就这样被顶掉，随后被判失效、被动登出。
+  @visibleForTesting
+  static bool shouldSyncCookie(
+    String name, {
+    Set<String>? cookieNames,
+    Set<String>? excludeCookieNames,
+    bool includeSessionToken = false,
+  }) {
+    if (cookieNames != null && !cookieNames.contains(name)) return false;
+    if (excludeCookieNames != null && excludeCookieNames.contains(name)) {
+      return false;
+    }
+    if (name == _sessionTokenName && !includeSessionToken) return false;
+    return true;
+  }
+
   /// 从 WebView 读 cookie 写入 jar。
   ///
   /// [currentUrl] 当前页面 URL，用于确定读取哪个域名的 cookie。
@@ -153,6 +179,8 @@ class BoundarySyncService {
   /// [trusted] 标记为权威写入（CF challenge 确认后），让写入升 version 盖过旧值。
   /// [acceptValues] cookie 名 → 只接受的值；用于 challenge 场景按确认的 fresh 值
   ///   过滤，排除 WebView 中可能残留的旧变体。
+  /// [includeSessionToken] 只有登录收口传 true：把 WebView 里新登录的 `_t`
+  ///   写进 jar。其余调用方即使不过滤名字也不会写 `_t`（见 [shouldSyncCookie]）。
   Future<void> syncFromWebView({
     String? currentUrl,
     InAppWebViewController? controller,
@@ -162,6 +190,7 @@ class BoundarySyncService {
     int? requestGeneration,
     bool trusted = false,
     Map<String, String>? acceptValues,
+    bool includeSessionToken = false,
   }) async {
     final url = currentUrl ?? AppConstants.baseUrl;
     final uri = Uri.parse(url);
@@ -182,7 +211,9 @@ class BoundarySyncService {
           controller,
           currentUrl: url,
           cookieNames: cookieNames,
-          excludeCookieNames: excludeCookieNames,
+          excludeCookieNames: includeSessionToken
+              ? excludeCookieNames
+              : {...?excludeCookieNames, _sessionTokenName},
           trusted: trusted,
           acceptValues: acceptValues,
         );
@@ -224,9 +255,12 @@ class BoundarySyncService {
           }
           authority.noteWebViewValueObserved(value);
         }
-        if (cookieNames != null && !cookieNames.contains(wc.name)) continue;
-        if (excludeCookieNames != null &&
-            excludeCookieNames.contains(wc.name)) {
+        if (!shouldSyncCookie(
+          wc.name,
+          cookieNames: cookieNames,
+          excludeCookieNames: excludeCookieNames,
+          includeSessionToken: includeSessionToken,
+        )) {
           continue;
         }
         // challenge 场景：只接受确认的 fresh 值，排除 WebView 残留的旧变体。

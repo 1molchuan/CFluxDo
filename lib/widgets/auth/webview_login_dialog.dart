@@ -603,6 +603,8 @@ document.close();
         allowLowConfidenceSessionCookies: true,
         requestGeneration: _flowGeneration,
         trusted: true,
+        // 登录收口：WebView 里是刚登录的新会话，_t 要写进 jar
+        includeSessionToken: true,
       );
       final runtimeDetails = await CookieJarService()
           .getCookieDiagnosticsForRequest(

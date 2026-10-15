@@ -634,6 +634,8 @@ class _WebViewLoginPageState extends ConsumerState<WebViewLoginPage> {
       cookieNames: CookieJarService.authCookieNames,
       allowLowConfidenceSessionCookies: true,
       requestGeneration: requestGeneration,
+      // 登录收口：WebView 里是刚登录的新会话，_t 要写进 jar
+      includeSessionToken: true,
     );
   }
 
@@ -681,6 +683,7 @@ class _WebViewLoginPageState extends ConsumerState<WebViewLoginPage> {
         allowLowConfidenceSessionCookies: true,
         requestGeneration: requestGeneration,
         trusted: true,
+        includeSessionToken: true,
       );
       runtimeDetails = await _runtimeCookieDiagnostics();
       var hasRuntimeCookie = _hasRuntimeCookie(runtimeDetails);
@@ -705,6 +708,7 @@ class _WebViewLoginPageState extends ConsumerState<WebViewLoginPage> {
             allowLowConfidenceSessionCookies: true,
             requestGeneration: requestGeneration,
             trusted: true,
+            includeSessionToken: true,
           );
           runtimeDetails = await _runtimeCookieDiagnostics();
           hasRuntimeCookie = _hasRuntimeCookie(runtimeDetails);

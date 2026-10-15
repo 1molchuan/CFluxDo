@@ -1587,10 +1587,10 @@ document.close();
     if (!webViewSessionVerified) return;
 
     // 服务端刚刚认可了 WebView 的登录态：WebView 里的 _t 若与 jar 不同，
-    // 由血缘对账决定是采纳（WebView 轮换到了新值，jar 落后）还是推回
-    // （jar 刚轮换、WebView 还拿着上一枚）。上面的普通回写对 _t 是非可信
-    // 写入，jar 里的值版本号更高时会被静默丢弃，这正是 jar 长期落后、
-    // 最终带着死 token 触发掉登录的根源。
+    // 由 SessionTokenAuthority 决定是采纳（WebView 轮换到了新值，jar 落后）
+    // 还是推回（jar 刚轮换、WebView 还拿着上一枚）。上面的回写不带 _t
+    // （BoundarySync 只在登录收口写 _t）——以前那是一次非可信写入，jar 里
+    // 的值版本号更高时会被静默丢弃，版本号相同时又会不经探测顶掉 jar。
     try {
       await SessionTokenAuthority.instance.reconcile(
         url: currentUrl,
