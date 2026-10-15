@@ -77,6 +77,14 @@ class FluxRequestKeys {
   /// 后台 isolate 没有重试窗口;页面数据有自己的降级路径。
   static const String noRecovery = 'noRecovery';
 
+  /// 被本请求 validateStatus 放行的 CF 挑战页原样交给调用方，不进过盾恢复。
+  ///
+  /// 默认情况下，只要实例启用了 CF 恢复，挑战页无论被 validateStatus 判成
+  /// 成功还是失败都会进同一条恢复流程（此前放行 4xx 的请求会把挑战页当
+  /// 正常响应解析，表现成「授权页解析失败」）。确实要自己检视挑战页的请求
+  /// 必须显式声明本键。
+  static const String allowCfChallengeResponse = 'allowCfChallengeResponse';
+
   /// 3xx 响应上的 Set-Cookie 额外保存到每个 Location 目标域。
   /// OAuth 授权跳转链的会话 cookie 依赖此语义;重定向子请求会继承本键。
   static const String allowRedirectSetCookie = 'allowRedirectSetCookie';
@@ -148,6 +156,9 @@ extension type const FluxRequestSpec(Map<String, dynamic> _extra) {
   /// 被恢复层加工更有用(MessageBus 靠原始 429 的 Retry-After 计算退避)。
   bool get recoveryDisabled =>
       _extra[FluxRequestKeys.noRecovery] == true || isSilent;
+
+  bool get allowCfChallengeResponse =>
+      _extra[FluxRequestKeys.allowCfChallengeResponse] == true;
 
   bool get allowRedirectSetCookie =>
       _extra[FluxRequestKeys.allowRedirectSetCookie] == true;

@@ -1,6 +1,7 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:html/parser.dart' as html_parser;
+import 'network/cf/cf_challenge_classifier.dart';
 import 'network/discourse_dio.dart';
 import 'network/exceptions/oauth_exception.dart';
 import '../l10n/s.dart';
@@ -79,17 +80,26 @@ class LdcOAuthService {
     }
   }
 
+  /// 撞盾且没能过盾时提示安全验证，而不是笼统的网络错误/获取失败。
+  static String _failureMessage(DioException e, String fallback) =>
+      CfChallengeClassifier.isChallengeFailure(e)
+      ? S.current.cf_operationBlockedByChallenge
+      : fallback;
+
   Future<bool> authorize(BuildContext context) async {
     final String authUrl;
     try {
       authUrl = await getAuthUrl();
-    } on DioException {
-      throw Exception(S.current.oauth_getAuthUrlFailed);
+    } on DioException catch (e) {
+      throw Exception(_failureMessage(e, S.current.oauth_getAuthUrlFailed));
     }
 
     // step1 → step2: 模拟"业务页加载完成 → 跳转到 OAuth 同意页"的导航延迟
     await OAuthFlowHelper.humanGap(minMs: 800, maxMs: 1500);
 
+    // validateStatus 放行 4xx 是为了自己解析授权页；被放行的 CF 挑战页
+    // 仍由 CfChallengeInterceptor 截下过盾后重放（以前挑战页会被当成授权页
+    // 解析，表现成「授权页面解析失败」）。
     final Response response;
     try {
       response = await _dio.get(
@@ -100,8 +110,8 @@ class LdcOAuthService {
           extra: {'skipCsrf': true, 'allowRedirectSetCookie': true},
         ),
       );
-    } on DioException {
-      throw Exception(S.current.oauth_networkError);
+    } on DioException catch (e) {
+      throw Exception(_failureMessage(e, S.current.oauth_networkError));
     }
 
     final document = html_parser.parse(response.data);
