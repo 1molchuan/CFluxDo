@@ -107,6 +107,21 @@ class TopicDetailNotifier extends AsyncNotifier<TopicDetail> {
   /// 离开页面,期间还挡住用户自己的翻页。
   int _newPostLoadFailures = 0;
   static const int _maxNewPostLoadRetries = 5;
+
+  /// refreshPost 在途表:postId → 该次调用的 preserveCooked,防止同一 postId 并发请求。
+  /// 对齐 Discourse 官方 triggerChangedPost：同一 postId 同时只有一个在途请求，
+  /// 如果在途期间又收到新消息，标记需要「尾部重试」一次以获取最新状态。
+  ///
+  /// 按实例记(官方也是每个 post-stream 各管各的):同一话题叠开两页时,
+  /// 后开那页的刷新不能被前一页的在途请求吞掉 —— 那份结果只落到前一页的
+  /// state,前一页中途关掉时连尾部重试都不会发。
+  final Map<int, bool> _pendingRefresh = {};
+
+  /// 需要尾部重试的 postId → 重试用的 preserveCooked。窗口内每条消息都要求
+  /// 保留 cooked 才保留;有一条 revised 就得换上新 cooked。重试丢掉这个参数
+  /// 会让两条 acted 消息的第二条覆盖 cooked/read(单帖接口无 topic_view
+  /// 上下文,read 缺省 false),已读楼层重新变未读、长帖重付一次解析。
+  final Map<int, bool> _needsRetry = {};
   /// 过滤视图按 stream id 翻页时每页条数
   static const int _streamPageSize = 20;
 
