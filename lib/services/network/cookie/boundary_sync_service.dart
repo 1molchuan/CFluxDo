@@ -14,6 +14,41 @@ import 'cookie_logger.dart';
 import 'raw_cookie_writer.dart';
 import 'strategy/platform_cookie_strategy.dart';
 
+/// 一次 WebView → jar 同步的结果（以前是 void，调用方只能再读 jar 猜）。
+class WebViewCookieSyncReport {
+  const WebViewCookieSyncReport._({
+    this.written = const [],
+    this.skippedReason,
+    this.error,
+  });
+
+  /// 同步跑完：[written] 是实际写进 jar 的 cookie 名（可能为空：WebView
+  /// 里没有匹配的、或与 jar 已一致、或被 cf_clearance 闸门挡下）。
+  const WebViewCookieSyncReport.completed(List<String> written)
+    : this._(written: written);
+
+  /// 没有执行（会话代已过期等）。
+  const WebViewCookieSyncReport.skipped(String reason)
+    : this._(skippedReason: reason);
+
+  /// 执行中出错（读 WebView / 写 jar 抛异常）。
+  const WebViewCookieSyncReport.failed(Object error) : this._(error: error);
+
+  final List<String> written;
+  final String? skippedReason;
+  final Object? error;
+
+  /// 同步完整跑完（不代表一定写了东西，见 [written]）。
+  bool get completed => skippedReason == null && error == null;
+
+  bool wrote(String name) => written.contains(name);
+
+  @override
+  String toString() => completed
+      ? 'WebViewCookieSyncReport(written=$written)'
+      : 'WebViewCookieSyncReport(${skippedReason ?? 'error: $error'})';
+}
+
 /// 边界同步服务：在登录成功、CF 验证成功等关键时机，
 /// 从 WebView CookieManager 读取 cookie 写入 CookieJar。
 ///
@@ -145,29 +180,28 @@ class BoundarySyncService {
     return ordered;
   }
 
-  /// 登录会话 token。WebView 里的 `_t` 只在登录收口（新会话）由这里写进
-  /// jar；其余时机一律不写，交 SessionTokenAuthority 对账（服务端探测决定
-  /// jar 与 WebView 谁对）。
+  /// 登录会话 token。这里从不把 WebView 的 `_t` 写进 jar：登录收口由
+  /// SessionTokenAuthority.adoptLoginToken 写（带过期时间、重置血缘），其余
+  /// 时机交它对账（服务端探测决定 jar 与 WebView 谁对）。
   static const String _sessionTokenName = '_t';
 
   /// 本次同步是否写 [name]（纯函数，便于测试）。
   ///
-  /// `_t` 只有 [includeSessionToken] 为 true（登录收口）才写：以前任何
-  /// 「全量可信同步」（BrowserTrust 启动预载、WebView 会话刷新）都会把
-  /// WebView 里的 `_t` 不经探测可信写进 jar——WebView 的值坏掉（或是旧值）
-  /// 时，jar 里的活值就这样被顶掉，随后被判失效、被动登出。
+  /// `_t` 一律不写：以前任何「全量可信同步」（BrowserTrust 启动预载、
+  /// WebView 会话刷新）都会把 WebView 里的 `_t` 不经探测可信写进 jar——
+  /// WebView 的值坏掉（或是旧值）时，jar 里的活值就这样被顶掉，随后被判
+  /// 失效、被动登出。
   @visibleForTesting
   static bool shouldSyncCookie(
     String name, {
     Set<String>? cookieNames,
     Set<String>? excludeCookieNames,
-    bool includeSessionToken = false,
   }) {
+    if (name == _sessionTokenName) return false;
     if (cookieNames != null && !cookieNames.contains(name)) return false;
     if (excludeCookieNames != null && excludeCookieNames.contains(name)) {
       return false;
     }
-    if (name == _sessionTokenName && !includeSessionToken) return false;
     return true;
   }
 
@@ -179,9 +213,10 @@ class BoundarySyncService {
   /// [trusted] 标记为权威写入（CF challenge 确认后），让写入升 version 盖过旧值。
   /// [acceptValues] cookie 名 → 只接受的值；用于 challenge 场景按确认的 fresh 值
   ///   过滤，排除 WebView 中可能残留的旧变体。
-  /// [includeSessionToken] 只有登录收口传 true：把 WebView 里新登录的 `_t`
-  ///   写进 jar。其余调用方即使不过滤名字也不会写 `_t`（见 [shouldSyncCookie]）。
-  Future<void> syncFromWebView({
+  ///
+  /// `_t` 从不在这里写（见 [shouldSyncCookie]）。返回同步结果；WebView 使用期的
+  /// 各种同步口径统一由 WebViewUses 按用途与结果决定，调用方不再自己挑参数。
+  Future<WebViewCookieSyncReport> syncFromWebView({
     String? currentUrl,
     InAppWebViewController? controller,
     Set<String>? cookieNames,
@@ -190,7 +225,6 @@ class BoundarySyncService {
     int? requestGeneration,
     bool trusted = false,
     Map<String, String>? acceptValues,
-    bool includeSessionToken = false,
   }) async {
     final url = currentUrl ?? AppConstants.baseUrl;
     final uri = Uri.parse(url);
@@ -203,7 +237,7 @@ class BoundarySyncService {
           '[BoundarySync] 跳过过期会话同步: '
           'gen=$requestGeneration current=${AuthSession().generation}',
         );
-        return;
+        return const WebViewCookieSyncReport.skipped('stale_generation');
       }
 
       if (io.Platform.isWindows && controller != null) {
@@ -211,9 +245,7 @@ class BoundarySyncService {
           controller,
           currentUrl: url,
           cookieNames: cookieNames,
-          excludeCookieNames: includeSessionToken
-              ? excludeCookieNames
-              : {...?excludeCookieNames, _sessionTokenName},
+          excludeCookieNames: {...?excludeCookieNames, _sessionTokenName},
           trusted: trusted,
           acceptValues: acceptValues,
         );
@@ -230,7 +262,9 @@ class BoundarySyncService {
             url: url,
             cookieDetails: syncedDetails,
           );
-          return;
+          return WebViewCookieSyncReport.completed(
+            cookieNames?.toList() ?? const ['*'],
+          );
         }
       }
 
@@ -259,7 +293,6 @@ class BoundarySyncService {
           wc.name,
           cookieNames: cookieNames,
           excludeCookieNames: excludeCookieNames,
-          includeSessionToken: includeSessionToken,
         )) {
           continue;
         }
@@ -416,12 +449,6 @@ class BoundarySyncService {
 
         if (wc.expiresDate != null) {
           cookie.expires = DateTime.fromMillisecondsSinceEpoch(wc.expiresDate!);
-        } else if (trusted && wc.name == '_t') {
-          // 服务端发的 _t 一定带 Expires；WebView 里没过期时间的 _t 只可能是
-          // 我们自己从内存态 jar 推过去的。可信写回时补上过期时间，否则它在
-          // jar 里仍是会话 cookie、不落盘，冷启动又会丢。只对可信写入做，
-          // 泛读路径不能靠补一个更晚的过期时间盖过 jar 里的权威值。
-          cookie.expires = await _jar.resolveSessionTokenExpiryFor(null);
         }
 
         if (isSessionCookie &&
@@ -440,7 +467,7 @@ class BoundarySyncService {
 
       if (toSave.isEmpty) {
         debugPrint('[BoundarySync] 未从 WebView 读取到有效 cookie: url=$url');
-        return;
+        return const WebViewCookieSyncReport.completed([]);
       }
 
       if (requestGeneration != null &&
@@ -449,7 +476,7 @@ class BoundarySyncService {
           '[BoundarySync] 跳过过期会话写入: '
           'gen=$requestGeneration current=${AuthSession().generation}',
         );
-        return;
+        return const WebViewCookieSyncReport.skipped('stale_generation');
       }
 
       if (!_jar.isInitialized) await _jar.initialize();
@@ -486,8 +513,12 @@ class BoundarySyncService {
             'forcedHostOnlySessionCookies': forcedHostOnlySessionCookies,
         },
       );
+      return WebViewCookieSyncReport.completed(
+        toSave.map((c) => c.name).toList(growable: false),
+      );
     } catch (e) {
       CookieLogger.error(operation: 'boundary_sync', error: e.toString());
+      return WebViewCookieSyncReport.failed(e);
     }
   }
 

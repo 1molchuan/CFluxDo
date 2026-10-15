@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
@@ -11,10 +12,9 @@ import '../../services/auth_session.dart';
 import '../../services/cf_challenge_service.dart';
 import '../../services/network/cf/cf_round_outcome.dart';
 import '../../services/discourse/discourse_service.dart';
-import '../../services/network/cookie/boundary_sync_service.dart';
 import '../../services/network/cookie/cookie_jar_service.dart';
-import '../../services/network/cookie/webview_cookie_priming.dart';
 import '../../services/preloaded_data_service.dart';
+import '../../services/session/webview_use.dart';
 import '../../services/toast_service.dart';
 import '../../services/webview_session_cookie_refresh_service.dart';
 import '../../services/webview_settings.dart';
@@ -118,7 +118,8 @@ class _WebViewLoginDialogState extends State<_WebViewLoginDialog> {
   bool _loading = true;
   bool _processing = false; // hcaptcha 通过后登录请求进行中
   bool _finished = false; // 防止重复 pop / 回调重入
-  bool _cookiesPrimed = false; // 方案 A: 是否已从 jar 预灌 cookie
+  /// 方案 A: 登录 WebView 的使用期（首次跑登录前从 jar 预灌，收口时回写）
+  WebViewUse? _webViewUse;
   bool _windowsInlineHtmlInjected = false;
   bool _cfRetryUsed = false; // CSRF 403 自动重验证只做一次, 避免死循环
   final int _flowGeneration = AuthSession().generation;
@@ -131,6 +132,8 @@ class _WebViewLoginDialogState extends State<_WebViewLoginDialog> {
 
   @override
   void dispose() {
+    // 没走到成功收口就关掉（失败 / 取消 / 过期）：什么都不回写
+    unawaited(_webViewUse?.end(WebViewUseOutcome.aborted));
     // 对话框关闭后立即释放 WebView2 原生控制器，避免不可见的平台视图
     // 继续参与外部视图合成并长期占用资源。
     _controller?.dispose();
@@ -354,13 +357,14 @@ class _WebViewLoginDialogState extends State<_WebViewLoginDialog> {
   /// 必须走 canonical Set-Cookie 写入，不能把 Cookie header 拆成 name/value，
   /// 否则会丢 Domain/Path 并制造 host-only 副本。
   Future<void> _primeCookiesFromJar() async {
-    if (_cookiesPrimed) return;
-    _cookiesPrimed = true;
-    try {
-      await WebViewCookiePriming.instance.prime(AppConstants.baseUrl);
+    final use = _webViewUse ??= WebViewUses.instance.start(
+      WebViewUsePurpose.login,
+      reason: 'webview_login_dialog',
+      generation: _flowGeneration,
+    );
+    // 预灌失败不阻止登录（继续，依赖共享 store），WebViewUses 已记日志
+    if (await use.ready) {
       debugPrint('[WebViewLogin] 已从 jar 预灌 cookie 到登录 WebView store');
-    } catch (e) {
-      debugPrint('[WebViewLogin] 预灌 cookie 失败 (继续, 依赖共享 store): $e');
     }
   }
 
@@ -531,17 +535,25 @@ document.close();
 
     // 2. 验证码等其余非会话 cookie 顺带同步一次。
     //    session cookie 只在登录成功收口时同步，避免旧会话回写。
-    await BoundarySyncService.instance.syncFromWebView(
-      cookieNames: null,
-      excludeCookieNames: CookieJarService.authCookieNames,
-      requestGeneration: _flowGeneration,
-    );
+    //    （验证页与本 WebView 共用 cookie store，新 cf_clearance 已在 store
+    //    里；以前这里还会「重新预灌」，但 store 已就绪时那是空操作。）
+    final use = _webViewUse;
+    if (use != null) {
+      await use.checkpoint(
+        WebViewUseOutcome.loginPending,
+        reason: 'webview_login_dialog_cf',
+      );
+    } else {
+      await WebViewUses.instance.syncOnce(
+        WebViewUsePurpose.login,
+        WebViewUseOutcome.loginPending,
+        reason: 'webview_login_dialog_cf',
+        generation: _flowGeneration,
+      );
+    }
     if (_finished) return;
 
-    // 3. 把 jar 里的新 cookie 重新灌进 dialog WV (清掉一次锁, 否则跳过)
-    _cookiesPrimed = false;
-
-    // 4. 重跑登录: hcaptcha token 还没被 hcaptcha/create 消费 (上次卡在
+    // 3. 重跑登录: hcaptcha token 还没被 hcaptcha/create 消费 (上次卡在
     //    csrf 阶段, 是 hcaptcha 之前的步骤), 直接复用即可。
     await _runLogin(
       hcaptchaToken: _lastHcaptchaToken,
@@ -596,15 +608,17 @@ document.close();
             );
         bootstrapped = bootstrapResult.ok;
       }
-      await BoundarySyncService.instance.syncFromWebView(
+      // 登录收口：全量可信回写；WebView 里是刚登录的新会话，_t 由
+      // SessionTokenAuthority 可信写进 jar（带过期时间）
+      final use = _webViewUse ??= WebViewUses.instance.start(
+        WebViewUsePurpose.login,
+        reason: 'webview_login_dialog',
+        generation: _flowGeneration,
+      );
+      await use.end(
+        WebViewUseOutcome.loginSucceeded,
+        reason: 'native_login_success',
         controller: controller,
-        currentUrl: 'https://linux.do/',
-        cookieNames: null,
-        allowLowConfidenceSessionCookies: true,
-        requestGeneration: _flowGeneration,
-        trusted: true,
-        // 登录收口：WebView 里是刚登录的新会话，_t 要写进 jar
-        includeSessionToken: true,
       );
       final runtimeDetails = await CookieJarService()
           .getCookieDiagnosticsForRequest(

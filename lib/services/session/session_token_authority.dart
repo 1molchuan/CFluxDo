@@ -768,6 +768,67 @@ class SessionTokenAuthority {
     return SessionTokenPrimingPlan(injectJarToken: inject, outcome: outcome);
   }
 
+  /// 登录收口：WebView 里是刚登录的新会话，把它的 `_t` 可信写进 jar。
+  ///
+  /// 除冷启动 jar 丢值的恢复外，这是唯一不经探测就把 WebView 的 `_t` 写进
+  /// jar 的地方：登录成功本身就是服务端对这枚值的认可（以前由各登录入口经
+  /// BoundarySync 的 includeSessionToken 写，有的可信有的不可信）。
+  /// 新会话与旧血缘无关——先清血缘，写入
+  /// （带过期时间：WebView 自带的 → jar 原值的 → 60 天）读回一致后标记两端
+  /// 一致。[generation] 是登录流程的会话代，已过期（期间登出 / 再次登录）
+  /// 就什么都不写。返回是否写入成功。
+  Future<bool> adoptLoginToken({
+    required String reason,
+    int? generation,
+  }) async {
+    if (!_jar.isReady) return false;
+    if (generation != null && !_session.isValid(generation)) return false;
+
+    String? value;
+    DateTime? expires;
+    try {
+      value = await _webView.read();
+      if (value != null && value.isNotEmpty) {
+        expires = await _webView.readExpiry(value);
+      }
+    } catch (e) {
+      debugPrint('[SessionToken] 登录收口读取 WebView _t 失败($reason): $e');
+      value = null;
+    }
+    if (value == null || value.isEmpty) {
+      LogWriter.instance.write({
+        'timestamp': DateTime.now().toIso8601String(),
+        'level': 'warning',
+        'type': 'auth',
+        'event': 'login_session_token_missing',
+        'message': '登录收口时 WebView 里没有 _t',
+        'reason': reason,
+      });
+      return false;
+    }
+    if (generation != null && !_session.isValid(generation)) return false;
+
+    final before = await _readJarSafely();
+    resetLineage();
+    final ok = await _writeJarTrusted(value, candidateExpires: expires);
+    if (ok) markAgreed(value);
+    LogWriter.instance.write({
+      'timestamp': DateTime.now().toIso8601String(),
+      'level': ok ? 'info' : 'warning',
+      'type': 'auth',
+      'event': ok
+          ? 'login_session_token_adopted'
+          : 'login_session_token_write_failed',
+      'message': ok ? '登录收口：WebView 的新 _t 已可信写进 jar' : '登录收口：新 _t 写入 jar 后读回不符',
+      'reason': reason,
+      'tLen': _len(value),
+      'tHash': tokenHash(value),
+      'replacedJarTHash': tokenHash(before),
+      'hasWebViewExpiry': expires != null,
+    });
+    return ok;
+  }
+
   /// Dio（路径 A）收到服务端新发的 `_t` 并已写进 jar：推进 WebView、读回
   /// 确认后两端一致。推不进去时保持原血缘（下次对账会把 jar 的推回去，
   /// 而不是把 WebView 里的旧值当成「WebView 往前走了」）。

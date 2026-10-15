@@ -8,8 +8,8 @@ import '../services/cf_challenge_service.dart';
 import '../services/network/cf/cf_round_outcome.dart';
 import '../services/credential_store_service.dart';
 import '../services/discourse/discourse_service.dart';
-import '../services/network/cookie/boundary_sync_service.dart';
 import '../services/network/cookie/cookie_jar_service.dart';
+import '../services/session/webview_use.dart';
 import '../services/toast_service.dart';
 import '../services/user_api_key_login_flow.dart';
 import '../utils/blur_config.dart';
@@ -157,10 +157,11 @@ class _LoginPageState extends State<LoginPage>
     // 验证码等其余非会话 cookie 顺带同步一次（登录对话框会把 jar 灌回
     // WebView，jar 里的旧值不能盖掉刚签发的）。这里明确排除 Discourse
     // session cookie，登录成功收口流程会单独同步它们。
-    await BoundarySyncService.instance.syncFromWebView(
-      cookieNames: null,
-      excludeCookieNames: CookieJarService.authCookieNames,
-      requestGeneration: requestGeneration,
+    await WebViewUses.instance.syncOnce(
+      WebViewUsePurpose.login,
+      WebViewUseOutcome.loginPending,
+      reason: 'login_page_cf',
+      generation: requestGeneration,
     );
     return true;
   }

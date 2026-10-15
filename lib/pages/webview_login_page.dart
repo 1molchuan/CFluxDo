@@ -15,10 +15,9 @@ import '../services/credential_store_service.dart';
 import '../services/auth_session.dart';
 import '../services/discourse/discourse_service.dart';
 import '../services/preloaded_data_service.dart';
-import '../services/network/cookie/boundary_sync_service.dart';
 import '../services/network/cookie/cookie_jar_service.dart';
 import '../services/network/cookie/csrf_token_service.dart';
-import '../services/network/cookie/webview_cookie_priming.dart';
+import '../services/session/webview_use.dart';
 import '../services/toast_service.dart';
 import '../services/webview_settings.dart';
 import '../services/webview_session_cookie_refresh_service.dart';
@@ -58,7 +57,8 @@ class _WebViewLoginPageState extends ConsumerState<WebViewLoginPage> {
   String _url = AppConstants.baseUrl;
   double _progress = 0;
   String? _savedUsername;
-  Future<void>? _initialCookieFlushFuture;
+  /// 这个页面的 WebView 使用期（开始时从 jar 重灌，登录收口时回写）。
+  late final WebViewUse _webViewUse;
   Completer<void>? _fingerprintCompleter;
   bool _fingerprintDone = false;
 
@@ -69,9 +69,11 @@ class _WebViewLoginPageState extends ConsumerState<WebViewLoginPage> {
   @override
   void initState() {
     super.initState();
-    // v0.4.0: WV cookie 重灌 (取代 RawSetCookieQueue.flush + 启动自检)
-    _initialCookieFlushFuture = WebViewCookiePriming.instance.prime(
-      AppConstants.baseUrl,
+    // WebView 使用期开始：从 jar 重灌（取代 RawSetCookieQueue.flush + 启动自检）
+    _webViewUse = WebViewUses.instance.start(
+      WebViewUsePurpose.login,
+      reason: 'webview_login_page',
+      generation: _flowGeneration,
     );
     _loadSavedUsername();
   }
@@ -87,6 +89,8 @@ class _WebViewLoginPageState extends ConsumerState<WebViewLoginPage> {
 
   @override
   void dispose() {
+    // 登录成功的回写已在收口时做完；没登录就关页则什么都不写
+    unawaited(_webViewUse.end(WebViewUseOutcome.aborted));
     _controller?.dispose();
     super.dispose();
   }
@@ -500,12 +504,11 @@ class _WebViewLoginPageState extends ConsumerState<WebViewLoginPage> {
         });
       }
 
-      await BoundarySyncService.instance.syncFromWebView(
-        currentUrl: currentUrl,
+      // 登录还没收口：先带回验证码等非登录 cookie
+      await _webViewUse.checkpoint(
+        WebViewUseOutcome.loginPending,
+        url: currentUrl,
         controller: controller,
-        cookieNames: null,
-        excludeCookieNames: CookieJarService.authCookieNames,
-        requestGeneration: _flowGeneration,
       );
       final tToken = await _readTTokenFromWebView(
         controller,
@@ -628,14 +631,14 @@ class _WebViewLoginPageState extends ConsumerState<WebViewLoginPage> {
     required String? currentUrl,
     required int requestGeneration,
   }) async {
-    await BoundarySyncService.instance.syncFromWebView(
-      currentUrl: currentUrl,
+    // 登录收口：会话代刚推进，这段使用属于新会话；WebView 里是刚登录的
+    // 会话，_t 由 SessionTokenAuthority 可信写进 jar（带过期时间）
+    _webViewUse.rebindGeneration(requestGeneration);
+    await _webViewUse.checkpoint(
+      WebViewUseOutcome.loginSucceeded,
+      reason: 'webview_login_finalize',
+      url: currentUrl,
       controller: controller,
-      cookieNames: CookieJarService.authCookieNames,
-      allowLowConfidenceSessionCookies: true,
-      requestGeneration: requestGeneration,
-      // 登录收口：WebView 里是刚登录的新会话，_t 要写进 jar
-      includeSessionToken: true,
     );
   }
 
@@ -676,14 +679,12 @@ class _WebViewLoginPageState extends ConsumerState<WebViewLoginPage> {
         return false;
       }
 
-      await BoundarySyncService.instance.syncFromWebView(
-        currentUrl: currentUrl,
+      _webViewUse.rebindGeneration(requestGeneration);
+      await _webViewUse.checkpoint(
+        WebViewUseOutcome.loginSucceeded,
+        reason: 'webview_login_runtime_cookies',
+        url: currentUrl,
         controller: controller,
-        cookieNames: null,
-        allowLowConfidenceSessionCookies: true,
-        requestGeneration: requestGeneration,
-        trusted: true,
-        includeSessionToken: true,
       );
       runtimeDetails = await _runtimeCookieDiagnostics();
       var hasRuntimeCookie = _hasRuntimeCookie(runtimeDetails);
@@ -701,14 +702,11 @@ class _WebViewLoginPageState extends ConsumerState<WebViewLoginPage> {
         bootstrapOk = bootstrapResult.ok;
 
         if (AuthSession().isValid(requestGeneration)) {
-          await BoundarySyncService.instance.syncFromWebView(
-            currentUrl: currentUrl,
+          await _webViewUse.checkpoint(
+            WebViewUseOutcome.loginSucceeded,
+            reason: 'webview_login_bootstrap',
+            url: currentUrl,
             controller: controller,
-            cookieNames: null,
-            allowLowConfidenceSessionCookies: true,
-            requestGeneration: requestGeneration,
-            trusted: true,
-            includeSessionToken: true,
           );
           runtimeDetails = await _runtimeCookieDiagnostics();
           hasRuntimeCookie = _hasRuntimeCookie(runtimeDetails);
@@ -1012,10 +1010,8 @@ class _WebViewLoginPageState extends ConsumerState<WebViewLoginPage> {
   }
 
   Future<void> _awaitInitialCookieFlush() async {
-    final future = _initialCookieFlushFuture;
-    if (future == null) return;
     try {
-      await future.timeout(const Duration(seconds: 2));
+      await _webViewUse.ready.timeout(const Duration(seconds: 2));
     } catch (e) {
       debugPrint('[Login] 等待初始 Cookie 回放完成失败: $e');
     }
