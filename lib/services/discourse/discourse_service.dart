@@ -217,12 +217,28 @@ class DiscourseService extends _DiscourseServiceBase
     // 独立 Dio 只装 3 个拦截器,在后台/会话失效窗口撞 CF 会静默失败。
     _cookieSync.attachDio(_dio);
     _initInterceptors();
-    // _t 的唯一真相来源：服务端探测、User API Key 自愈与认证层回调接给它
-    _attachSessionTokenAuthority();
+    // _t 的服务端探测 / 自愈 / 认证回调不在这里接：由启动序列在 priming 之前
+    // 显式调用 [attachSessionTokenAuthority]（见 AppStartup 的会话接线阶段）
     // 加速 DoH 令牌跟随登录账号，只用到 id / 用户名 / 等级
     currentUserNotifier.addListener(
       () =>
           AccelDohAuthService.instance.onUserChanged(currentUserNotifier.value),
+    );
+  }
+
+  /// 把服务端探测、User API Key 自愈与认证层回调接给 [SessionTokenAuthority]
+  /// （`_t` 的唯一真相来源）。
+  ///
+  /// 由启动序列在存储就绪后、WebView priming 之前显式调用。接线惰性解析服务
+  /// 单例：调用本身不会提前构造 DiscourseService（也就不会提前建 Dio），
+  /// 第一次真正探测时才取单例。以前它挂在构造函数上，冷启动时碰巧被
+  /// CfhubProbeAuthService.initialize 顺手构造出来才赶在 priming 之前接上。
+  static void attachSessionTokenAuthority({SessionTokenAuthority? authority}) {
+    final link = _AuthSessionTokenLink(() => DiscourseService());
+    (authority ?? SessionTokenAuthority.instance).attachAuth(
+      probe: link,
+      userApiKey: link,
+      listener: link,
     );
   }
 

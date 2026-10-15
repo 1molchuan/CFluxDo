@@ -55,6 +55,7 @@ import 'services/network/vpn_auto_toggle_service.dart';
 import 'services/network/doh_proxy/proxy_certificate.dart';
 import 'services/cf_challenge_logger.dart';
 import 'services/browser_trust_coordinator.dart';
+import 'services/discourse/discourse_service.dart';
 import 'services/update_service.dart';
 import 'services/update_checker_helper.dart';
 import 'package:fluxdo_render/fluxdo_render.dart'
@@ -257,6 +258,9 @@ Future<void> main() async {
   ];
   final results = await Future.wait(futures);
   final prefs = results[0] as SharedPreferences;
+  // jar 已就绪：先把 _t 的服务端探测 / 自愈 / 认证回调接给 SessionTokenAuthority，
+  // 之后无论谁先构造 DiscourseService，priming 的对账都有探测可用
+  DiscourseService.attachSessionTokenAuthority();
   await AuthIssueNoticeService.instance.initialize(prefs);
 
   // release 下按设置开关启用性能监控(debug/profile 已在上方无条件启用)

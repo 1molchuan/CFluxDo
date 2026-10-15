@@ -502,18 +502,6 @@ mixin _AuthMixin on _DiscourseServiceBase {
     );
   }
 
-  /// 把服务端探测、User API Key 自愈与认证层回调接给 [SessionTokenAuthority]
-  /// （显式依赖，取代原先 AppCookieManager 上的静态回调）。
-  ///
-  /// 注意：仍在 DiscourseService 构造时接入。冷启动时它是被
-  /// CfhubProbeAuthService.initialize 顺手构造出来的（早于 BrowserTrust 的
-  /// priming）；若哪天那条依赖没了，priming 的对账会在没有探测的情况下运行
-  /// （只按血缘，不会采纳），启动顺序的整理见计划第 10 项。
-  void _attachSessionTokenAuthority() {
-    final link = _AuthSessionTokenLink(this);
-    _sessionToken.attachAuth(probe: link, userApiKey: link, listener: link);
-  }
-
   /// 用候选会话 cookie 探测 `/session/current.json`。
   ///
   /// 只有服务端**明确**答复会话失效（404、带登出信号的 401/403，口径同
@@ -1524,14 +1512,19 @@ mixin _AuthMixin on _DiscourseServiceBase {
 
 /// 认证层接给 [SessionTokenAuthority] 的端口实现：服务端探测、User API Key
 /// 自愈、`_t` 被替换 / 被静默删除的回调。
+///
+/// 认证层按需解析（[_resolve]），接线时不构造服务单例；接线入口见
+/// [DiscourseService.attachSessionTokenAuthority]。
 class _AuthSessionTokenLink
     implements
         SessionTokenProbe,
         SessionTokenUserApiKey,
         SessionTokenAuthListener {
-  _AuthSessionTokenLink(this._auth);
+  _AuthSessionTokenLink(this._resolve);
 
-  final _AuthMixin _auth;
+  final _AuthMixin Function() _resolve;
+
+  _AuthMixin get _auth => _resolve();
 
   @override
   Future<SessionTokenProbeResult> probeCandidate(
