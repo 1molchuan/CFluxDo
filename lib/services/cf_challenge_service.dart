@@ -8,9 +8,8 @@ import 'package:app_icons/app_icons.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../constants.dart';
-import 'network/cookie/boundary_sync_service.dart';
 import 'network/cookie/cookie_jar_service.dart';
-import 'session/session_token_authority.dart';
+import 'session/webview_use.dart';
 import 'local_notification_service.dart'; // 用于获取全局 navigatorKey
 import 'cf_challenge_logger.dart';
 import 'cf_clearance_authority.dart';
@@ -745,6 +744,10 @@ class _ServiceRoundEnvironment implements CfRoundEnvironment {
 
   final CfChallengeService _service;
 
+  /// 当前这一轮的 WebView 使用期（同一时间只有一轮）：过盾前对账 `_t`，
+  /// 定稿值落地，过盾后再交 `_t`；轮次撤下时结束。
+  WebViewUse? _webViewUse;
+
   @override
   Future<Object?> ensureUi(BuildContext? context) =>
       _service._resolveUi(context);
@@ -798,22 +801,17 @@ class _ServiceRoundEnvironment implements CfRoundEnvironment {
 
   @override
   Future<void> primeSession() async {
-    // 验证 WebView 与 App 共用 CookieManager。过盾后它会带着 WebView 里的
-    // _t 去加载站内页：若 WebView 没有 _t（从未重灌）就先把 jar 的推过去；
-    // 若与 jar 不一致，只按血缘判断方向，不向服务端探测——探测请求此刻
-    // 自己也会被 CF 拦下。无论结果如何都不阻塞验证流程。
-    try {
-      await SessionTokenAuthority.instance
-          .reconcile(
-            reason: 'cf_challenge_prepare',
-            allowProbe: false,
-            pushIfWebViewEmpty: true,
-            lockTimeout: const Duration(seconds: 3),
-          )
-          .timeout(const Duration(seconds: 5));
-    } catch (e) {
-      debugPrint('[CfChallenge] 过盾前 _t 对账跳过: $e');
-    }
+    // 一轮验证的 WebView 使用期开始。验证 WebView 与 App 共用 CookieManager，
+    // 过盾后它会带着 WebView 里的 _t 去加载站内页：准备阶段只做 _t 的对账
+    // （WebView 没有 _t 就把 jar 的推过去；不一致只按血缘判断、不探测——
+    // 探测请求此刻自己也会被 CF 拦下），有时限，不阻塞验证流程。
+    unawaited(_webViewUse?.end(WebViewUseOutcome.aborted));
+    final use = _webViewUse = WebViewUses.instance.start(
+      WebViewUsePurpose.cfVerification,
+      url: CfChallengeService._verifyUrl,
+      reason: 'cf_verification',
+    );
+    await use.ready;
   }
 
   @override
@@ -836,7 +834,12 @@ class _ServiceRoundEnvironment implements CfRoundEnvironment {
       _service._onJoin(round, mode);
 
   @override
-  void dismiss(CfVerificationRound round) => _service._dismiss(round);
+  void dismiss(CfVerificationRound round) {
+    // 过盾的已在 onPassed 结束；失败 / 撤下的这一轮什么都不再写
+    unawaited(_webViewUse?.end(WebViewUseOutcome.aborted));
+    _webViewUse = null;
+    _service._dismiss(round);
+  }
 
   @override
   Future<String?> land(CfVerificationRound round, String value) async {
@@ -845,12 +848,16 @@ class _ServiceRoundEnvironment implements CfRoundEnvironment {
     // 同步往空 jar 里写过一枚"健康"值）。
     authority.expectVerifiedSuccessor(value);
     try {
-      await BoundarySyncService.instance.syncFromWebView(
-        currentUrl: CfChallengeService._verifyUrl,
+      // 只接受这一枚定稿值、可信写入（口径在 WebViewUses）。轮次会读回
+      // 校验、失败重试，所以这是使用期内的阶段同步，不是结束。
+      final use = _webViewUse ??= WebViewUses.instance.start(
+        WebViewUsePurpose.cfVerification,
+        url: CfChallengeService._verifyUrl,
+        reason: 'cf_verification',
+      );
+      await use.landVerifiedClearance(
+        value,
         controller: _service._pageControllerFor(round),
-        cookieNames: const {CfClearanceAuthority.cookieName},
-        trusted: true,
-        acceptValues: {CfClearanceAuthority.cookieName: value},
       );
     } finally {
       authority.expectVerifiedSuccessor(null);
@@ -862,23 +869,16 @@ class _ServiceRoundEnvironment implements CfRoundEnvironment {
   void onPassed(CfVerificationRound round, String value) {
     // 广播:一次 CF 挑战被成功解决,定稿 cf_clearance 已落 jar。
     _service.clearanceResolvedAt.value = DateTime.now();
-    // 过盾后验证 WebView 会加载站内页，Discourse 可能借此轮换了 _t；
-    // 交给 SessionTokenAuthority 对账（必要时探测服务端）。WebView 若带着
-    // 坏值 / 旧值去加载、被服务端删了 _t，就把 jar 的推回去，让 WebView 尽快
-    // 恢复登录态。不 await：对账可能正等着另一次对账的探测，而那个探测
-    // 恰恰在等这次验证结束。
-    unawaited(
-      SessionTokenAuthority.instance
-          .reconcile(
-            url: CfChallengeService._verifyUrl,
-            reason: 'cf_challenge_passed',
-            pushIfWebViewEmpty: true,
-          )
-          .catchError((Object e) {
-            debugPrint('[CfChallenge] 过盾后 _t 对账失败: $e');
-            return SessionTokenReconcileOutcome.skipped;
-          }),
-    );
+    // 过盾：这一轮的使用期结束，_t 交 SessionTokenAuthority（在后台对账，
+    // 不阻塞：对账可能正等着另一次对账的探测，而那个探测恰恰在等这次验证
+    // 结束；WebView 的 _t 被服务端删了就把 jar 的推回去）。
+    final use = _webViewUse;
+    _webViewUse = null;
+    if (use != null) {
+      unawaited(
+        use.end(WebViewUseOutcome.cfPassed, reason: 'cf_challenge_passed'),
+      );
+    }
   }
 
   @override

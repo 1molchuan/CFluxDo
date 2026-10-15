@@ -14,8 +14,7 @@ import '../services/deep_link_service.dart';
 import '../services/toast_service.dart';
 import '../services/app_link_service.dart';
 import '../services/network/cookie/cookie_store_observer.dart';
-import '../services/network/cookie/webview_cookie_priming.dart';
-import '../services/session/session_token_authority.dart';
+import '../services/session/webview_use.dart';
 import '../services/webview_settings.dart';
 import '../services/windows_webview_environment_service.dart';
 import '../widgets/common/app_link_confirm_dialog.dart';
@@ -69,6 +68,10 @@ class _WebViewPageState extends ConsumerState<WebViewPage> {
   /// hybrid composition（Android）/HWND（Windows）实时回读造成卡顿。
   Uint8List? _webViewSnapshot;
 
+  /// 这个页面的 WebView 使用期：开始时从 jar 重灌，期间定期、关页时把 `_t`
+  /// 交 SessionTokenAuthority（用户浏览不把页面 cookie 带回 jar）。
+  late final WebViewUse _webViewUse;
+
   /// 站内页面长时间停留时 XHR 会让 WebView 自己轮换 _t，而 jar 只在页面
   /// 加载完成时跟一次。定期对账，避免两边分叉超过轮换窗口后 jar 的值被判死。
   Timer? _sessionTokenReconcileTimer;
@@ -79,6 +82,11 @@ class _WebViewPageState extends ConsumerState<WebViewPage> {
     super.initState();
     _currentUrl = widget.url;
     _currentTitle = widget.title ?? '';
+    _webViewUse = WebViewUses.instance.start(
+      WebViewUsePurpose.browsing,
+      url: widget.url.isEmpty ? null : widget.url,
+      reason: 'in_app_browser',
+    );
     // 可见 WebView(hybrid composition)在位期间会参与每帧合成,
     // 打点让诊断时间轴能对齐"WebView 页在前台"与掉帧段
     FrameJankMonitor.logEvent('WEBVIEW', 'WebViewPage mount');
@@ -93,8 +101,17 @@ class _WebViewPageState extends ConsumerState<WebViewPage> {
     FrameJankMonitor.logEvent('WEBVIEW', 'WebViewPage dispose');
     _sessionTokenReconcileTimer?.cancel();
     _sessionTokenReconcileTimer = null;
-    // 关页前最后对一次账：页面里最后几次 XHR 的轮换结果要带回 jar
-    _reconcileSessionToken('in_app_browser_dispose');
+    // 关页前最后对一次账：页面里最后几次 XHR 的轮换结果要交给 authority
+    final siteUrl = _siteUrlCandidate();
+    unawaited(
+      siteUrl == null
+          ? _webViewUse.end(WebViewUseOutcome.aborted)
+          : _webViewUse.end(
+              WebViewUseOutcome.loaded,
+              reason: 'in_app_browser_dispose',
+              url: siteUrl,
+            ),
+    );
     _controller?.dispose();
     super.dispose();
   }
@@ -105,14 +122,14 @@ class _WebViewPageState extends ConsumerState<WebViewPage> {
     final siteUrl = _siteUrlCandidate();
     if (siteUrl == null) return;
     // 站内页打开期间 WebView 的 _t 被服务端删掉（页内请求带了死值）时，
-    // 把 jar 里仍有效的值推过去，页面下一次请求就能恢复登录态。
+    // 把 jar 里仍有效的值推过去，页面下一次请求就能恢复登录态（口径在
+    // WebViewUses）。
     unawaited(
-      SessionTokenAuthority.instance
-          .reconcile(url: siteUrl, reason: reason, pushIfWebViewEmpty: true)
-          .catchError((Object e) {
-            debugPrint('[WebViewPage] _t 对账失败($reason): $e');
-            return SessionTokenReconcileOutcome.skipped;
-          }),
+      _webViewUse.checkpoint(
+        WebViewUseOutcome.loaded,
+        reason: reason,
+        url: siteUrl,
+      ),
     );
   }
 
@@ -308,9 +325,9 @@ class _WebViewPageState extends ConsumerState<WebViewPage> {
                               // 老 WKWebView 的 JS 运行时错误回传到 LogWriter。
                               WebViewSettings.registerJsErrorReporter(controller);
                               if (widget.url.isNotEmpty) {
-                                // v0.4.0: 取代 RawSetCookieQueue.flush
-                                await WebViewCookiePriming.instance
-                                    .prime(widget.url);
+                                // 等使用期的准备（重灌）完成再加载；准备失败
+                                // 也照常加载（取代 RawSetCookieQueue.flush）
+                                await _webViewUse.ready;
                                 await controller.loadUrl(
                                   urlRequest:
                                       URLRequest(url: WebUri(widget.url)),

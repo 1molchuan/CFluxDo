@@ -75,7 +75,7 @@ import 'services/migration_service.dart';
 import 'services/navigation/app_route_observer.dart';
 import 'services/navigation/back_exit_guard.dart';
 import 'services/navigation/keyboard_focus_guard.dart';
-import 'services/session/session_token_authority.dart';
+import 'services/session/webview_use.dart';
 import 'services/webview_settings.dart';
 import 'services/windows_webview_environment_service.dart';
 import 'services/user_presence_service.dart';
@@ -1288,16 +1288,9 @@ class _MainPageState extends ConsumerState<MainPage>
         CookieJarService().reloadPersistedCookies();
       }
       // 后台期间 WebView（站内页 / 适配器）可能自己轮换过 _t，而 jar 没跟上；
-      // 先对账再恢复 message-bus 等原生请求，避免用落后的值去碰服务端。
-      // WebView 没有 _t（后台被服务端删掉 / 存储被清）时直接把 jar 的推过去。
-      // 对账有上限时长，超时就按原流程继续。
-      try {
-        await SessionTokenAuthority.instance
-            .reconcile(reason: 'app_resume', pushIfWebViewEmpty: true)
-            .timeout(const Duration(seconds: 5));
-      } catch (e) {
-        debugPrint('[MainPage] 回前台 _t 对账跳过: $e');
-      }
+      // 先对账再恢复 message-bus 等原生请求，避免用落后的值去碰服务端
+      // （WebView 没有 _t 时把 jar 的推过去；有上限时长，超时按原流程继续）。
+      await WebViewUses.instance.reconcileAfterBackground();
       MessageBusService().exitBackgroundMode();
       if (!mounted) return;
       ref.invalidate(notificationListProvider);
