@@ -11,11 +11,6 @@ class SessionSnapshot {
   bool get hasForumSession => forumSession != null && forumSession!.isNotEmpty;
   String? get fingerprint => hasSession ? tToken : null;
 
-  bool isStableWith(SessionSnapshot other) {
-    return _normalize(tToken) == _normalize(other.tToken) &&
-        _normalize(forumSession) == _normalize(other.forumSession);
-  }
-
   static SessionSnapshot fromValues({
     String? tToken,
     String? forumSession,
