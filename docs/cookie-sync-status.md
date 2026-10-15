@@ -1,5 +1,11 @@
 # Cookie 架构
 
+> 2026-10-15 注：本文停在 v0.3.0，已过时。Cookie 引擎 v0.4.0（#276，b8503b2c）已按
+> [v0.4.0 设计](./cookie-sync-design-v0.4.0.md) 落地：`RawSetCookieQueue`（`raw_set_cookie_queue.dart`）
+> 已删除，改由 `SessionCookieSentinel`（变体清扫）、`WebViewCookiePriming`（WebView 启动前从 jar 重灌）
+> 和 `RawCookieWriter` 承担；`_t` 两端分叉另由 `SessionTokenLineage`（血缘对账）处理。
+> 现状以 `lib/services/network/cookie/` 源码为准。
+
 ## 版本历史
 
 | 版本 | 模型 | 问题 |
@@ -159,7 +165,7 @@ RFC 6265bis (Section 5.7, Step 23) 定义 cookie identity 包含 `host-only-flag
 ### 同步
 
 - [boundary_sync_service.dart](../lib/services/network/cookie/boundary_sync_service.dart) — WebView → jar 边界同步
-- [raw_set_cookie_queue.dart](../lib/services/network/cookie/raw_set_cookie_queue.dart) — jar → WebView 原始头队列
+- ~~raw_set_cookie_queue.dart~~ — jar → WebView 原始头队列（v0.4.0 已删除，见文首注）
 
 ### 基础设施
 
@@ -168,10 +174,10 @@ RFC 6265bis (Section 5.7, Step 23) 定义 cookie identity 包含 `host-only-flag
 - [cookie_value_codec.dart](../lib/services/network/cookie/cookie_value_codec.dart) — RFC 6265 值编码
 - [raw_cookie_writer.dart](../lib/services/network/cookie/raw_cookie_writer.dart) — 原生平台 Set-Cookie 写入
 
-### Android CDP（可选）
+### Android CDP（可选；两个文件已随 #276 删除）
 
-- [android_cdp_feature.dart](../lib/services/network/cookie/android_cdp_feature.dart) — 功能开关（默认关闭）
-- [android_cdp_service.dart](../lib/services/network/cookie/android_cdp_service.dart) — 原生 CDP 通道
+- ~~android_cdp_feature.dart~~ — 功能开关（默认关闭）
+- ~~android_cdp_service.dart~~ — 原生 CDP 通道
 
 ### enhanced_cookie_jar 包
 

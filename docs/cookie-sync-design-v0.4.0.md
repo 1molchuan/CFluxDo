@@ -1,6 +1,7 @@
 # Cookie 架构设计 v0.4.0
 
 > 状态：设计中（未实施）
+> 2026-10-15 注：已随 #276（b8503b2c）落地；`_t` winner 规则与实现的出入见 §5.1.1 的注。
 > 上一版：[v0.3.0 现状](./cookie-sync-status.md)
 > 设计目标：根治多变体导致的"假登录失效"问题
 
@@ -423,6 +424,13 @@ flowchart TD
 4. 都没区分度 → **信 jar，直接用 jar.canonical.value 作 winner**
 
 **关键决策 `[选]`**：Android 上 jar 永远是兜底 winner，等同于"Android 路径上 jar 是最终权威源"。
+
+> 2026-10-15 注：`_t` 已不按这条规则。`lib/services/network/cookie/session_token_lineage.dart`
+> （`SessionTokenLineage` 类注释）明确废弃了「jar 永远赢」：两端 `_t` 分叉时按最后一次一致的值
+> （血缘）判断哪边往前走了，再由服务端探测决定采纳 WebView 的值还是把 jar 的值推回。
+> 但 `SessionCookieSentinel._pickWinner`（auth cookie 只要 jar 有值就取 jar）和 Nuclear Reset
+> （§5.1.2，从 jar 重灌 WebView）仍按「jar 赢」实现。两套规则不一致，是已知问题，
+> 留待计划中的 session token 重构统一。
 
 #### 5.1.2 Nuclear Reset 流程
 
