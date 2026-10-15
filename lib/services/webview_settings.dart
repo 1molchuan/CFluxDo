@@ -11,6 +11,7 @@ import '../constants.dart';
 import 'eruda_settings_service.dart';
 import 'log/log_writer.dart';
 import 'network/doh/network_settings_service.dart';
+import 'network/doh_proxy/wpe_tls_trust.dart';
 
 /// WebView 配置工具类
 /// 区分 Headless（后台同步）和 Visible（用户可见页面）两种场景
@@ -93,6 +94,19 @@ class WebViewSettings {
   static Future<ServerTrustAuthResponse?> handleServerTrustAuthRequest(
     URLAuthenticationChallenge challenge,
   ) async {
+    // Linux（WPE）：只放行代理为该主机签发的那张叶子证书，其余证书错误照常拒绝
+    if (WpeTlsTrust.isApplicable) {
+      final host = challenge.protectionSpace.host;
+      final der =
+          challenge.protectionSpace.sslCertificate?.x509Certificate?.encoded;
+      final trusted = NetworkSettingsService.instance.isGatewayMode &&
+          WpeTlsTrust.isProxyLeaf(host, der);
+      return ServerTrustAuthResponse(
+        action: trusted
+            ? ServerTrustAuthResponseAction.PROCEED
+            : ServerTrustAuthResponseAction.CANCEL,
+      );
+    }
     // Android/macOS: gateway MITM 模式下放行代理 CA 证书。
     // iOS: 使用隧道模式（非 MITM），不会触发代理 CA 信任问题。
     if (NetworkSettingsService.instance.isGatewayMode) {

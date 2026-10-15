@@ -3,7 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:hive_ce/hive.dart';
 import 'package:path/path.dart' as p;
-import 'package:path_provider/path_provider.dart';
+import '../utils/app_data_dir.dart';
 
 /// 应用级 Hive 存储初始化与按账号 box 工厂。
 ///
@@ -142,7 +142,7 @@ class AppDatabase {
         'AppDatabase 暂不支持 Web 平台：书签本地缓存仅在移动端与桌面端启用。',
       );
     }
-    final directory = await getApplicationDocumentsDirectory();
+    final directory = await getAppDataDirectory();
     Hive.init(p.join(directory.path, 'hive'));
     _initialized = true;
   }

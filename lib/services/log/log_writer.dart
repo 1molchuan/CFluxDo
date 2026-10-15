@@ -4,7 +4,7 @@ import 'dart:io';
 
 import 'package:flutter/widgets.dart';
 import 'package:package_info_plus/package_info_plus.dart';
-import 'package:path_provider/path_provider.dart';
+import '../../utils/app_data_dir.dart';
 
 /// 统一日志写入器，所有日志通过此类写入同一个 JSONL 文件
 ///
@@ -179,7 +179,7 @@ class LogWriter {
   static Future<void> _ensureFiles() async {
     if (_file != null) return;
 
-    final dir = await getApplicationDocumentsDirectory();
+    final dir = await getAppDataDirectory();
     final logDir = Directory('${dir.path}/logs');
     if (!logDir.existsSync()) {
       await logDir.create(recursive: true);

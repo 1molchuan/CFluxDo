@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=cfluxdo
+Comment=linux.do 客户端
+Exec=cfluxdo %u
+Icon=com.github.molchuan.cfluxdo
+Terminal=false
+Type=Application
+Categories=Network;
+MimeType=x-scheme-handler/fluxdo;x-scheme-handler/discourse;
+StartupWMClass=com.github.molchuan.cfluxdo

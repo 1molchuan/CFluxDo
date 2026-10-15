@@ -10,6 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../constants.dart';
 import 'discourse_cache_manager.dart';
 import 'network/cookie/cookie_jar_service.dart';
+import '../utils/app_data_dir.dart';
 
 /// 迁移项定义
 class Migration {
@@ -129,7 +130,7 @@ class MigrationService {
       name: 'RawSetCookieQueue removal migration',
       shouldRun: (prefs) async {
         try {
-          final dir = await getApplicationDocumentsDirectory();
+          final dir = await getAppDataDirectory();
           final queueFile = io.File(
             p.join(dir.path, '.cookies', 'pending_set_cookies.json'),
           );
@@ -140,7 +141,7 @@ class MigrationService {
       },
       run: () async {
         try {
-          final dir = await getApplicationDocumentsDirectory();
+          final dir = await getAppDataDirectory();
           final queueFile = io.File(
             p.join(dir.path, '.cookies', 'pending_set_cookies.json'),
           );
@@ -190,7 +191,7 @@ class MigrationService {
       name: 'Purge legacy Hive image cache index',
       shouldRun: (prefs) async {
         try {
-          final dir = await getApplicationDocumentsDirectory();
+          final dir = await getAppDataDirectory();
           final hiveDir = io.Directory(p.join(dir.path, 'hive'));
           if (!await hiveDir.exists()) return false;
           await for (final e in hiveDir.list()) {
@@ -205,7 +206,7 @@ class MigrationService {
         }
       },
       run: () async {
-        final dir = await getApplicationDocumentsDirectory();
+        final dir = await getAppDataDirectory();
         final hiveDir = io.Directory(p.join(dir.path, 'hive'));
         if (!await hiveDir.exists()) return;
         await for (final e in hiveDir.list()) {

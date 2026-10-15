@@ -7,6 +7,7 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 import 'network/discourse_dio.dart';
+import '../utils/app_data_dir.dart';
 
 /// 文件下载服务（单例）
 ///
@@ -184,7 +185,7 @@ class DownloadService {
       }
       return downloadsDir;
     }
-    final appDir = await getApplicationDocumentsDirectory();
+    final appDir = await getAppDataDirectory();
     final fallbackDir = Directory(p.join(appDir.path, 'Downloads'));
     if (!await fallbackDir.exists()) {
       await fallbackDir.create(recursive: true);

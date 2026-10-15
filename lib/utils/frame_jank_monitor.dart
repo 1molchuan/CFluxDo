@@ -8,12 +8,12 @@ import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:package_info_plus/package_info_plus.dart';
-import 'package:path_provider/path_provider.dart';
 
 import '../widgets/common/perf_overlay.dart';
 import 'frame_scheduler_probe.dart';
 import 'jank_profiler.dart';
 import 'perf_layer_inventory.dart';
+import 'app_data_dir.dart';
 
 /// 一条掉帧记录(供诊断页展示与导出)
 class JankRecord {
@@ -868,7 +868,7 @@ class FrameJankMonitor {
   static Future<void> persistSnapshot() async {
     if (!_started || (jankRecords.isEmpty && events.isEmpty)) return;
     try {
-      final dir = await getApplicationDocumentsDirectory();
+      final dir = await getAppDataDirectory();
       final file = File('${dir.path}/logs/perf_diag_last.txt');
       await file.parent.create(recursive: true);
       await file.writeAsString(exportText());
@@ -878,7 +878,7 @@ class FrameJankMonitor {
   /// 上次会话快照文件(不存在时返回 null)。诊断页展示与分享用。
   static Future<File?> snapshotFile() async {
     try {
-      final dir = await getApplicationDocumentsDirectory();
+      final dir = await getAppDataDirectory();
       final file = File('${dir.path}/logs/perf_diag_last.txt');
       return await file.exists() ? file : null;
     } catch (_) {

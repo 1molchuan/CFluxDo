@@ -573,15 +573,14 @@ Future<void> _prepareLinuxNative(_BuildMode mode) async {
       if (mode == _BuildMode.release) '--release',
       '--features',
       'ech',
-      '--bin',
-      'doh_proxy_bin',
+      '--lib',
     ],
     workingDirectory: 'core/doh_proxy',
   );
 
+  // Linux 走进程内 FFI（与 Android 同一套导出），不再用 doh_proxy_bin 进程模式
   final cargoDir = mode == _BuildMode.release ? 'release' : 'debug';
-  _stageFile('core/doh_proxy/target/$cargoDir/doh_proxy_bin', stagedOutputs[0]);
-  await _chmodIfSupported(stagedOutputs[0]);
+  _stageFile('core/doh_proxy/target/$cargoDir/libdoh_proxy.so', stagedOutputs[0]);
   _writeNativeStageStamp('linux', mode);
 }
 
@@ -1265,7 +1264,7 @@ const _macOsStagedOutputs = <String>[
   'macos/Runner/native/doh_proxy_bin',
 ];
 
-const _linuxStagedOutputs = <String>['linux/runner/native/doh_proxy_bin'];
+const _linuxStagedOutputs = <String>['linux/runner/native/libdoh_proxy.so'];
 
 const _iosStagedOutputs = <String>[
   'ios/rust_libs/device/libdoh_proxy.a',

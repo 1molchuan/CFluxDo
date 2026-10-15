@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:ffi/ffi.dart';
 import 'package:flutter/foundation.dart';
+import 'wpe_tls_trust.dart';
 
 class DohHostLookupResult {
   const DohHostLookupResult({
@@ -397,6 +398,8 @@ class DohProxyFfi {
   Pointer<Utf8> Function()? _dohProxySelectStatus;
   int Function()? _dohProxySelectRerace;
   int Function(int, Pointer<Utf8>)? _dohProxySetShareMeasurements;
+  // Linux：取代理为某主机签发的 MITM 叶子证书，给 WPE 逐主机精确放行；可选符号
+  Pointer<Utf8> Function(Pointer<Utf8>)? _dohProxyMitmLeafPem;
   late void Function(Pointer<Utf8>) _dohProxyFreeString;
 
   /// Initialize FFI bindings
@@ -572,6 +575,16 @@ class DohProxyFfi {
       }
 
       try {
+        _dohProxyMitmLeafPem = _lib!
+            .lookup<NativeFunction<Pointer<Utf8> Function(Pointer<Utf8>)>>(
+              'doh_proxy_mitm_leaf_pem',
+            )
+            .asFunction();
+      } catch (_) {
+        _dohProxyMitmLeafPem = null;
+      }
+
+      try {
         _dohProxySelectStatus = _lib!
             .lookup<NativeFunction<Pointer<Utf8> Function()>>(
               'doh_proxy_select_status',
@@ -651,13 +664,25 @@ class DohProxyFfi {
       } else if (Platform.isMacOS) {
         return _loadMacOSLibrary();
       } else if (Platform.isLinux) {
-        return DynamicLibrary.open('libdoh_proxy.so');
+        return _loadLinuxLibrary();
       }
     } catch (e) {
       lastInitError = '加载原生库失败: $e';
       debugPrint('[DOH FFI] $lastInitError');
     }
     return null;
+  }
+
+  /// Linux bundle 把库装在 `<可执行文件目录>/lib/`；按绝对路径打开，
+  /// 不依赖 dlopen 调用方（libflutter）的 RUNPATH
+  DynamicLibrary _loadLinuxLibrary() {
+    const libName = 'libdoh_proxy.so';
+    final execDir = File(Platform.resolvedExecutable).parent.path;
+    final bundled = '$execDir/lib/$libName';
+    if (File(bundled).existsSync()) {
+      return DynamicLibrary.open(bundled);
+    }
+    return DynamicLibrary.open(libName);
   }
 
   DynamicLibrary? _loadWindowsLibrary() {
@@ -754,6 +779,7 @@ class DohProxyFfi {
     String? caKeyPem,
     bool mitmConnect = true,
     bool h2Mitm = false,
+    List<String> mitmHosts = const [],
     String? dohRoutesUrl,
     String? dohRouteTableJson,
     String? dohNodeListJson,
@@ -779,6 +805,12 @@ class DohProxyFfi {
       'gateway_mode': gatewayMode,
       'mitm_connect': mitmConnect,
       'h2_mitm': h2Mitm,
+      // 空 = 除 CF 验证域名外全部 MITM；Linux 的 WPE 只能逐主机放行叶子证书，
+      // 只 MITM 必须走 ECH 的主机（见 WpeTlsTrust）
+      if (mitmHosts.isNotEmpty)
+        'mitm_hosts': mitmHosts
+      else if (Platform.isLinux)
+        'mitm_hosts': WpeTlsTrust.mitmHosts,
       'doh_server': dohServer ?? 'cloudflare',
       'prefer_ipv6': preferIpv6,
       'timeout_secs': 30,
@@ -1065,6 +1097,30 @@ class DohProxyFfi {
     }
   }
 
+  /// 当前代理为 [host] 签发的 MITM 叶子证书 PEM；代理没在跑、库不支持或出错返回 null。
+  /// 代理每次重启叶子都会换，调用方要在重启后重新取
+  String? mitmLeafPem(String host) {
+    if (!_initialized && !initialize()) return null;
+    final fn = _dohProxyMitmLeafPem;
+    if (fn == null) return null;
+
+    final hostPtr = host.toNativeUtf8();
+    try {
+      final resultPtr = fn(hostPtr);
+      if (resultPtr == nullptr) return null;
+      final jsonStr = resultPtr.toDartString();
+      _dohProxyFreeString(resultPtr);
+      final decoded = jsonDecode(jsonStr);
+      if (decoded is! Map<String, dynamic> || decoded['ok'] != true) {
+        debugPrint('[DOH FFI] mitmLeafPem($host): ${decoded is Map ? decoded['error'] : decoded}');
+        return null;
+      }
+      return decoded['pem'] as String?;
+    } finally {
+      calloc.free(hostPtr);
+    }
+  }
+
   /// 查询本地动态优选状态；库不支持、没有优选实例或解析失败返回 null
   DohSelectStatus? selectStatus() {
     if (!_initialized && !initialize()) return null;
@@ -1340,7 +1396,8 @@ class DohProxyFfi {
     return Platform.isAndroid ||
         Platform.isIOS ||
         Platform.isMacOS ||
-        Platform.isWindows;
+        Platform.isWindows ||
+        Platform.isLinux;
   }
 
   /// 桌面平台 FFI 失败时可以回退到进程模式

@@ -595,7 +595,10 @@ class AiChatService {
   }
 
   Future<String> _saveImageBytes(Uint8List bytes, String mime) async {
-    final dir = await getApplicationDocumentsDirectory();
+    // Linux 的 Documents 是用户文件夹（且可能未配置），改用 XDG 数据目录
+    final dir = Platform.isLinux
+        ? await getApplicationSupportDirectory()
+        : await getApplicationDocumentsDirectory();
     final imagesDir = Directory(p.join(dir.path, 'ai_generated_images'));
     if (!imagesDir.existsSync()) imagesDir.createSync(recursive: true);
     final ext = _extFromMime(mime);

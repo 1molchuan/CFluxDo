@@ -4,6 +4,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../discourse_cache_manager.dart';
+import '../../utils/app_data_dir.dart';
 
 /// 图片缓存分类(Telegram Storage Usage 式明细的口径)。
 ///
@@ -149,7 +150,7 @@ class CacheSizeService {
 
   /// 计算 Cookie 缓存大小（.cookies 目录）
   static Future<int> getCookieCacheSize() async {
-    final docDir = await getApplicationDocumentsDirectory();
+    final docDir = await getAppDataDirectory();
     return _getDirectorySize(Directory('${docDir.path}/.cookies'));
   }
 

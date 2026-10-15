@@ -64,25 +64,28 @@ class ConnectivityService {
     receiveTimeout: const Duration(seconds: 5),
   );
 
-  static bool get _isFlatpakSandbox =>
-      Platform.isLinux && Platform.environment.containsKey('FLATPAK_ID');
-
   static bool get _hasSystemBusSocket =>
+      Platform.environment.containsKey('DBUS_SYSTEM_BUS_ADDRESS') ||
       File('/var/run/dbus/system_bus_socket').existsSync();
 
+  /// Linux 的 connectivity_plus 走系统总线上的 NetworkManager。没有系统总线
+  /// （Flatpak 未授权、容器、非 NM 发行版）时插件的连接错误抛在内部订阅里，
+  /// checkConnectivity 的 Future 永远不完成，所以先判断，再加超时兜底
   static bool get _canUseConnectivityPlugin =>
-      !_isFlatpakSandbox || _hasSystemBusSocket;
+      !Platform.isLinux || _hasSystemBusSocket;
 
   static Future<List<ConnectivityResult>> safeCheckConnectivity() async {
     if (!_canUseConnectivityPlugin) {
       debugPrint(
-        '[Connectivity] Flatpak sandbox without system bus, fallback to connected state',
+        '[Connectivity] 没有系统总线，按已连接处理',
       );
       return const [ConnectivityResult.other];
     }
 
     try {
-      return await Connectivity().checkConnectivity();
+      return await Connectivity().checkConnectivity().timeout(
+        const Duration(seconds: 3),
+      );
     } catch (e) {
       debugPrint('[Connectivity] checkConnectivity 失败，fallback to connected state: $e');
       return const [ConnectivityResult.other];

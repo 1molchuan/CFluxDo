@@ -30,6 +30,7 @@ import 'cfhub_api.dart';
 import 'cfhub_probe_auth_service.dart';
 import 'doh_resolver.dart';
 import 'webview_mitm_policy.dart';
+import '../doh_proxy/wpe_tls_trust.dart';
 
 /// 本地动态优选的模式（只在 Android 网关模式下生效）
 enum CfSelectMode {
@@ -1135,6 +1136,7 @@ class NetworkSettingsService {
 
     // macOS 14 以下 / iOS 17 以下调用 setProxyOverride 可能报错
     if (!Platform.isAndroid &&
+        !Platform.isLinux &&
         !await _isMacOS14OrAbove() &&
         !await _isiOS17OrAbove()) {
       return;
@@ -1148,6 +1150,8 @@ class NetworkSettingsService {
       );
       _webViewProxySet = true;
       debugPrint('[DOH] WebView 代理已设置 -> 127.0.0.1:$port');
+      // Linux：代理每次启动叶子证书都会换，设代理的同时重新放行
+      await WpeTlsTrust.preallowProxyLeaves();
     } catch (e) {
       debugPrint('[DOH] WebView 代理设置失败: $e');
     }
@@ -1172,6 +1176,7 @@ class NetworkSettingsService {
     if (!_webViewProxySet) return true;
 
     if (!Platform.isAndroid &&
+        !Platform.isLinux &&
         !await _isMacOS14OrAbove() &&
         !await _isiOS17OrAbove()) {
       return true;
