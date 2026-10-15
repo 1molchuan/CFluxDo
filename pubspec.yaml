@@ -1,7 +1,7 @@
 name: fluxdo
 description: "cfluxdo：基于 FluxDO 的 Linux.do 第三方 Android 客户端"
 publish_to: 'none'
-version: 1.1.0-beta.4+2026101504
+version: 1.1.0+2026101505
 
 environment:
   sdk: ^3.10.4

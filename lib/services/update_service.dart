@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
+
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:dio/dio.dart';
 import 'package:package_info_plus/package_info_plus.dart';
@@ -161,20 +163,29 @@ class UpdateService {
     return packageInfo.version;
   }
 
-  /// 发行包只出这一种 ABI(见 README 构建说明)
-  static const String releaseAbi = 'arm64-v8a';
+  /// 发行包提供的 ABI，按优先级排列(见 README 下载说明)：64 位机优先装 arm64 包
+  static const List<String> releaseAbis = ['arm64-v8a', 'armeabi-v7a'];
 
-  /// 当前设备能否装发行包:supportedAbis 里有 arm64-v8a 即可(64 位 ARM
-  /// 设备都满足;此前的多架构优先级映射对只出一种包的发行没有意义)
-  Future<bool> deviceSupportsReleaseAbi() async {
-    if (!Platform.isAndroid) return false;
+  /// 当前设备应装哪种发行包：按设备自己声明的 ABI 顺序（64 位机把 arm64-v8a
+  /// 排在前面），取第一个我们有包的；都没有返回 null
+  Future<String?> preferredReleaseAbi() async {
+    if (!Platform.isAndroid) return null;
 
     try {
       final androidInfo = await DeviceInfoPlugin().androidInfo;
-      return androidInfo.supportedAbis.contains(releaseAbi);
+      return pickReleaseAbi(androidInfo.supportedAbis);
     } catch (e) {
-      return false;
+      return null;
     }
+  }
+
+  /// 纯函数版：从设备支持的 ABI 列表里挑发行包 ABI
+  @visibleForTesting
+  static String? pickReleaseAbi(List<String> deviceAbis) {
+    for (final abi in deviceAbis) {
+      if (releaseAbis.contains(abi)) return abi;
+    }
+    return null;
   }
 
   /// 自动检查更新（应用启动时调用）
@@ -405,20 +416,38 @@ class UpdateService {
     return apkAssets;
   }
 
-  /// 从 APK 文件名中识别 ABI;发行包只出 arm64-v8a,其余文件一律忽略
-  String? _extractArchitecture(String fileName) =>
-      fileName.contains(releaseAbi) ? releaseAbi : null;
+  /// 从 APK 文件名中识别 ABI（`cfluxdo-1.1.0-arm64-v8a.apk`）；不是发行 ABI 的文件一律忽略
+  @visibleForTesting
+  static String? abiOfFileName(String fileName) {
+    for (final abi in releaseAbis) {
+      if (fileName.endsWith('-$abi.apk')) return abi;
+    }
+    return null;
+  }
 
-  /// 获取当前设备可安装的 APK 资源:设备支持 arm64-v8a 且 Release 里有该包
+  String? _extractArchitecture(String fileName) => abiOfFileName(fileName);
+
+  /// 获取当前设备可安装的 APK 资源：按设备 ABI 优先级，取 Release 里有包的第一个
   Future<ApkAsset?> getMatchingApkAsset(UpdateInfo updateInfo) async {
-    if (!await deviceSupportsReleaseAbi()) return null;
+    List<String> deviceAbis;
+    try {
+      if (!Platform.isAndroid) return null;
+      deviceAbis = (await DeviceInfoPlugin().androidInfo).supportedAbis;
+    } catch (e) {
+      return null;
+    }
+    return pickApkAsset(deviceAbis, updateInfo.apkAssets);
+  }
 
-    for (final asset in updateInfo.apkAssets) {
-      if (asset.architecture == releaseAbi) {
-        return asset;
+  /// 纯函数版：设备声明的 ABI 顺序里，第一个 Release 里有包的
+  @visibleForTesting
+  static ApkAsset? pickApkAsset(List<String> deviceAbis, List<ApkAsset> assets) {
+    for (final abi in deviceAbis) {
+      if (!releaseAbis.contains(abi)) continue;
+      for (final asset in assets) {
+        if (asset.architecture == abi) return asset;
       }
     }
-
     return null;
   }
 
