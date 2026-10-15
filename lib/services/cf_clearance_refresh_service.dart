@@ -10,8 +10,7 @@ import '../utils/frame_jank_monitor.dart';
 import '../utils/scroll_busy_signal.dart';
 import 'cf_challenge_logger.dart';
 import 'cf_clearance_authority.dart';
-import 'network/cookie/boundary_sync_service.dart';
-import 'network/cookie/webview_cookie_priming.dart';
+import 'session/webview_use.dart';
 import 'webview_settings.dart';
 import 'windows_webview_environment_service.dart';
 
@@ -27,7 +26,6 @@ class CfClearanceRefreshService {
   factory CfClearanceRefreshService() => _instance;
   CfClearanceRefreshService._internal();
 
-  static const String _cookieName = 'cf_clearance';
   static const int _maxConsecutiveFailures = 3;
   static const Duration _initialTimeout = Duration(seconds: 45);
 
@@ -55,6 +53,9 @@ class CfClearanceRefreshService {
 
   /// 当前 HeadlessWebView 对应的 controller。
   InAppWebViewController? _webViewController;
+
+  /// 当前续期 WebView 的使用期（准备 + cf_clearance 回写）。
+  WebViewUse? _webViewUse;
 
   bool _isRunning = false;
   bool _isDisposing = false;
@@ -268,12 +269,15 @@ class CfClearanceRefreshService {
   Future<void> _createAndRunWebView(String sitekey, int gen) async {
     if (!_canStartGeneration(gen)) return;
 
-    try {
-      WebViewCookiePriming.instance.invalidate();
-      await WebViewCookiePriming.instance.prime(AppConstants.baseUrl);
-    } catch (e) {
-      debugPrint('[CfRefresh] WebView cookie priming 失败，继续启动: $e');
-      CfChallengeLogger.log('[CfRefresh] WebView cookie priming 失败，继续启动: $e');
+    // 续期 WebView 的使用期：每次重建都强制重灌（失败照常启动），期间每次
+    // 有动静只把 cf_clearance 可信回写，WebView 销毁时结束
+    unawaited(_webViewUse?.end(WebViewUseOutcome.aborted));
+    final webViewUse = _webViewUse = WebViewUses.instance.start(
+      WebViewUsePurpose.clearanceRefresh,
+      reason: 'cf_clearance_refresh',
+    );
+    if (!await webViewUse.ready) {
+      CfChallengeLogger.log('[CfRefresh] WebView cookie priming 失败，继续启动');
     }
     if (!_canStartGeneration(gen)) return;
 
@@ -527,6 +531,8 @@ document.close();
     final controller = _webViewController;
     _headlessWebView = null;
     _webViewController = null;
+    unawaited(_webViewUse?.end(WebViewUseOutcome.aborted));
+    _webViewUse = null;
 
     CfChallengeLogger.log(
       '[CfRefresh] disposing begin: reason=$reason, gen=$_generation',
@@ -675,12 +681,22 @@ document.close();
 
     _isSyncingCookies = true;
     try {
-      await BoundarySyncService.instance.syncFromWebView(
-        currentUrl: AppConstants.baseUrl,
+      final webViewUse = _webViewUse;
+      if (webViewUse == null) return false;
+      final report = await webViewUse.checkpoint(
+        WebViewUseOutcome.loaded,
+        reason: reason,
         controller: controller,
-        cookieNames: const {_cookieName},
-        trusted: true,
       );
+      final sync = report.cookies;
+      if (sync != null &&
+          !sync.completed &&
+          reason != 'poll' &&
+          reason != 'health') {
+        CfChallengeLogger.log(
+          '[CfRefresh] cf_clearance 回写未完成: reason=$reason $sync',
+        );
+      }
 
       if (!_canHandleGeneration(gen)) return false;
       final snapshot = await _readClearanceSnapshot();

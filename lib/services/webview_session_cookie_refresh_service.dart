@@ -9,11 +9,9 @@ import '../constants.dart';
 import '../utils/frame_jank_monitor.dart';
 import 'log/log_writer.dart';
 import 'network/cf/cf_challenge_classifier.dart';
-import 'network/cookie/boundary_sync_service.dart';
 import 'network/cookie/cookie_jar_service.dart';
-import 'network/cookie/webview_cookie_priming.dart';
 import 'preloaded_data_service.dart';
-import 'session/session_token_authority.dart';
+import 'session/webview_use.dart';
 import 'webview_settings.dart';
 import 'windows_webview_environment_service.dart';
 
@@ -315,12 +313,15 @@ class WebViewSessionCookieRefreshService {
   }) async {
     debugPrint('[WebViewSessionSync] 开始运行轻量会话 bootstrap: reason=$reason');
 
-    try {
-      WebViewCookiePriming.instance.invalidate();
-      await WebViewCookiePriming.instance.prime(AppConstants.baseUrl);
-    } catch (e) {
-      debugPrint('[WebViewSessionSync] WebView cookie priming 失败，继续尝试: $e');
-    }
+    // WebView 使用期：开始时强制重灌（重建的 headless WebView，期间 jar 可能
+    // 变了；失败照常继续），bootstrap 跑完（成败都算）全量可信回写，_t 交
+    // SessionTokenAuthority 对账（以前这里不经探测就把 WebView 的 _t 可信
+    // 写进 jar）。期间登出则什么都不写。
+    final webViewUse = WebViewUses.instance.start(
+      WebViewUsePurpose.sessionBootstrap,
+      reason: reason,
+    );
+    await webViewUse.ready;
 
     final loadCompleter = Completer<void>();
     HeadlessInAppWebView? webView;
@@ -329,21 +330,10 @@ class WebViewSessionCookieRefreshService {
     Future<void> syncCookies() async {
       final c = controller;
       if (c == null) return;
-
-      // _t 不在其中（BoundarySync 只在登录收口写 _t）：bootstrap 期间 WebView
-      // 可能轮换了 _t，交 SessionTokenAuthority 对账，服务端探测决定谁对、
-      // 无结论两端都不动（以前这里不经探测就把 WebView 的 _t 可信写进 jar）。
-      await BoundarySyncService.instance.syncFromWebView(
-        currentUrl: AppConstants.baseUrl,
+      await webViewUse.end(
+        WebViewUseOutcome.loaded,
+        reason: 'webview_session_refresh',
         controller: c,
-        cookieNames: null,
-        allowLowConfidenceSessionCookies: true,
-        trusted: true,
-      );
-      unawaited(
-        SessionTokenAuthority.instance.reconcile(
-          reason: 'webview_session_refresh',
-        ),
       );
     }
 
@@ -437,6 +427,8 @@ class WebViewSessionCookieRefreshService {
       debugPrint('[WebViewSessionSync] 刷新浏览器会话 cookie 失败: $e');
       return const SessionBootstrapResult.failure(phase: 'exception');
     } finally {
+      // 没走到回写（控制器为空 / 异常）：按中止结束
+      unawaited(webViewUse.end(WebViewUseOutcome.aborted));
       try {
         await webView.dispose();
       } catch (e) {

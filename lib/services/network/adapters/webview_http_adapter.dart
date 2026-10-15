@@ -8,12 +8,8 @@ import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import '../../../constants.dart';
 import '../../../utils/frame_jank_monitor.dart';
 import '../../auth_session.dart';
+import '../../session/webview_use.dart';
 import '../cookie/app_cookie_manager.dart';
-import '../cookie/boundary_sync_service.dart';
-import '../cookie/cookie_jar_service.dart';
-import '../cookie/session_cookie_sentinel.dart';
-import '../cookie/webview_cookie_priming.dart';
-import '../../session/session_token_authority.dart';
 import '../../webview_settings.dart';
 import '../../windows_webview_environment_service.dart';
 import 'adapter_log_metadata.dart';
@@ -235,6 +231,9 @@ document.close();
     Duration? jsEvalElapsed;
     Duration? browserWaitElapsed;
     Duration? cookieBackSyncElapsed;
+    // 这次请求的 WebView 使用期（站点请求才有）：请求前准备 cookie，
+    // 响应后按结果回写；没走到回写（出错 / 二进制流 / 被节流）就按中止结束。
+    WebViewUse? webViewUse;
 
     try {
       if (!_isInitialized || _controller == null) {
@@ -263,20 +262,20 @@ document.close();
           options.responseType == ResponseType.bytes;
 
       if (prepareAppCookies) {
-        // v0.4.0: 取代 RawSetCookieQueue.flush + _repair + _syncCookiesFromJar
-        // 1. Priming: 确保 WV 中 jar 的 critical cookies 已就绪
-        // 2. sweepAll: 清理 critical cookies 的多变体 (兜底)
-        // 3. mark as path B: 让 onResponse 走路径 B 处理 (跳过 jar 写入,
-        //    sweep 反向同步)
+        // 取代 RawSetCookieQueue.flush + _repair + _syncCookiesFromJar：
+        // WebViewUses 按用途准备（重灌 jar 的 cookie；会回写的请求再兜底清
+        // 一遍多变体；准备失败照常发请求）。会回写的请求标成路径 B，让
+        // onResponse 跳过 jar 写入、由回写把 WebView 的值带回来。
         final cookiePrepWatch = Stopwatch()..start();
-        try {
-          await WebViewCookiePriming.instance.prime(url);
-        } catch (e) {
-          debugPrint('[WebViewAdapter] priming failed (continuing): $e');
-        }
-        if (syncAppCookies) {
-          await SessionCookieSentinel.instance.sweepAll(url);
-        }
+        webViewUse = WebViewUses.instance.start(
+          syncAppCookies
+              ? WebViewUsePurpose.adapterRequest
+              : WebViewUsePurpose.adapterReadOnlyRequest,
+          url: url,
+          reason: 'adapter_back_sync',
+          generation: options.extra['_sessionGeneration'] as int?,
+        );
+        await webViewUse.ready;
         cookiePrepWatch.stop();
         cookiePrepElapsed = cookiePrepWatch.elapsed;
         if (syncAppCookies) {
@@ -468,17 +467,16 @@ document.close();
           statusCode,
           responseHeaders,
         );
-        // 成功的 WebView 登录态请求本身就是服务端认可 session 的证明。
-        // 失败/登出信号路径仍只同步非登录态 cookie，避免旧 _t 回灌。
+        // 成功的 WebView 登录态请求本身就是服务端认可 session 的证明；
+        // 失败 / 登出信号路径只是「拿到了响应」（回写口径见 WebViewUses）。
         final cookieBackSyncWatch = Stopwatch()..start();
         await _syncCriticalCookiesBackToJar(
           url,
+          webViewUse!,
           force: trustsWebViewSession || (method != 'GET' && method != 'HEAD'),
-          requestGeneration: options.extra['_sessionGeneration'] as int?,
-          excludeCookieNames: trustsWebViewSession
-              ? null
-              : CookieJarService.authCookieNames,
-          webViewSessionVerified: trustsWebViewSession,
+          outcome: trustsWebViewSession
+              ? WebViewUseOutcome.sessionAccepted
+              : WebViewUseOutcome.loaded,
         );
         cookieBackSyncWatch.stop();
         cookieBackSyncElapsed = cookieBackSyncWatch.elapsed;
@@ -508,6 +506,8 @@ document.close();
         headers: responseHeaders,
       );
     } finally {
+      // 已回写的使用期这里是空操作
+      unawaited(webViewUse?.end(WebViewUseOutcome.aborted));
       _activeFetches--;
       if (_activeFetches == 0 && _disposeWhenIdle) {
         close(force: false);
@@ -1525,12 +1525,14 @@ document.close();
     }
   }
 
+  /// 响应后的回写：同一个适配器上的并发 / 高频请求合并（800ms 内的 GET 直接
+  /// 复用进行中的那次；登录态请求与写请求强制再跑一次）。被合并掉的请求
+  /// 不回写，由 fetch 的 finally 按中止结束它的使用期。
   Future<void> _syncCriticalCookiesBackToJar(
-    String currentUrl, {
+    String currentUrl,
+    WebViewUse use, {
     bool force = false,
-    int? requestGeneration,
-    Set<String>? excludeCookieNames,
-    bool webViewSessionVerified = false,
+    required WebViewUseOutcome outcome,
   }) async {
     final controller = _controller;
     if (controller == null) return;
@@ -1554,13 +1556,9 @@ document.close();
       if (!force) return;
     }
 
-    final future = _runCriticalCookieBackSync(
-      currentUrl,
-      controller,
-      requestGeneration: requestGeneration,
-      excludeCookieNames: excludeCookieNames,
-      webViewSessionVerified: webViewSessionVerified,
-    );
+    // 回写口径与 _t 交接（服务端认可会话时交 SessionTokenAuthority 对账，
+    // 等它完成再交回响应）都在 WebViewUses
+    final future = use.end(outcome, url: currentUrl, controller: controller);
 
     _activeCriticalCookieSync = future.whenComplete(() {
       _lastCriticalCookieSyncAt = DateTime.now();
@@ -1568,41 +1566,6 @@ document.close();
     });
 
     await _activeCriticalCookieSync!;
-  }
-
-  Future<void> _runCriticalCookieBackSync(
-    String currentUrl,
-    InAppWebViewController controller, {
-    int? requestGeneration,
-    Set<String>? excludeCookieNames,
-    bool webViewSessionVerified = false,
-  }) async {
-    await BoundarySyncService.instance.syncFromWebView(
-      currentUrl: currentUrl,
-      controller: controller,
-      cookieNames: CookieJarService.criticalCookieNames,
-      excludeCookieNames: excludeCookieNames,
-      requestGeneration: requestGeneration,
-    );
-    if (!webViewSessionVerified) return;
-
-    // 服务端刚刚认可了 WebView 的登录态：WebView 里的 _t 若与 jar 不同，
-    // 由 SessionTokenAuthority 决定是采纳（WebView 轮换到了新值，jar 落后）
-    // 还是推回（jar 刚轮换、WebView 还拿着上一枚）。上面的回写不带 _t
-    // （BoundarySync 只在登录收口写 _t）——以前那是一次非可信写入，jar 里
-    // 的值版本号更高时会被静默丢弃，版本号相同时又会不经探测顶掉 jar。
-    try {
-      await SessionTokenAuthority.instance.reconcile(
-        url: currentUrl,
-        reason: 'adapter_back_sync',
-        requestGeneration: requestGeneration,
-        webViewVerified: true,
-        // 别让一次正在探测的对账拖住适配器响应；下一个请求会再来。
-        lockTimeout: const Duration(seconds: 3),
-      );
-    } catch (e) {
-      debugPrint('[WebViewAdapter] _t 血缘对账失败: $e');
-    }
   }
 }
 

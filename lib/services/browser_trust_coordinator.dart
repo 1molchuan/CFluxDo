@@ -15,11 +15,10 @@ import 'cf_clearance_authority.dart';
 import 'cf_clearance_refresh_service.dart';
 import 'network/cf/cf_round_outcome.dart';
 import 'discourse/discourse_service.dart';
-import 'network/cookie/boundary_sync_service.dart';
 import 'network/cookie/cookie_jar_service.dart';
 import 'network/cookie/webview_cookie_priming.dart';
 import 'preloaded_data_service.dart';
-import 'session/session_token_authority.dart';
+import 'session/webview_use.dart';
 import 'startup_progress.dart';
 import 'webview_session_cookie_refresh_service.dart';
 import 'webview_settings.dart';
@@ -520,7 +519,35 @@ class BrowserTrustCoordinator {
     required String reason,
     required BrowserTrustRunCancellation cancellation,
   }) async {
-    await _primeWebViewCookies(reason: '$reason:webview_preload');
+    // WebView 使用期：开始时从 jar 重灌（失败照常预载、记日志），首页加载
+    // 完与 bootstrap 跑完各回写一次，结束时不再回写
+    final webViewUse = WebViewUses.instance.start(
+      WebViewUsePurpose.startupPreload,
+      reason: '$reason:webview_preload',
+    );
+    try {
+      return await _runPreloadWebView(
+        webViewUse,
+        reason: reason,
+        cancellation: cancellation,
+      );
+    } finally {
+      unawaited(webViewUse.end(WebViewUseOutcome.aborted));
+    }
+  }
+
+  Future<bool> _runPreloadWebView(
+    WebViewUse webViewUse, {
+    required String reason,
+    required BrowserTrustRunCancellation cancellation,
+  }) async {
+    if (!await webViewUse.ready) {
+      _log(
+        'WebView cookie priming failed: reason=$reason:webview_preload, '
+        'continue preload',
+        level: 'warning',
+      );
+    }
     if (cancellation.isCancelled) return false;
     _log('startup WebView create reason=$reason');
 
@@ -594,7 +621,11 @@ class BrowserTrustCoordinator {
       await _waitForLoad(loadCompleter, cancellation: cancellation);
       if (cancellation.isCancelled) return false;
       _log('startup WebView home loaded, syncing cookies reason=$reason');
-      await _syncCookiesFromController(c, reason: 'browser_trust_home');
+      await webViewUse.checkpoint(
+        WebViewUseOutcome.loaded,
+        reason: 'browser_trust_home',
+        controller: c,
+      );
       if (cancellation.isCancelled) return false;
 
       _progress.set(StartupStage.webViewSnapshot);
@@ -626,7 +657,11 @@ class BrowserTrustCoordinator {
             );
         if (cancellation.isCancelled) return false;
         final bootstrapped = bootstrapResult.ok;
-        await _syncCookiesFromController(c, reason: 'browser_trust_bootstrap');
+        await webViewUse.checkpoint(
+          WebViewUseOutcome.loaded,
+          reason: 'browser_trust_bootstrap',
+          controller: c,
+        );
         if (cancellation.isCancelled) return false;
         final runtimeDetails = await _jar.getCookieDiagnosticsForRequest(
           Uri.parse(AppConstants.baseUrl),
@@ -712,26 +747,6 @@ class BrowserTrustCoordinator {
       ]);
     }
     return null;
-  }
-
-  Future<void> _syncCookiesFromController(
-    InAppWebViewController controller, {
-    required String reason,
-  }) async {
-    // 其余 cookie 照常可信同步；_t 不在其中（BoundarySync 只在登录收口写
-    // _t）：WebView 的 _t 交 SessionTokenAuthority 对账，服务端探测决定 jar
-    // 与 WebView 谁对，探测无结论两端都不动。以前这里把 WebView 的 _t 不经
-    // 探测可信写进 jar——WebView 的值坏了（或是旧值）而启动又撞上 CF 盾时，
-    // jar 里的活值被顶掉，过盾后随即被判失效、被动登出。
-    // 不等对账：探测可能要几秒，启动预载不该被它拖住。
-    await BoundarySyncService.instance.syncFromWebView(
-      currentUrl: AppConstants.baseUrl,
-      controller: controller,
-      cookieNames: null,
-      allowLowConfidenceSessionCookies: true,
-      trusted: true,
-    );
-    unawaited(SessionTokenAuthority.instance.reconcile(reason: reason));
   }
 
   /// 冷启动能否直接走原生链路预加载首页（剩余有效期门槛见
