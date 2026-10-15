@@ -110,6 +110,10 @@ class AccelDohAuthService extends ChangeNotifier {
   @visibleForTesting
   Future<bool?> Function()? debugAskConsent;
 
+  /// 测试用：手动授权重试前不真等
+  @visibleForTesting
+  Future<void> Function(Duration delay)? debugSleep;
+
   SharedPreferences? _prefs;
   ConnectTokenTransport? _defaultTransport;
   ConnectBoundToken? _boundToken;
@@ -149,6 +153,7 @@ class AccelDohAuthService extends ChangeNotifier {
     flow: () => debugConnectFlow ?? (_defaultFlow ??= ConnectCodeFlow()),
     // 主动退出后 _user 为 null：进行中的结果一律丢弃
     currentUserId: () => _user?.id,
+    sleep: debugSleep,
   );
 
   Future<bool?> _askConsent() => (debugAskConsent ?? askAccelDohConsent)();
@@ -226,6 +231,8 @@ class AccelDohAuthService extends ChangeNotifier {
   }
 
   /// 用户在设置里点了「用 L 站 Connect 授权」：没同意过就先弹说明，然后立即授权
+  ///
+  /// 网络类失败整条链路最多重来 2 次（2 s / 4 s）；后台自动授权仍只走一次、失败按退避再试
   Future<AccelDohAuthStatus> authorizeNow() async {
     final user = _user;
     if (_prefs == null || user == null || user.trustLevel < minTrustLevel) {

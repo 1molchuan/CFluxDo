@@ -19,9 +19,8 @@ abstract final class CfhubApi {
     tokenPattern: RegExp(r'^cfp_[\x21-\x7E]{1,4096}$'),
     // cfhub 接口还没开放时回 404
     notFoundMeansUnavailable: true,
-    // 整条链路（取授权地址 → Connect → 换令牌）有 4 跳、每跳只请求一次，
-    // 移动网络上任一跳瞬时失败就整体失败，所以网络类失败最多重来 2 次
-    retryDelays: const [Duration(seconds: 2), Duration(seconds: 4)],
+    // 开启都是用户手动点的：网络类失败整条链路重来
+    retryDelays: ConnectTokenPolicy.manualRetryDelays,
     connectRequestTag: 'cfhub_connect',
   );
 

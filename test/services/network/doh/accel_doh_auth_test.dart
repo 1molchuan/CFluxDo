@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fluxdo/models/user.dart';
@@ -51,6 +52,7 @@ void main() {
     final api = _FakeServer();
     final flow = FakeConnectFlow();
     final consent = _FakeConsent();
+    final sleeps = <Duration>[];
 
     late DohServer accelServer;
 
@@ -80,6 +82,9 @@ void main() {
         ..debugTransport = api.transport()
         ..debugConnectFlow = flow
         ..debugAskConsent = consent.ask
+        ..debugSleep = (delay) async {
+          sleeps.add(delay);
+        }
         ..consentPromptDelay = Duration.zero
         ..rejectCooldown = Duration.zero;
       await service.initialize(prefs);
@@ -231,6 +236,35 @@ void main() {
       expect(prefs.getBool('doh_accel_member'), isNull);
       expect(prefs.getString('doh_accel_last_connect'), isNull);
       expect(activeUrl(), accelDohPublicServer.url);
+    });
+
+    test('网络类失败：后台自动授权只走一次，菜单里手动授权整条链路重来 2 次', () async {
+      api.calls.clear();
+      api.reply(
+        api.policy.startPath,
+        (_) => throw const SocketException('offline'),
+      );
+      consent.answer = true;
+      auth.onUserChanged(User(id: 10, username: 'dave', trustLevel: 2));
+      await pumpEventQueue();
+      // 同意后的自动授权：失败交给原来的退避（1 分钟后再试），不在这里重来
+      expect(api.startCalls, 1);
+      expect(sleeps, isEmpty);
+      expect(auth.status, AccelDohAuthStatus.pending);
+
+      final status = await auth.authorizeNow();
+      expect(api.startCalls, 4);
+      expect(sleeps, const [Duration(seconds: 2), Duration(seconds: 4)]);
+      expect(status, AccelDohAuthStatus.pending);
+      expect(auth.token, isNull);
+
+      // 网络恢复后再点一次：成功
+      api.respond(api.policy.startPath, 200, {
+        'authorize_url': FakeTokenServer.authorizeUrl,
+      });
+      api.issue('token-10');
+      expect(await auth.authorizeNow(), AccelDohAuthStatus.ready);
+      expect(auth.token, 'token-10');
     });
   });
 }

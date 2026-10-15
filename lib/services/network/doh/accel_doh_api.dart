@@ -18,6 +18,8 @@ abstract final class AccelDohApi {
     tokenPattern: RegExp(r'^[\x21-\x7E]{1,4096}$'),
     // 服务端没给 expires_in 时按这个有效期算
     defaultLifetime: const Duration(hours: 24),
+    // 只用于菜单里的手动授权；后台自动授权 / 续期失败走 AccelDohAuthService 自己的退避
+    retryDelays: ConnectTokenPolicy.manualRetryDelays,
     connectRequestTag: 'accel_doh_connect',
   );
 
