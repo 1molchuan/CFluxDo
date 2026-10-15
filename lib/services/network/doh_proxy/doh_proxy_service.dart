@@ -1081,6 +1081,34 @@ class DohProxyService {
     );
   }
 
+  /// 报告连 [host] -> [ip] 失败（作废粘性 IP；[ip] 是钉住的优选赢家时计入它的连败）
+  Future<bool> reportHostFailure(
+    String host,
+    String dohServer, {
+    String? dohServerEch,
+    bool preferIpv6 = false,
+    required String ip,
+  }) async {
+    if (!DohProxyFfi.isAvailable) {
+      return DohProxyFfi.instance.reportHostFailure(
+        host,
+        dohServer,
+        dohServerEch: dohServerEch,
+        preferIpv6: preferIpv6,
+        ip: ip,
+      );
+    }
+    return _enqueueFfiOp(
+      () => _callFfiReportHostFailure(
+        host,
+        dohServer,
+        dohServerEch: dohServerEch,
+        preferIpv6: preferIpv6,
+        ip: ip,
+      ),
+    );
+  }
+
   Future<bool> clearPreferredHostIp(
     String host,
     String dohServer, {
@@ -1308,6 +1336,7 @@ class DohProxyService {
         preferredIp: data['preferredIp']?.toString(),
         echConfig: data['echConfig'] as Uint8List?,
         ttl: Duration(milliseconds: ttlMs),
+        pinned: data['pinned'] == true,
       );
     }
     return null;
@@ -1366,6 +1395,29 @@ class DohProxyService {
     final response = ReceivePort();
     sendPort.send({
       'cmd': 'record_host_success',
+      'host': host,
+      'dohServer': dohServer,
+      'dohServerEch': dohServerEch,
+      'preferIpv6': preferIpv6,
+      'ip': ip,
+      'replyTo': response.sendPort,
+    });
+    final result = await response.first;
+    response.close();
+    return result is Map && result['ok'] == true;
+  }
+
+  Future<bool> _callFfiReportHostFailure(
+    String host,
+    String dohServer, {
+    required String? dohServerEch,
+    required bool preferIpv6,
+    required String ip,
+  }) async {
+    final sendPort = await _ensureFfiIsolate();
+    final response = ReceivePort();
+    sendPort.send({
+      'cmd': 'report_host_failure',
       'host': host,
       'dohServer': dohServer,
       'dohServerEch': dohServerEch,
@@ -1672,6 +1724,7 @@ void _ffiIsolateEntry(SendPort mainSendPort) {
                     'preferredIp': result.preferredIp,
                     'echConfig': result.echConfig,
                     'ttl_ms': result.ttl.inMilliseconds,
+                    'pinned': result.pinned,
                   },
           });
           return;
@@ -1790,6 +1843,21 @@ void _ffiIsolateEntry(SendPort mainSendPort) {
           final preferIpv6 = message['preferIpv6'] as bool? ?? false;
           final ip = message['ip'] as String? ?? '';
           final ok = DohProxyFfi.instance.recordHostSuccess(
+            host,
+            dohServer,
+            dohServerEch: dohServerEch,
+            preferIpv6: preferIpv6,
+            ip: ip,
+          );
+          replyTo.send({'ok': ok});
+          return;
+        case 'report_host_failure':
+          final host = message['host'] as String? ?? '';
+          final dohServer = message['dohServer'] as String? ?? '';
+          final dohServerEch = message['dohServerEch'] as String?;
+          final preferIpv6 = message['preferIpv6'] as bool? ?? false;
+          final ip = message['ip'] as String? ?? '';
+          final ok = DohProxyFfi.instance.reportHostFailure(
             host,
             dohServer,
             dohServerEch: dohServerEch,

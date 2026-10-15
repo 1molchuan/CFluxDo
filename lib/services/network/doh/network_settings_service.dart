@@ -184,6 +184,7 @@ class _ResolvedHostEntry {
     required this.echConfig,
     required this.ttl,
     required this.resolvedAt,
+    this.pinned = false,
   }) : expiresAt = resolvedAt.add(ttl);
 
   final List<String> ips;
@@ -192,6 +193,9 @@ class _ResolvedHostEntry {
   final Duration ttl;
   final DateTime resolvedAt;
   final DateTime expiresAt;
+
+  /// Rust（EdgePin）把该域名钉在本地优选赢家上，[ips] 按原样用
+  final bool pinned;
 
   bool get hasData => ips.isNotEmpty || (echConfig?.isNotEmpty ?? false);
   bool get isExpired => !expiresAt.isAfter(DateTime.now());
@@ -750,7 +754,12 @@ class NetworkSettingsService {
         debugPrint('[DOH] 读取本地优选状态失败: $e');
       }
     }
+    final previousWinner = selectStatusNotifier.value?.winnerIp;
     selectStatusNotifier.value = status;
+    // 优选赢家换了：钉在旧赢家上的条目作废，rhttp 下一个请求就跟上新赢家
+    if (status?.winnerIp != previousWinner) {
+      _dropPinnedHostEntries();
+    }
     return status;
   }
 
@@ -1350,6 +1359,15 @@ class NetworkSettingsService {
       normalizedHost,
       forceRefresh: forceRefresh,
     );
+    // 钉在优选赢家上的域名原样用 Rust 给的地址（赢家在前、只有同族兜底），不叠加本地的
+    // 失败惩罚和粘性挑选：linux.do 各子域换 IP / 换地址族会让 cf_clearance 对不上出口
+    if (entry != null && entry.pinned && serverIpOverride == null) {
+      return ResolvedHostConfig(
+        dnsOverrides: entry.ips,
+        preferredIp: entry.preferredIp,
+        echConfig: entry.echConfig,
+      );
+    }
     final orderedIps = _applyHostIpPenalties(
       normalizedHost,
       entry?.ips ?? const [],
@@ -1378,23 +1396,39 @@ class NetworkSettingsService {
       return;
     }
 
-    _evictExpiredHostIpPenalties();
-    final penalties = _hostIpPenaltyCache.putIfAbsent(
-      normalizedHost,
-      () => <String, DateTime>{},
-    );
-    penalties[normalizedIp] = DateTime.now().add(_failedHostIpPenaltyTtl);
+    if (_resolvedHostCache[normalizedHost]?.pinned ?? false) {
+      // 钉住的域名不在本地记惩罚：失败报给 Rust 计入赢家连败（达阈值 Rust 解除钉住、重新优选），
+      // 并丢掉所有钉住的条目，下一个请求重新问 Rust，覆盖域名一起换
+      _dropPinnedHostEntries();
+    } else {
+      _evictExpiredHostIpPenalties();
+      final penalties = _hostIpPenaltyCache.putIfAbsent(
+        normalizedHost,
+        () => <String, DateTime>{},
+      );
+      penalties[normalizedIp] = DateTime.now().add(_failedHostIpPenaltyTtl);
+    }
     if (current.dohEnabled) {
       final dohServer = _activeServerUrl;
       final dohServerEch = _effectiveEchServerUrl ?? _activeServerUrl;
       unawaited(
-        _rustProxyService.clearPreferredHostIp(
+        _rustProxyService.reportHostFailure(
           normalizedHost,
           dohServer,
           dohServerEch: dohServerEch,
           preferIpv6: current.preferIPv6,
+          ip: normalizedIp,
         ),
       );
+    }
+  }
+
+  /// 丢掉钉在优选赢家上的缓存条目：赢家连不上或换了时，下一个请求重新问 Rust
+  void _dropPinnedHostEntries() {
+    final before = _resolvedHostCache.length;
+    _resolvedHostCache.removeWhere((_, entry) => entry.pinned);
+    if (_resolvedHostCache.length != before) {
+      _updateLocalDnsCacheStats();
     }
   }
 
@@ -1595,6 +1629,7 @@ class NetworkSettingsService {
         echConfig: rustResult.echConfig,
         ttl: _clampDnsTtl(rustResult.ttl),
         resolvedAt: resolvedAt,
+        pinned: rustResult.pinned,
       );
       _resolvedHostCache[host] = entry;
       _updateLocalDnsCacheStats();

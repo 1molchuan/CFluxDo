@@ -11,12 +11,17 @@ class DohHostLookupResult {
     required this.ttl,
     this.preferredIp,
     this.echConfig,
+    this.pinned = false,
   });
 
   final List<String> ips;
   final String? preferredIp;
   final Uint8List? echConfig;
   final Duration ttl;
+
+  /// Rust 把该域名钉在本地优选赢家上：[ips] 是赢家及同族兜底，按原样使用，
+  /// 不要再按失败惩罚换 IP（cf_clearance 绑出口，换了就撞盾）
+  final bool pinned;
 
   bool get hasData => ips.isNotEmpty || (echConfig?.isNotEmpty ?? false);
 }
@@ -301,6 +306,9 @@ class DohProxyFfi {
   _dohProxyRecordHostSuccess;
   late int Function(Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>, int)
   _dohProxyClearPreferredHostIp;
+  // 带 IP 的连接失败回报（计入赢家连败），旧版本库没有时回退到清粘性 IP
+  int Function(Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>, int, Pointer<Utf8>)?
+  _dohProxyReportHostFailure;
   Pointer<Utf8> Function()? _dohProxyDnsCacheStats;
   Pointer<Utf8> Function()? _dohProxyDnsCacheRecords;
   Pointer<Utf8> Function()? _dohProxyGenerateCa;
@@ -400,6 +408,24 @@ class DohProxyFfi {
             >
           >('doh_proxy_clear_preferred_host_ip')
           .asFunction();
+
+      try {
+        _dohProxyReportHostFailure = _lib!
+            .lookup<
+              NativeFunction<
+                Int32 Function(
+                  Pointer<Utf8>,
+                  Pointer<Utf8>,
+                  Pointer<Utf8>,
+                  Int32,
+                  Pointer<Utf8>,
+                )
+              >
+            >('doh_proxy_report_host_failure')
+            .asFunction();
+      } catch (_) {
+        _dohProxyReportHostFailure = null;
+      }
 
       try {
         _dohProxyDnsCacheStats = _lib!
@@ -882,6 +908,7 @@ class DohProxyFfi {
               ? base64Decode(echBase64)
               : null,
           ttl: Duration(seconds: ttlSecs),
+          pinned: map['pinned'] == true,
         );
       }
       debugPrint('[DOH FFI] Host lookup: ${map['error'] ?? 'unknown error'}');
@@ -1129,6 +1156,45 @@ class DohProxyFfi {
             ipPtr,
           ) !=
           0;
+    } finally {
+      calloc.free(hostPtr);
+      calloc.free(dohPtr);
+      calloc.free(ipPtr);
+      if (hasEchPtr) {
+        calloc.free(echPtr);
+      }
+    }
+  }
+
+  /// 报告连 [host] -> [ip] 失败：Rust 作废该域名的粘性 IP，[ip] 是钉住的赢家时计入它的连败。
+  /// 旧版本库没有该符号时退化为 [clearPreferredHostIp]
+  bool reportHostFailure(
+    String host,
+    String dohServer, {
+    String? dohServerEch,
+    bool preferIpv6 = false,
+    required String ip,
+  }) {
+    if (!_initialized && !initialize()) return false;
+    final report = _dohProxyReportHostFailure;
+    if (report == null) {
+      return clearPreferredHostIp(
+        host,
+        dohServer,
+        dohServerEch: dohServerEch,
+        preferIpv6: preferIpv6,
+      );
+    }
+
+    final hostPtr = host.toNativeUtf8();
+    final dohPtr = dohServer.toNativeUtf8();
+    final hasEchPtr = dohServerEch != null && dohServerEch.isNotEmpty;
+    final echPtr = hasEchPtr
+        ? dohServerEch.toNativeUtf8()
+        : nullptr.cast<Utf8>();
+    final ipPtr = ip.toNativeUtf8();
+    try {
+      return report(hostPtr, dohPtr, echPtr, preferIpv6 ? 1 : 0, ipPtr) != 0;
     } finally {
       calloc.free(hostPtr);
       calloc.free(dohPtr);
