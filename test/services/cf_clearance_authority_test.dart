@@ -30,13 +30,15 @@ void main() {
   }
 
   setUp(() {
-    authority = CfClearanceAuthority.instance..reset();
+    authority = CfClearanceAuthority.instance..debugResetAll();
     authority.debugCookieReader = null;
+    authority.debugNow = null;
   });
 
   tearDown(() {
     authority.debugCookieReader = null;
-    authority.reset();
+    authority.debugNow = null;
+    authority.debugResetAll();
   });
 
   group('evaluateReplacement 放行条件', () {
@@ -243,6 +245,289 @@ void main() {
       authority.reset();
       expect(authority.isKnownChallenged('dead'), isFalse);
       expect(authority.hasObservedWebViewValue('seen'), isFalse);
+    });
+  });
+
+  group('按 host 的可用性账本', () {
+    const main = 'linux.do';
+    const cdk = 'cdk.linux.do';
+    late DateTime now;
+
+    void advance(Duration d) => now = now.add(d);
+
+    setUp(() {
+      now = DateTime(2026, 10, 15, 12);
+      authority.debugNow = () => now;
+    });
+
+    CanonicalCookie live(String value, {Duration ttl = const Duration(days: 7)}) =>
+        CanonicalCookie(
+          name: 'cf_clearance',
+          value: value,
+          domain: '.linux.do',
+          expiresAt: now.add(ttl),
+        );
+
+    test('bootstrap 被 CF 挡下 → 请求门与原生预加载都不可信', () async {
+      jarWith(live('v1'));
+      expect(
+        (await authority.status(main, purpose: CfClearancePurpose.requestGate))
+            .usable,
+        isTrue,
+      );
+
+      authority.noteRejected(main, value: 'v1');
+
+      for (final purpose in [
+        CfClearancePurpose.requestGate,
+        CfClearancePurpose.nativePreload,
+      ]) {
+        final status = await authority.status(main, purpose: purpose);
+        expect(status.verdict, CfClearanceVerdict.recentlyRejected);
+        expect(status.present, isTrue, reason: '值还在，只是不可信');
+      }
+    });
+
+    test('被拒窗口：jar 换上别的值即解除，否则 2 分钟后自然过期', () async {
+      jarWith(live('v1'));
+      authority.noteRejected(main, value: 'v1');
+
+      jarWith(live('v2'));
+      expect(
+        (await authority.status(main, purpose: CfClearancePurpose.requestGate))
+            .usable,
+        isTrue,
+        reason: '被拒的是 v1，新值不受牵连',
+      );
+
+      jarWith(live('v1'));
+      advance(const Duration(minutes: 1, seconds: 59));
+      expect(
+        (await authority.status(main, purpose: CfClearancePurpose.requestGate))
+            .verdict,
+        CfClearanceVerdict.recentlyRejected,
+      );
+      advance(const Duration(seconds: 1));
+      expect(
+        (await authority.status(main, purpose: CfClearancePurpose.requestGate))
+            .usable,
+        isTrue,
+      );
+    });
+
+    test('不知道被拒的是哪枚时窗口内一律不可信，拿到新值后显式解除', () async {
+      jarWith(live('v1'));
+      authority.noteRejected(main);
+      jarWith(live('v2'));
+      expect(
+        (await authority.status(main, purpose: CfClearancePurpose.requestGate))
+            .verdict,
+        CfClearanceVerdict.recentlyRejected,
+      );
+
+      authority.clearRejection(main);
+      expect(
+        (await authority.status(main, purpose: CfClearancePurpose.requestGate))
+            .usable,
+        isTrue,
+      );
+    });
+
+    test('拒绝只记在被拒的 host 上', () async {
+      jarWith(live('v1'));
+      authority.noteRejected(cdk, value: 'v1');
+      expect(
+        (await authority.status(main, purpose: CfClearancePurpose.requestGate))
+            .usable,
+        isTrue,
+      );
+    });
+
+    test('cdk 上定稿值无效 → 只冷却 cdk，主站与其他子域不受影响', () {
+      authority.startIneffectiveCooldown(cdk);
+
+      expect(authority.isCoolingDown(cdk), isTrue);
+      expect(authority.isCoolingDown(main), isFalse);
+      expect(authority.isCoolingDown('credit.linux.do'), isFalse);
+
+      advance(CfClearanceAuthority.ineffectiveCooldown);
+      advance(const Duration(milliseconds: 1));
+      expect(authority.isCoolingDown(cdk), isFalse);
+    });
+
+    test('验证本身连续失败是全站冷却：子域也不再起验证', () {
+      authority.recordVerifyFailure(round: 1);
+      authority.recordVerifyFailure(round: 1);
+      authority.recordVerifyFailure(round: 2);
+      expect(authority.isCoolingDown(main), isFalse, reason: '同一轮只记一次');
+
+      authority.recordVerifyFailure(round: 3);
+      expect(authority.isCoolingDown(main), isTrue);
+      expect(authority.isCoolingDown(cdk), isTrue);
+      expect(authority.consecutiveFailures(main), 3);
+
+      authority.resetCooldown();
+      expect(authority.isCoolingDown(cdk), isFalse);
+      expect(authority.consecutiveFailures(main), 0);
+    });
+
+    test('被撞标记按 host 记：cdk 撞过的值在主站仍可用', () async {
+      jarWith(live('v1'));
+      authority.noteIncumbentChallenged('v1', host: cdk);
+
+      expect(
+        (await authority.status(cdk, purpose: CfClearancePurpose.requestGate))
+            .verdict,
+        CfClearanceVerdict.challenged,
+      );
+      expect(
+        (await authority.status(main, purpose: CfClearancePurpose.requestGate))
+            .usable,
+        isTrue,
+      );
+      expect(authority.isKnownChallenged('v1'), isTrue, reason: '不分 host 的查询');
+      expect(authority.isKnownChallenged('v1', host: main), isFalse);
+      expect(authority.isKnownChallenged('v1', host: cdk), isTrue);
+      // jar 里只有这一枚：任一 host 撞过都放开换届
+      expect(
+        await authority.evaluateReplacement('v2'),
+        CfClearanceReplaceDecision.allow,
+      );
+    });
+
+    group('有效期窗口', () {
+      Future<CfClearanceVerdict> verdictFor(
+        Duration ttl,
+        CfClearancePurpose purpose,
+      ) async {
+        jarWith(live('v', ttl: ttl));
+        return (await authority.status(main, purpose: purpose)).verdict;
+      }
+
+      test('剩 5 分钟：原生预加载不够（10 分钟），请求门与续期够用', () async {
+        const ttl = Duration(minutes: 5);
+        expect(
+          await verdictFor(ttl, CfClearancePurpose.nativePreload),
+          CfClearanceVerdict.expiring,
+        );
+        expect(
+          await verdictFor(ttl, CfClearancePurpose.requestGate),
+          CfClearanceVerdict.usable,
+        );
+        expect(
+          await verdictFor(ttl, CfClearancePurpose.refresh),
+          CfClearanceVerdict.usable,
+        );
+      });
+
+      test('剩 20 秒：请求门也不够（30 秒）', () async {
+        expect(
+          await verdictFor(
+            const Duration(seconds: 20),
+            CfClearancePurpose.requestGate,
+          ),
+          CfClearanceVerdict.expiring,
+        );
+      });
+
+      test('刚好 10 分钟 / 30 秒：门槛是闭区间', () async {
+        expect(
+          await verdictFor(
+            const Duration(minutes: 10),
+            CfClearancePurpose.nativePreload,
+          ),
+          CfClearanceVerdict.usable,
+        );
+        expect(
+          await verdictFor(
+            const Duration(seconds: 30),
+            CfClearancePurpose.requestGate,
+          ),
+          CfClearanceVerdict.usable,
+        );
+      });
+
+      test('已过期：任何用途都不可用，续期也读不到', () async {
+        for (final purpose in CfClearancePurpose.values) {
+          jarWith(live('v', ttl: const Duration(minutes: -1)));
+          final status = await authority.status(main, purpose: purpose);
+          expect(status.verdict, CfClearanceVerdict.expired);
+          expect(status.present, isFalse);
+        }
+      });
+
+      test('无 expires 的会话形态视为够用', () async {
+        jarWith(
+          CanonicalCookie(
+            name: 'cf_clearance',
+            value: 'session-form',
+            domain: '.linux.do',
+          ),
+        );
+        expect(
+          (await authority.status(
+            main,
+            purpose: CfClearancePurpose.nativePreload,
+          )).usable,
+          isTrue,
+        );
+      });
+
+      test('没有 / 不属于本站域名', () async {
+        jarWith(null);
+        expect(
+          (await authority.status(
+            main,
+            purpose: CfClearancePurpose.requestGate,
+          )).verdict,
+          CfClearanceVerdict.missing,
+        );
+        jarWith(
+          CanonicalCookie(
+            name: 'cf_clearance',
+            value: 'x',
+            domain: '.example.com',
+            expiresAt: now.add(const Duration(days: 1)),
+          ),
+        );
+        final foreign = await authority.status(
+          main,
+          purpose: CfClearancePurpose.requestGate,
+        );
+        expect(foreign.verdict, CfClearanceVerdict.foreignDomain);
+        expect(foreign.present, isFalse);
+      });
+
+      test('闸门的换届窗口仍是 30 分钟', () async {
+        jarWith(live('old', ttl: const Duration(minutes: 29)));
+        expect(
+          await authority.evaluateReplacement('new'),
+          CfClearanceReplaceDecision.allow,
+        );
+        jarWith(live('old', ttl: const Duration(minutes: 31)));
+        expect(
+          await authority.evaluateReplacement('new'),
+          CfClearanceReplaceDecision.skipHealthyIncumbent,
+        );
+      });
+    });
+
+    test('验证轮次定稿值在落值期间直接继位', () async {
+      jarWith(live('someone-else-wrote'));
+      authority.expectVerifiedSuccessor('verified');
+      expect(
+        await authority.evaluateReplacement('verified'),
+        CfClearanceReplaceDecision.allow,
+      );
+      expect(
+        await authority.evaluateReplacement('other'),
+        CfClearanceReplaceDecision.skipHealthyIncumbent,
+      );
+      authority.expectVerifiedSuccessor(null);
+      expect(
+        await authority.evaluateReplacement('verified'),
+        CfClearanceReplaceDecision.skipHealthyIncumbent,
+      );
     });
   });
 

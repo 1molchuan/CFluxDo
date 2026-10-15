@@ -180,15 +180,9 @@ class CfChallengeService {
   VoidCallback? _activePromoteToForeground;
   bool _pendingPromoteToForeground = false;
 
-  /// 冷却机制：连续失败 N 次后进入冷却期
-  DateTime? _cooldownUntil;
-  int _consecutiveFailures = 0;
-
-  /// 已被记过失败的轮次号,防止同一轮被多个等待者重复计数。
-  int? _failureCountedRound;
-  static const _cooldownDuration = Duration(seconds: 30);
-  static const _ineffectiveClearanceCooldown = Duration(seconds: 60);
-  static const _maxFailuresBeforeCooldown = 3;
+  /// 冷却与失败计数按 host 记在 cf_clearance 账本里（验证失败是全站口径，
+  /// 记在主站；定稿值对某个子域无效只冷却那个子域）。
+  CfClearanceAuthority get _ledger => CfClearanceAuthority.instance;
   static const _toastCooldown = Duration(seconds: 2);
 
   /// 等待 navigator context 就绪的上限。
@@ -203,21 +197,19 @@ class CfChallengeService {
   /// 也不再询问。给它加时效:既不反复打扰,也不永久放弃。
   static const _sessionCompatDeclineTtl = Duration(minutes: 30);
 
-  /// 检查是否在冷却期
-  bool get isInCooldown {
-    if (_cooldownUntil == null) return false;
-    if (DateTime.now().isAfter(_cooldownUntil!)) {
-      _cooldownUntil = null;
-      return false;
-    }
-    return true;
-  }
+  /// 主站（也就是能否起验证）是否在冷却期
+  bool get isInCooldown => _ledger.isCoolingDown(CfClearanceAuthority.mainHost);
 
-  /// 冷却截止时刻(仅供诊断快照读取,不参与判定——判定请用 [isInCooldown])。
-  DateTime? get cooldownUntil => _cooldownUntil;
+  /// [host] 是否在冷却期（它自己的冷却，或全站的验证冷却）。
+  bool isCoolingDown(String host) => _ledger.isCoolingDown(host);
+
+  /// 主站冷却截止时刻(仅供诊断快照读取,不参与判定——判定请用 [isInCooldown])。
+  DateTime? get cooldownUntil =>
+      _ledger.cooldownUntil(CfClearanceAuthority.mainHost);
 
   /// 连续验证失败次数(诊断用)。
-  int get consecutiveFailures => _consecutiveFailures;
+  int get consecutiveFailures =>
+      _ledger.consecutiveFailures(CfClearanceAuthority.mainHost);
 
   /// 本次会话是否已被用户拒绝过"切兼容模式"询问(诊断用)。
   /// 当前是否处于「已拒绝切兼容」的静默期内(诊断用)。
@@ -227,14 +219,8 @@ class CfChallengeService {
     return DateTime.now().difference(declinedAt) < _sessionCompatDeclineTtl;
   }
 
-  /// 重置冷却期和失败计数（验证成功后调用）
-  void resetCooldown() {
-    _cooldownUntil = null;
-    _consecutiveFailures = 0;
-    // 去重标记随计数一起清:下一轮失败要能重新记账
-    _failureCountedRound = null;
-    CfChallengeLogger.logCooldown(entering: false);
-  }
+  /// 重置所有 host 的冷却期和失败计数（验证成功、用户主动验证时调用）
+  void resetCooldown() => _ledger.resetCooldown();
 
   /// 最近一轮验证的轮次号（每真正起一轮验证递增）。
   ///
@@ -242,48 +228,11 @@ class CfChallengeService {
   /// [startCooldown]),否则一次时序抖动会被记成 N 次失败。
   int get verifyRound => _rounds.roundCounter;
 
-  /// 记录一次验证失败，连续达到上限后进入冷却期。
+  /// 记录一次验证失败，连续达到上限后进入冷却期（全站口径）。
   ///
-  /// [round] 传入触发本次失败的验证轮次号(见 [verifyRound])。同一轮只记一次
-  /// —— 多个并发请求撞盾会合流到同一轮验证,却各自走后续处置,不去重会把
-  /// 一次失败放大成 N 次,瞬间打满阈值。不传则按独立失败计数(如验证本身
-  /// 被用户取消,那与并发无关)。
-  void startCooldown({int? round}) {
-    if (round != null) {
-      if (_failureCountedRound == round) {
-        debugPrint('[CfChallenge] 轮次 $round 的失败已记过，跳过重复计数');
-        return;
-      }
-      _failureCountedRound = round;
-    }
-    _consecutiveFailures++;
-    if (_consecutiveFailures >= _maxFailuresBeforeCooldown) {
-      _cooldownUntil = DateTime.now().add(_cooldownDuration);
-      debugPrint(
-        '[CfChallenge] 连续失败 $_consecutiveFailures 次，进入 ${_cooldownDuration.inSeconds}s 冷却期',
-      );
-      CfChallengeLogger.logCooldown(entering: true, until: _cooldownUntil);
-    } else {
-      debugPrint(
-        '[CfChallenge] 验证失败 $_consecutiveFailures/$_maxFailuresBeforeCooldown，允许重试',
-      );
-    }
-  }
-
-  /// 验证「成功」但铸出的 cf_clearance 对 Dio 无效(重试仍 403)时立即冷却。
-  ///
-  /// 这是确定性环境问题(典型:Dio 与 WebView2 出口 IP 不一致,clearance
-  /// 绑定了另一侧的 IP),重复验证不可能成功,不能走 3 次计数——否则每个
-  /// 403 都会拉起一轮完整验证,形成删 cookie → 验证 → 再 403 的无限循环。
-  void startIneffectiveClearanceCooldown() {
-    _consecutiveFailures = _maxFailuresBeforeCooldown;
-    _cooldownUntil = DateTime.now().add(_ineffectiveClearanceCooldown);
-    debugPrint(
-      '[CfChallenge] 验证完成但 clearance 对请求无效，'
-      '进入 ${_ineffectiveClearanceCooldown.inSeconds}s 冷却期',
-    );
-    CfChallengeLogger.logCooldown(entering: true, until: _cooldownUntil);
-  }
+  /// [round] 传入触发本次失败的验证轮次号(见 [verifyRound])，同一轮只记一次；
+  /// 不传则按独立失败计数。详见 [CfClearanceAuthority.recordVerifyFailure]。
+  void startCooldown({int? round}) => _ledger.recordVerifyFailure(round: round);
 
   static void showGlobalMessage(String message, {bool isError = true}) {
     final now = DateTime.now();

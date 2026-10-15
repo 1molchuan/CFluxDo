@@ -223,7 +223,10 @@ class _JarClearancePort implements CfClearancePort {
   Future<String?> currentInJar() => _jar.getCfClearance();
 
   @override
-  Future<String?> swapInWebViewCandidate({required String? challenged}) async {
+  Future<String?> swapInWebViewCandidate({
+    required String? challenged,
+    required String host,
+  }) async {
     final authority = CfClearanceAuthority.instance;
     List<String> candidates;
     try {
@@ -237,7 +240,8 @@ class _JarClearancePort implements CfClearancePort {
     String? candidate;
     for (final value in candidates) {
       if (CfClearanceAuthority.isSameValue(value, challenged)) continue;
-      if (authority.isKnownChallenged(value)) continue;
+      // 只排除在这个 host 上被撞过的值：别的子域撞过的值在这里未必无效
+      if (authority.isKnownChallenged(value, host: host)) continue;
       candidate = value;
       break;
     }
@@ -275,14 +279,15 @@ class _ServiceRoundPort implements CfRoundPort {
   bool get autoVerifyEnabled => _cf.autoVerifyEnabled;
 
   @override
-  bool isCoolingDown(String host) => _cf.isInCooldown;
+  bool isCoolingDown(String host) => _cf.isCoolingDown(host);
 
   @override
   Future<CfRoundOutcome> acquire(CfVerifyMode mode) => _cf.verify(mode: mode);
 
+  /// 只冷却这个 host：credit/cdk 子域上定稿值无效不连累主站。
   @override
   void noteIneffective(String host) =>
-      _cf.startIneffectiveClearanceCooldown();
+      CfClearanceAuthority.instance.startIneffectiveCooldown(host);
 }
 
 class _SessionCompatPort implements CfCompatPort {

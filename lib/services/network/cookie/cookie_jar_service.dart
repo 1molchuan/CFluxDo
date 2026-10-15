@@ -353,10 +353,18 @@ class CookieJarService {
         .toList(growable: false);
   }
 
-  /// 获取指定名称的 CanonicalCookie
-  Future<CanonicalCookie?> getCanonicalCookie(String name) async {
+  /// 获取指定名称的 CanonicalCookie。
+  ///
+  /// [host] 为空时按主站读取；给了子域（credit/cdk 等）则按发往该 host 的
+  /// 请求能看到的 cookie 读取（cf_clearance 的按 host 可用性判定用）。
+  Future<CanonicalCookie?> getCanonicalCookie(
+    String name, {
+    String? host,
+  }) async {
     if (!_initialized) await initialize();
-    final uri = Uri.parse(AppConstants.baseUrl);
+    final uri = host == null || host.isEmpty
+        ? Uri.parse(AppConstants.baseUrl)
+        : Uri(scheme: 'https', host: host, path: '/');
     final cookies = await loadCanonicalCookiesForRequest(uri);
 
     for (final cookie in cookies) {

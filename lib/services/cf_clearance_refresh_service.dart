@@ -9,8 +9,8 @@ import '../constants.dart';
 import '../utils/frame_jank_monitor.dart';
 import '../utils/scroll_busy_signal.dart';
 import 'cf_challenge_logger.dart';
+import 'cf_clearance_authority.dart';
 import 'network/cookie/boundary_sync_service.dart';
-import 'network/cookie/cookie_jar_service.dart';
 import 'network/cookie/webview_cookie_priming.dart';
 import 'webview_settings.dart';
 import 'windows_webview_environment_service.dart';
@@ -39,6 +39,10 @@ class CfClearanceRefreshService {
   /// 8 分钟 stale 窗口内仍有 4 次检查机会,行为不变、平台线程流量 -75%。
   static const Duration _cookiePollInterval = Duration(minutes: 2);
   static const Duration _healthCheckInterval = Duration(minutes: 1);
+
+  /// 这么久没观察到 cf_clearance 前进（换值或延期）就认为 Turnstile 页面
+  /// 卡住、原地重载。它判的是续期 WebView 的活性，不是「值能不能用」
+  /// （那个统一在 CfClearanceAuthority），所以留在这里。
   static const Duration _staleRefreshWindow = Duration(minutes: 8);
   static const Duration _restartDelay = Duration(seconds: 5);
   static const Duration _disposeGracePeriod = Duration(milliseconds: 150);
@@ -715,18 +719,19 @@ document.close();
     }
   }
 
+  /// jar 里当前那枚属于本站、未过期的 cf_clearance（是否被撞/临期不影响
+  /// 续期：续期本来就是为了换掉它）。判定口径统一在 cf_clearance 账本。
   Future<_ClearanceSnapshot?> _readClearanceSnapshot() async {
-    final cookie = await CookieJarService().getCanonicalCookie(_cookieName);
-    if (cookie == null || cookie.value.isEmpty) return null;
-    if (!CookieJarService.matchesAppHost(cookie.domain)) return null;
-    final expiresAt = cookie.expiresAt;
-    if (expiresAt != null && !expiresAt.isAfter(DateTime.now())) {
-      return null;
-    }
+    final status = await CfClearanceAuthority.instance.status(
+      CfClearanceAuthority.mainHost,
+      purpose: CfClearancePurpose.refresh,
+    );
+    final value = status.value;
+    if (!status.present || value == null) return null;
     return _ClearanceSnapshot(
-      value: cookie.value,
-      expiresAt: expiresAt,
-      domain: cookie.domain,
+      value: value,
+      expiresAt: status.expiresAt,
+      domain: status.domain,
     );
   }
 

@@ -42,7 +42,7 @@ void main() {
     clearance = _FakeClearance(jar);
     round = _FakeRound(jar);
     compat = _FakeCompat();
-    ledger = CfClearanceAuthority.instance..reset();
+    ledger = CfClearanceAuthority.instance..debugResetAll();
     ledger.debugCookieReader = () async => jar.value == null
         ? null
         : CanonicalCookie(
@@ -55,7 +55,7 @@ void main() {
 
   tearDown(() {
     ledger.debugCookieReader = null;
-    ledger.reset();
+    ledger.debugResetAll();
   });
 
   test('403 + cf-mitigated → 恰好一轮验证 → 重放 200', () async {
@@ -463,7 +463,10 @@ class _FakeClearance implements CfClearancePort {
   Future<String?> currentInJar() async => jar.value;
 
   @override
-  Future<String?> swapInWebViewCandidate({required String? challenged}) async {
+  Future<String?> swapInWebViewCandidate({
+    required String? challenged,
+    required String host,
+  }) async {
     final value = candidate;
     if (value == null || value == challenged) return null;
     if (onSwap != null) {
@@ -548,8 +551,10 @@ class _EnvClearance implements CfClearancePort {
   Future<String?> currentInJar() async => env.jar;
 
   @override
-  Future<String?> swapInWebViewCandidate({required String? challenged}) async =>
-      null;
+  Future<String?> swapInWebViewCandidate({
+    required String? challenged,
+    required String host,
+  }) async => null;
 }
 
 class _FakeCompat implements CfCompatPort {

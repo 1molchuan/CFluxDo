@@ -20,9 +20,12 @@ abstract interface class CfReplayPort {
 abstract interface class CfClearancePort {
   Future<String?> currentInJar();
 
-  /// WebView 若持有一枚与 [challenged] 不同、且本会话未被撞过的值，经权威
-  /// 闸门换进 jar 并返回它；没有可换的值或闸门未采纳返回 null。
-  Future<String?> swapInWebViewCandidate({required String? challenged});
+  /// WebView 若持有一枚与 [challenged] 不同、且本会话在 [host] 上未被撞过
+  /// 的值，经权威闸门换进 jar 并返回它；没有可换的值或闸门未采纳返回 null。
+  Future<String?> swapInWebViewCandidate({
+    required String? challenged,
+    required String host,
+  });
 }
 
 /// 验证轮次端口。
@@ -192,7 +195,7 @@ class CfChallengeRecovery {
     // 2. 登记在位值被撞：本次请求（或刚才的重放）实际携带的值已被 CF 挑战，
     //    打开换届窗口——之后的同步才能用新值替换它。不分 403/429。
     final challenged = carriedIsStale ? current : carried;
-    ledger.noteIncumbentChallenged(challenged);
+    ledger.noteIncumbentChallenged(challenged, host: host);
 
     // 3. 撞盾先换值重放：典型是站点在 WebView 里刚签了新值，但同步闸门因
     //    在位值当时还健康把它挡在 jar 外。实测可把 3～6 秒的恢复缩到一个
@@ -200,6 +203,7 @@ class CfChallengeRecovery {
     if (!round.isVerifying) {
       final swapped = await clearance.swapInWebViewCandidate(
         challenged: challenged,
+        host: host,
       );
       if (swapped != null) {
         CfChallengeLogger.log(
@@ -215,7 +219,7 @@ class CfChallengeRecovery {
             return CfRecoveryFailed(error);
           case _StillChallenged(:final statusCode):
             // 换上的值也被撞：登记为已死，继续走验证流程
-            ledger.noteIncumbentChallenged(swapped);
+            ledger.noteIncumbentChallenged(swapped, host: host);
             CfChallengeLogger.log(
               '[INTERCEPTOR] Replay with WebView cf_clearance still '
               'challenged ($statusCode), falling back to verify',
@@ -283,7 +287,7 @@ class CfChallengeRecovery {
         reverified = true;
         // 刚定稿的值已确认对 Dio 无效：登记为已撞，放开换届，下一轮
         // 验证铸出的新值才能过闸门进 jar。
-        ledger.noteIncumbentChallenged(stillChallenged.carried);
+        ledger.noteIncumbentChallenged(stillChallenged.carried, host: host);
         CfChallengeLogger.log(
           '[INTERCEPTOR] Verified clearance rejected on retry '
           '(${stillChallenged.statusCode}), re-verifying once: $label',
@@ -323,7 +327,7 @@ class CfChallengeRecovery {
       // 出口 IP 不一致），再验证多少次都一样：立即冷却，阻断无限循环；
       // 同时把它标记为已死，让下一次验证/新铸值补位。
       round.noteIneffective(host);
-      ledger.noteIncumbentChallenged(stillChallenged.carried);
+      ledger.noteIncumbentChallenged(stillChallenged.carried, host: host);
       CfChallengeLogger.log(
         '[INTERCEPTOR] Verified clearance ineffective for Dio '
         '(retry ${stillChallenged.statusCode}), entering cooldown: $label',
