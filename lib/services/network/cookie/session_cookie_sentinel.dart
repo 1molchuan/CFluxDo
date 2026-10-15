@@ -52,6 +52,11 @@ class SessionCookieSentinel {
     if (auth != null) _auth = auth;
   }
 
+  /// 仅测试用：直接走「winner 反向同步到 jar」这一步。
+  @visibleForTesting
+  Future<void> syncWinnerToJarForTest(String url, CookieFullInfo winner) =>
+      _syncWinnerToJar(url, winner);
+
   // ---------------------------------------------------------------------------
   // 内部状态
   // ---------------------------------------------------------------------------
@@ -803,6 +808,20 @@ class SessionCookieSentinel {
   /// 与 WV 网络层重写同名 cookie 时覆盖而非共存。
   Future<void> _syncWinnerToJar(String url, CookieFullInfo winner) async {
     try {
+      final expires = winner.expiresMillis != null
+          ? DateTime.fromMillisecondsSinceEpoch(
+              winner.expiresMillis!,
+              isUtc: true,
+            )
+          : null;
+      // `_t` 走可信写入的统一入口，保证带过期时间（WebView 的 → jar 原值的 →
+      // 兜底 60 天）。直接 setCookie 且 WebView 没给过期时间时写出的是会话
+      // cookie，jar 不落盘，下次冷启动 jar 为空就判未登录（同 d72e0db5）。
+      // 主站 host-only、Path=/、HttpOnly 由该入口和 auth 策略保证，与下面一致
+      if (winner.name == '_t') {
+        await _jar.setSessionTokenTrusted(winner.value, expires: expires);
+        return;
+      }
       final uri = Uri.parse(url);
       final host = uri.host.toLowerCase();
       final isAuthCookie = CookieJarService.hostOnlyCookieNames.contains(
@@ -827,12 +846,7 @@ class SessionCookieSentinel {
         url: url,
         domain: domainToWrite,
         path: isAuthCookie ? _pathDefault : winner.path ?? _pathDefault,
-        expires: winner.expiresMillis != null
-            ? DateTime.fromMillisecondsSinceEpoch(
-                winner.expiresMillis!,
-                isUtc: true,
-              )
-            : null,
+        expires: expires,
         secure: winner.isSecure ?? true,
         httpOnly: isAuthCookie ? true : winner.isHttpOnly ?? true,
         trusted: isAuthCookie,
