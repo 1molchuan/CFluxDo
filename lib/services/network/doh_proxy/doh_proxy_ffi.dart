@@ -59,6 +59,71 @@ class DohAccelUpdate {
       !reportAuthRejected;
 }
 
+/// 单个公共 DoH 端点的答案计数（Rust 侧优选启动后累计）：诊断国内解析器投毒用，
+/// 只有厂商名、端点地址和次数
+class DohPublicDohStat {
+  const DohPublicDohStat({
+    required this.vendor,
+    required this.host,
+    this.accepted = 0,
+    this.rejected = 0,
+    this.negative = 0,
+  });
+
+  /// 厂商名（如 `DNSPod`）
+  final String vendor;
+
+  /// 端点地址（URL 里的主机，内置端点都是 IP 字面量）
+  final String host;
+
+  /// 通过 CF 网段检查、被采用的答案
+  final int accepted;
+
+  /// 投毒答案（地址不全在 CF 网段）
+  final int rejected;
+
+  /// 正常响应但没有要的记录
+  final int negative;
+
+  /// 诊断用的短标签：`厂商@地址`
+  String get label => '$vendor@$host';
+
+  bool get isEmpty => accepted == 0 && rejected == 0 && negative == 0;
+
+  /// 旧版原生库没有这个字段、或字段形状不对时返回空列表
+  static List<DohPublicDohStat> listFromJson(Object? raw) {
+    if (raw is! List) return const [];
+    final out = <DohPublicDohStat>[];
+    for (final item in raw) {
+      if (item is! Map) continue;
+      final vendor = item['vendor']?.toString() ?? '';
+      final host = item['host']?.toString() ?? '';
+      if (vendor.isEmpty && host.isEmpty) continue;
+      out.add(
+        DohPublicDohStat(
+          vendor: vendor,
+          host: host,
+          accepted: (item['accepted'] as num?)?.toInt() ?? 0,
+          rejected: (item['rejected'] as num?)?.toInt() ?? 0,
+          negative: (item['negative'] as num?)?.toInt() ?? 0,
+        ),
+      );
+    }
+    return out;
+  }
+
+  Map<String, dynamic> toJson() => {
+    'vendor': vendor,
+    'host': host,
+    'accepted': accepted,
+    'rejected': rejected,
+    'negative': negative,
+  };
+
+  /// 一行摘要：`厂商@地址 通过/投毒/空`
+  String get summary => '$label $accepted/$rejected/$negative';
+}
+
 /// 本地动态优选的运行状态（`doh_proxy_select_status` 的解析结果）
 class DohSelectStatus {
   const DohSelectStatus({
@@ -73,6 +138,7 @@ class DohSelectStatus {
     this.lastError,
     this.failStreak = 0,
     this.share = false,
+    this.publicDoh = const [],
   });
 
   /// 优选模式（如 `off` / `local_atlas`）
@@ -108,6 +174,13 @@ class DohSelectStatus {
   /// 是否开启「帮助优选」（分享测量结果给 cfhub）
   final bool share;
 
+  /// 各公共 DoH 端点的答案计数（旧版原生库没有，为空）
+  final List<DohPublicDohStat> publicDoh;
+
+  /// 有过答案的端点（诊断导出只列这些）
+  List<DohPublicDohStat> get activePublicDoh =>
+      publicDoh.where((stat) => !stat.isEmpty).toList(growable: false);
+
   bool get hasWinner => winnerIp != null && phase == 'ready';
 
   factory DohSelectStatus.fromJson(Map<String, dynamic> map) {
@@ -127,6 +200,7 @@ class DohSelectStatus {
       lastError: lastError is String && lastError.isNotEmpty ? lastError : null,
       failStreak: (map['fail_streak'] as num?)?.toInt() ?? 0,
       share: map['share'] == true,
+      publicDoh: DohPublicDohStat.listFromJson(map['public_doh']),
     );
   }
 
@@ -146,6 +220,7 @@ class DohSelectStatus {
     'last_error': lastError,
     'fail_streak': failStreak,
     'share': share,
+    'public_doh': [for (final stat in publicDoh) stat.toJson()],
   };
 }
 

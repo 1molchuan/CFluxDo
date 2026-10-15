@@ -209,6 +209,14 @@ class LoggerUtils {
       '${select?.latencyMs ?? '-'}ms '
       '上报:${doh.shareMeasurements ? 'on' : 'off'}',
     );
+    // 各公共 DoH 端点的答案计数（通过/投毒/空），只列有过答案的
+    final publicDoh = select?.activePublicDoh ?? const [];
+    if (publicDoh.isNotEmpty) {
+      lines.add(
+        '公共 DoH(通过/投毒/空): '
+        '${publicDoh.map((stat) => stat.summary).join(', ')}',
+      );
+    }
 
     // HTTP 代理
     final proxy = ProxySettingsService.instance.current;
@@ -241,6 +249,10 @@ class LoggerUtils {
     map['cfSelectWinner'] = select?.winnerIp;
     map['cfSelectLatencyMs'] = select?.latencyMs;
     map['cfSelectShare'] = doh.shareMeasurements;
+    final publicDoh = select?.activePublicDoh ?? const [];
+    if (publicDoh.isNotEmpty) {
+      map['cfSelectPublicDoh'] = [for (final stat in publicDoh) stat.toJson()];
+    }
 
     final proxy = ProxySettingsService.instance.current;
     map['proxyEnabled'] = proxy.isValid;

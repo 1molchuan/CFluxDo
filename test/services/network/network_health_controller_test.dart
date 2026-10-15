@@ -3,6 +3,8 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fluxdo/services/log/log_writer.dart';
+import 'package:fluxdo/services/network/doh/network_settings_service.dart';
+import 'package:fluxdo/services/network/doh_proxy/doh_proxy_ffi.dart';
 import 'package:fluxdo/services/network/health/network_health_controller.dart';
 import 'package:fluxdo/services/network/request_scheduler_config.dart';
 import 'package:fluxdo/services/network/webview/webview_adapter_settings_service.dart';
@@ -44,6 +46,42 @@ void main() {
       expect(snapshot.summary(), contains('select=idle'));
       expect(snapshot.toJson()['cfSelectPhase'], 'idle');
       expect(snapshot.toJson().containsKey('cfSelectWinner'), isFalse);
+    });
+
+    test('公共 DoH 见过投毒答案：摘要带 dohPoison=，JSON 只列有过答案的端点', () {
+      final notifier = NetworkSettingsService.instance.selectStatusNotifier;
+      final before = notifier.value;
+      addTearDown(() => notifier.value = before);
+
+      notifier.value = const DohSelectStatus(
+        mode: 'local_atlas',
+        phase: 'ready',
+        publicDoh: [
+          DohPublicDohStat(
+            vendor: 'DNSPod',
+            host: '1.12.12.12',
+            accepted: 1,
+            rejected: 4,
+          ),
+          DohPublicDohStat(vendor: 'Google', host: '8.8.8.8', accepted: 2),
+          DohPublicDohStat(vendor: 'Quad9', host: '9.9.9.9'),
+        ],
+      );
+      final snapshot = NetworkHealthController.instance.snapshot();
+
+      expect(snapshot.summary(), contains('dohPoison=DNSPod@1.12.12.12:4'));
+      expect(snapshot.summary(), isNot(contains('Google@')));
+      final json = snapshot.toJson()['cfSelectPublicDoh'] as List;
+      expect(json.map((e) => (e as Map)['vendor']), ['DNSPod', 'Google']);
+
+      // 没有计数（旧版原生库）时不带这两项
+      notifier.value = const DohSelectStatus(
+        mode: 'local_atlas',
+        phase: 'idle',
+      );
+      final plain = NetworkHealthController.instance.snapshot();
+      expect(plain.summary(), isNot(contains('dohPoison=')));
+      expect(plain.toJson().containsKey('cfSelectPublicDoh'), isFalse);
     });
 
     test('会话级兼容通道开启后，快照与 isDegraded 同步变化', () {

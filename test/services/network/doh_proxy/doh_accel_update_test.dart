@@ -130,5 +130,63 @@ void main() {
       expect(restored.failStreak, original.failStreak);
       expect(restored.share, original.share);
     });
+
+    test('public_doh 计数逐端点解析，只列有过答案的端点；toJson 往返不丢', () {
+      final status = DohSelectStatus.fromJson({
+        'mode': 'local_atlas',
+        'phase': 'ready',
+        'public_doh': [
+          {
+            'vendor': 'DNSPod',
+            'host': '1.12.12.12',
+            'accepted': 3,
+            'rejected': 5,
+            'negative': 1,
+          },
+          {
+            'vendor': 'Google',
+            'host': '8.8.8.8',
+            'accepted': 0,
+            'rejected': 0,
+            'negative': 0,
+          },
+          'garbage',
+          {'vendor': 'AliDNS', 'host': '223.5.5.5', 'rejected': 2},
+        ],
+      });
+      expect(status.publicDoh, hasLength(3));
+      final dnspod = status.publicDoh.first;
+      expect(dnspod.label, 'DNSPod@1.12.12.12');
+      expect(dnspod.accepted, 3);
+      expect(dnspod.rejected, 5);
+      expect(dnspod.negative, 1);
+      expect(dnspod.summary, 'DNSPod@1.12.12.12 3/5/1');
+      // 缺的计数按 0
+      expect(status.publicDoh.last.accepted, 0);
+      expect(status.publicDoh.last.rejected, 2);
+      expect(status.activePublicDoh.map((s) => s.vendor), ['DNSPod', 'AliDNS']);
+
+      final restored = DohSelectStatus.fromJson(status.toJson());
+      expect(
+        restored.publicDoh.map((s) => s.toJson()).toList(),
+        status.publicDoh.map((s) => s.toJson()).toList(),
+      );
+    });
+
+    test('旧版原生库没有 public_doh 字段、或字段形状不对：计数为空，不抛异常', () {
+      final absent = DohSelectStatus.fromJson({
+        'mode': 'local_atlas',
+        'phase': 'idle',
+      });
+      expect(absent.publicDoh, isEmpty);
+      expect(absent.activePublicDoh, isEmpty);
+
+      final malformed = DohSelectStatus.fromJson({
+        'mode': 'local_atlas',
+        'phase': 'idle',
+        'public_doh': {'vendor': 'DNSPod'},
+      });
+      expect(malformed.publicDoh, isEmpty);
+    });
   });
 }

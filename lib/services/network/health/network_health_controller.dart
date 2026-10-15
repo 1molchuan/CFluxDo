@@ -8,6 +8,7 @@ import '../../log/log_writer.dart';
 import '../adapters/platform_adapter.dart';
 import '../cookie/csrf_token_service.dart';
 import '../doh/network_settings_service.dart';
+import '../doh_proxy/doh_proxy_ffi.dart' show DohPublicDohStat;
 import '../request_scheduler_config.dart';
 import '../webview/webview_adapter_settings_service.dart';
 
@@ -59,6 +60,7 @@ class NetworkHealthController {
       cfSelectPhase: select?.phase ?? 'idle',
       cfSelectWinner: select?.winnerIp,
       cfSelectLatencyMs: select?.latencyMs,
+      cfSelectPublicDoh: select?.activePublicDoh ?? const [],
     );
   }
 
@@ -142,6 +144,7 @@ class NetworkHealthSnapshot {
     required this.cfSelectPhase,
     this.cfSelectWinner,
     this.cfSelectLatencyMs,
+    this.cfSelectPublicDoh = const [],
   });
 
   // --- 引擎 ---
@@ -181,6 +184,9 @@ class NetworkHealthSnapshot {
   /// 赢家握手延迟(毫秒)
   final int? cfSelectLatencyMs;
 
+  /// 有过答案的公共 DoH 端点计数(通过/投毒/空),旧版原生库没有时为空
+  final List<DohPublicDohStat> cfSelectPublicDoh;
+
   /// 是否有任何降级/异常在生效(供 UI 或日志快速判断)。
   bool get isDegraded =>
       shield != ShieldState.ok || webViewCompatSession || csrfInFailureCooldown;
@@ -210,6 +216,13 @@ class NetworkHealthSnapshot {
     } else {
       parts.add('select=$cfSelectPhase');
     }
+    // 只在见过投毒答案时追加,平时不占摘要长度
+    final poisoned = cfSelectPublicDoh.where((stat) => stat.rejected > 0);
+    if (poisoned.isNotEmpty) {
+      parts.add(
+        'dohPoison=${poisoned.map((stat) => '${stat.label}:${stat.rejected}').join(',')}',
+      );
+    }
     return parts.join(' ');
   }
 
@@ -238,6 +251,10 @@ class NetworkHealthSnapshot {
     'cfSelectPhase': cfSelectPhase,
     if (cfSelectWinner != null) 'cfSelectWinner': cfSelectWinner,
     if (cfSelectLatencyMs != null) 'cfSelectLatencyMs': cfSelectLatencyMs,
+    if (cfSelectPublicDoh.isNotEmpty)
+      'cfSelectPublicDoh': [
+        for (final stat in cfSelectPublicDoh) stat.toJson(),
+      ],
   };
 
   @override
