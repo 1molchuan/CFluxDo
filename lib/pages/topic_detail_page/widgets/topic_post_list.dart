@@ -1187,7 +1187,7 @@ class _TopicPostListState extends State<TopicPostList> {
 
     switch (segment.type) {
       case _PostRenderSegmentType.shortPost:
-        Widget buildShortPost() => PostItem(
+        final item = PostItem(
           post: post,
           topicId: detail.id,
           categoryId: detail.categoryId,
@@ -1231,43 +1231,22 @@ class _TopicPostListState extends State<TopicPostList> {
 
         // OP 楼的 opSlot 依赖整个 detail 对象,签名无法稳定,不缓存
         if (post.postNumber == 1) {
-          child = buildShortPost();
+          child = item;
           break;
         }
 
         // 实例缓存:输入未变时复用同一 widget 实例,让整页 rebuild 时
         // 未变化的楼层在框架层短路(闭包回调经 State 转发,行为始终
-        // 跟随最新 widget,复用实例不会捕获旧数据)
-        // 签名必须覆盖 PostItem 的全部输入:漏一项,该项变化时就会复用旧实例
-        // (话题改分类、指派/取消指派、权限变化都曾因此不刷新)
-        final signature = (
-          post: post,
-          categoryId: detail.categoryId,
-          assignmentInfo: detail.indirectlyAssignedTo[post.id],
-          canAssignPost: widget.canAssignPost,
-          selected: isSelectedPost,
-          highlight: highlight,
-          boostUsername: boostUsername,
-          dateLabel: dateSeparatorLabel,
-          bottomDateLabel: bottomDateSeparatorLabel,
-          isTopicOwner: detail.createdBy?.username == post.username,
-          hasAcceptedAnswer: detail.hasAcceptedAnswer,
-          acceptedAnswers: detail.acceptedAnswers,
-          isLoggedIn: isLoggedIn,
-          useReplyDialog: useReplyDialog,
-          topicTitle: detail.title,
-          isPm: detail.isPrivateMessage,
-          pmNonHuman: detail.pmWithNonHumanUser,
-          canShareAsImage: onShareAsImage != null,
-          canShowDetail: widget.onShowPostDetail != null,
-          isPostVoting: detail.isPostVoting,
-          topicClosed: detail.closed || detail.archived,
-        );
+        // 跟随最新 widget,复用实例不会捕获旧数据)。
+        // 签名取 PostItem.reuseSignature:覆盖它的全部构造参数、与字段
+        // 声明放在一起,不再在这里手抄一份(手抄版漏过 categoryId /
+        // assignmentInfo / canAssignPost,话题改分类、指派变化时不刷新)
+        final signature = item.reuseSignature;
         final cached = _shortPostCache[post.id];
         if (cached != null && cached.signature == signature) {
           child = cached.widget;
         } else {
-          child = buildShortPost();
+          child = item;
           _shortPostCache[post.id] = _ShortPostCacheEntry(
             signature: signature,
             widget: child,

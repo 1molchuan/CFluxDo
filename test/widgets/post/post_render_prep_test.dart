@@ -88,6 +88,8 @@ Post _systemPost() => _post(
   actionCode: 'assigned',
 );
 
+final _fixed = _post(id: 1, cooked: '<p>x</p>');
+
 /// 预热侧:把 [plan] 从头热到尾,记下段落预热器收到的每个单位
 List<PostRenderUnit> _warmUnitsOf(PostRenderPlan plan) {
   final seen = <PostRenderUnit>[];
@@ -431,6 +433,49 @@ void main() {
 
       plans.retainOnly({});
       expect(plans[post.id], isNull);
+    });
+  });
+
+  group('PostItem.reuseSignature', () {
+    PostItem item({
+      int? categoryId,
+      bool canAssignPost = false,
+      PostAssignmentInfo? assignmentInfo,
+      VoidCallback? onShareAsImage,
+    }) => PostItem(
+      post: _fixed,
+      topicId: 1,
+      categoryId: categoryId,
+      canAssignPost: canAssignPost,
+      assignmentInfo: assignmentInfo,
+      onShareAsImage: onShareAsImage,
+      onLike: () {},
+    );
+
+    test('回调换了新闭包但有无不变:可复用', () {
+      expect(
+        item(onShareAsImage: () {}).reuseSignature,
+        item(onShareAsImage: () {}).reuseSignature,
+      );
+    });
+
+    test('8a01bdce 漏掉的三项变化都不复用', () {
+      final base = item().reuseSignature;
+      expect(item(categoryId: 5).reuseSignature, isNot(base));
+      expect(item(canAssignPost: true).reuseSignature, isNot(base));
+      expect(
+        item(
+          assignmentInfo: PostAssignmentInfo(postId: _fixed.id),
+        ).reuseSignature,
+        isNot(base),
+      );
+    });
+
+    test('回调有无变化(登录态等)不复用', () {
+      expect(
+        item(onShareAsImage: () {}).reuseSignature,
+        isNot(item().reuseSignature),
+      );
     });
   });
 }

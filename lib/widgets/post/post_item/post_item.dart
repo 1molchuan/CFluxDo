@@ -114,6 +114,52 @@ class PostItem extends ConsumerStatefulWidget {
     this.topicClosed = false,
   });
 
+  /// 实例复用签名:列表在整页 rebuild 时据此判断能否复用上次的 PostItem
+  /// 实例(框架在 Element.updateChild 处短路,整楼子树跳过 rebuild)。
+  ///
+  /// 覆盖**全部**构造参数,与字段声明放在一起 —— 新增参数必须同步加进
+  /// 这里(8a01bdce 之前列表侧手抄的签名漏了 categoryId / assignmentInfo /
+  /// canAssignPost,三者变化时楼层不刷新)。数据按 ==(Post 为值相等,
+  /// List 等不可变数据按引用);回调只比有无:列表传入的回调经 State
+  /// 转发,复用实例不会捕获旧数据。
+  Object get reuseSignature => (
+    post: post,
+    topicId: topicId,
+    categoryId: categoryId,
+    selected: selected,
+    highlight: highlight,
+    highlightBoostUsername: highlightBoostUsername,
+    isTopicOwner: isTopicOwner,
+    topicHasAcceptedAnswer: topicHasAcceptedAnswer,
+    acceptedAnswers: acceptedAnswers,
+    dateSeparatorLabel: dateSeparatorLabel,
+    bottomDateSeparatorLabel: bottomDateSeparatorLabel,
+    useReplyDialog: useReplyDialog,
+    topicTitle: topicTitle,
+    isPrivateMessageTopic: isPrivateMessageTopic,
+    isPmWithNonHumanUser: isPmWithNonHumanUser,
+    hideRepliesButton: hideRepliesButton,
+    opTopSlot: opTopSlot,
+    assignmentInfo: assignmentInfo,
+    canAssignPost: canAssignPost,
+    isPostVotingTopic: isPostVotingTopic,
+    topicClosed: topicClosed,
+    callbacks: (
+      onReply != null,
+      onMentionUser != null,
+      onLike != null,
+      onEdit != null,
+      onShareAsImage != null,
+      onRefreshPost != null,
+      onJumpToPost != null,
+      onSolutionChanged != null,
+      onQuoteSelection != null,
+      onQuoteImage != null,
+      onExpandHiddenPost != null,
+      onShowPostDetail != null,
+    ),
+  );
+
   @override
   ConsumerState<PostItem> createState() => _PostItemState();
 }
