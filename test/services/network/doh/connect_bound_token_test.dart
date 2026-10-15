@@ -49,9 +49,7 @@ void main() {
 
       // 手动授权网络类失败时总共会走几遍
       final manualAttempts = policy.retryDelays.length + 1;
-      final noManualRetry = policy.retryDelays.isEmpty
-          ? '这份配置的手动授权不重来'
-          : false;
+      final noManualRetry = policy.retryDelays.isEmpty ? '这份配置的手动授权不重来' : false;
 
       test('正常流程：取授权地址 → Connect → 换码，拿到令牌', () async {
         final result = await authorize();
@@ -315,7 +313,10 @@ void main() {
       });
 
       test('作废失败也不挡住重新授权', () async {
-        server.reply(policy.revokePath, (_) => throw const SocketException('x'));
+        server.reply(
+          policy.revokePath,
+          (_) => throw const SocketException('x'),
+        );
         await bound.revoke('cfp_old');
         expect((await authorize()).outcome, ConnectTokenOutcome.issued);
       });
@@ -364,35 +365,43 @@ void main() {
         expect(server.count(policy.startPath), 1);
       }, skip: noManualRetry);
 
-      test('续期：一次性请求，带旧令牌；401 → rejected', () async {
-        final path = policy.refreshPath!;
-        server.respond(path, 200, {'token': 'cfp_new', 'expires_in': 60});
-        final ok = await bound.refresh('cfp_old', userId: 7);
-        expect(ok.outcome, ConnectTokenOutcome.issued);
-        expect(ok.token, 'cfp_new');
-        final call = server.lastCall(path)!;
-        expect(call.bearer, 'cfp_old');
-        expect(call.body, isNull);
-        expect(call.oneShot, isTrue);
+      test(
+        '续期：一次性请求，带旧令牌；401 → rejected',
+        () async {
+          final path = policy.refreshPath!;
+          server.respond(path, 200, {'token': 'cfp_new', 'expires_in': 60});
+          final ok = await bound.refresh('cfp_old', userId: 7);
+          expect(ok.outcome, ConnectTokenOutcome.issued);
+          expect(ok.token, 'cfp_new');
+          final call = server.lastCall(path)!;
+          expect(call.bearer, 'cfp_old');
+          expect(call.body, isNull);
+          expect(call.oneShot, isTrue);
 
-        server.respond(path, 401);
-        expect(
-          (await bound.refresh('cfp_new', userId: 7)).outcome,
-          ConnectTokenOutcome.rejected,
-        );
-      }, skip: policy.refreshPath == null ? '这份配置没有续期' : false);
+          server.respond(path, 401);
+          expect(
+            (await bound.refresh('cfp_new', userId: 7)).outcome,
+            ConnectTokenOutcome.rejected,
+          );
+        },
+        skip: policy.refreshPath == null ? '这份配置没有续期' : false,
+      );
 
-      test('续期在 Rust 侧超时：不经 Dart 重发', () async {
-        bound = build(
-          server.transport(
-            native: (_) => Completer<(int, String)?>().future,
-            nativeTimeout: const Duration(milliseconds: 20),
-          ),
-        );
-        final result = await bound.refresh('cfp_old', userId: 7);
-        expect(result.outcome, ConnectTokenOutcome.failed);
-        expect(server.calls, isEmpty);
-      }, skip: policy.refreshPath == null ? '这份配置没有续期' : false);
+      test(
+        '续期在 Rust 侧超时：不经 Dart 重发',
+        () async {
+          bound = build(
+            server.transport(
+              native: (_) => Completer<(int, String)?>().future,
+              nativeTimeout: const Duration(milliseconds: 20),
+            ),
+          );
+          final result = await bound.refresh('cfp_old', userId: 7);
+          expect(result.outcome, ConnectTokenOutcome.failed);
+          expect(server.calls, isEmpty);
+        },
+        skip: policy.refreshPath == null ? '这份配置没有续期' : false,
+      );
 
       test('续期期间退出：丢弃，作废新令牌', () async {
         final path = policy.refreshPath!;

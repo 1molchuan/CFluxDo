@@ -204,9 +204,7 @@ class ConnectTokenTransport {
   Future<(int, String)> _sendViaDart(ConnectTokenRequest request) async {
     final client = _createClient();
     try {
-      final http = await client
-          .postUrl(request.url)
-          .timeout(_requestTimeout);
+      final http = await client.postUrl(request.url).timeout(_requestTimeout);
       http.headers.set(HttpHeaders.acceptHeader, 'application/json');
       final bearer = request.bearer;
       if (bearer != null) {
@@ -446,9 +444,7 @@ class ConnectBoundToken {
         return const ConnectTokenResult(ConnectTokenOutcome.cancelled);
       case ConnectCodeOutcome.unavailable:
         debugPrint('$_tag Connect 授权没拿到 code，此账号用不了 Connect');
-        return const ConnectTokenResult(
-          ConnectTokenOutcome.connectUnavailable,
-        );
+        return const ConnectTokenResult(ConnectTokenOutcome.connectUnavailable);
       case ConnectCodeOutcome.code:
         break;
     }
