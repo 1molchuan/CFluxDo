@@ -242,6 +242,9 @@ enum ConnectTokenOutcome {
   /// 这个账号用不了 Connect（没有授权页，或同意后没拿到 code）
   connectUnavailable,
 
+  /// Connect 撞 CF 盾后用户关掉了验证页（或验证没完成）
+  cancelled,
+
   /// 等结果期间换了号、退出或被调用方作废：结果已丢弃，拿到的令牌已作废
   stale,
 
@@ -261,11 +264,12 @@ class ConnectTokenResult {
       failureDetail = null,
       retryable = false;
 
-  const ConnectTokenResult.failed(String this.failureDetail)
-    : outcome = ConnectTokenOutcome.failed,
-      token = null,
-      lifetime = null,
-      retryable = true;
+  const ConnectTokenResult.failed(
+    String this.failureDetail, {
+    this.retryable = true,
+  }) : outcome = ConnectTokenOutcome.failed,
+       token = null,
+       lifetime = null;
 
   final ConnectTokenOutcome outcome;
   final String? token;
@@ -277,7 +281,8 @@ class ConnectTokenResult {
   /// 给界面提示用；不含任何敏感值
   final String? failureDetail;
 
-  /// 网络类失败：整条链路重来是安全的（每次都是新的 state 和 code）
+  /// 网络类失败：整条链路重来是安全的（每次都是新的 state 和 code）。
+  /// Connect 撞盾没过不算：马上重来还会撞同一个盾，手动授权时还会再弹验证页
   final bool retryable;
 }
 
@@ -290,7 +295,7 @@ class ConnectTokenResult {
 ///   换码时已经拿到的令牌顺手作废；
 /// - 作废先于重发：重新换码 / 续期前先等上一次作废落地（服务端可能按账号作废，
 ///   晚到的作废会把新令牌一起作废）；
-/// - 手动授权遇到网络类失败整条链路重来，被拒 / 不可用 / 换号不重来；
+/// - 手动授权遇到网络类失败整条链路重来，被拒 / 不可用 / 取消 / 撞盾没过 / 换号不重来；
 /// - 一次性请求（换码、续期）在 Rust 侧超时后不经 Dart 重发（见 [ConnectTokenTransport]）。
 ///
 /// [currentUserId] 返回现在登录的账号（没有为 null）；[sleep] 只在测试里替换重试等待。
@@ -432,7 +437,13 @@ class ConnectBoundToken {
     }
     switch (connect.outcome) {
       case ConnectCodeOutcome.failed:
-        return const ConnectTokenResult.failed('connect failed');
+        return ConnectTokenResult.failed(
+          'connect ${connect.failureDetail}',
+          retryable: connect.retryable,
+        );
+      case ConnectCodeOutcome.cancelled:
+        debugPrint('$_tag Connect 过盾验证被取消');
+        return const ConnectTokenResult(ConnectTokenOutcome.cancelled);
       case ConnectCodeOutcome.unavailable:
         debugPrint('$_tag Connect 授权没拿到 code，此账号用不了 Connect');
         return const ConnectTokenResult(

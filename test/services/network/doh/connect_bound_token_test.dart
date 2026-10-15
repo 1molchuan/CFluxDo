@@ -238,6 +238,28 @@ void main() {
         expect(sleeps, isEmpty);
       });
 
+      test('Connect 撞盾没过：failed（connect challenge），不重来', () async {
+        flow.result = const ConnectCodeResult.failed(
+          failureDetail: 'challenge',
+          retryable: false,
+        );
+        final result = await authorize();
+        expect(result.outcome, ConnectTokenOutcome.failed);
+        expect(bound.lastFailureDetail, 'connect challenge');
+        expect(server.count(policy.startPath), 1);
+        expect(sleeps, isEmpty);
+      });
+
+      test('Connect 时关掉了过盾验证页：cancelled，不重来', () async {
+        flow.result = const ConnectCodeResult.cancelled();
+        final result = await authorize();
+        expect(result.outcome, ConnectTokenOutcome.cancelled);
+        expect(bound.lastFailureDetail, isNull);
+        expect(server.count(policy.startPath), 1);
+        expect(server.count(policy.tokenPath), 0);
+        expect(sleeps, isEmpty);
+      });
+
       test('Rust 侧超时：换码不经 Dart 重发，取授权地址退回 Dart', () async {
         final native = <String>[];
         bound = build(

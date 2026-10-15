@@ -3,7 +3,9 @@ import 'package:flutter/foundation.dart';
 import 'package:html/parser.dart' as html_parser;
 
 import '../../oauth_flow_helper.dart';
+import '../cf/cf_challenge_classifier.dart';
 import '../discourse_dio.dart';
+import '../exceptions/api_exception.dart';
 import '../flux_request_spec.dart';
 
 enum ConnectCodeOutcome {
@@ -13,27 +15,49 @@ enum ConnectCodeOutcome {
   /// 这个账号用不了 Connect（没有授权页，或 Connect 直接报错）
   unavailable,
 
-  /// 网络问题，稍后再试
+  /// 撞 CF 盾后用户关掉了验证页（或验证没完成）
+  cancelled,
+
+  /// 网络问题或撞盾没过，[ConnectCodeResult.failureDetail] 说明是哪种
   failed,
 }
 
 class ConnectCodeResult {
   const ConnectCodeResult.code(String this.code, String this.state)
-    : outcome = ConnectCodeOutcome.code;
+    : outcome = ConnectCodeOutcome.code,
+      failureDetail = null,
+      retryable = false;
 
   const ConnectCodeResult.unavailable()
     : outcome = ConnectCodeOutcome.unavailable,
       code = null,
-      state = null;
+      state = null,
+      failureDetail = null,
+      retryable = false;
 
-  const ConnectCodeResult.failed()
-    : outcome = ConnectCodeOutcome.failed,
+  const ConnectCodeResult.cancelled()
+    : outcome = ConnectCodeOutcome.cancelled,
       code = null,
-      state = null;
+      state = null,
+      failureDetail = null,
+      retryable = false;
+
+  const ConnectCodeResult.failed({
+    String this.failureDetail = 'failed',
+    this.retryable = true,
+  }) : outcome = ConnectCodeOutcome.failed,
+       code = null,
+       state = null;
 
   final ConnectCodeOutcome outcome;
   final String? code;
   final String? state;
+
+  /// 失败时卡在哪（`HTTP 404` / `challenge` / `connectionTimeout`），拼在 `connect ` 后面
+  final String? failureDetail;
+
+  /// 网络类失败可以整体重来；撞盾没过马上重来还会撞同一个盾，不算
+  final bool retryable;
 }
 
 /// 在 App 里走一遍 LinuxDo Connect 授权，拿到回调里的 code/state
@@ -78,7 +102,9 @@ class ConnectCodeFlow {
 
       if (response.statusCode != 200) {
         debugPrint('[CONNECT] Connect 授权页打不开: HTTP ${response.statusCode}');
-        return const ConnectCodeResult.failed();
+        return ConnectCodeResult.failed(
+          failureDetail: 'HTTP ${response.statusCode}',
+        );
       }
       final data = response.data;
       final approveLink = html_parser
@@ -116,8 +142,29 @@ class ConnectCodeFlow {
       return callback;
     } on DioException catch (e) {
       debugPrint('[CONNECT] Connect 授权请求失败: ${e.type} ${e.message}');
-      return const ConnectCodeResult.failed();
+      return classifyFailure(e);
     }
+  }
+
+  /// Connect 那几跳的请求失败归类（撞盾判定统一问 [CfChallengeClassifier]）
+  @visibleForTesting
+  static ConnectCodeResult classifyFailure(DioException e) {
+    final cf = e.error;
+    if (cf is CfChallengeException && cf.userCancelled) {
+      // 过盾验证页被用户关掉或没完成：CF 那边已经提示过，当用户取消
+      return const ConnectCodeResult.cancelled();
+    }
+    if (CfChallengeClassifier.isChallengeFailure(e)) {
+      // 过盾恢复（换值重放 / 验证 / 兼容模式）走完仍被拦：马上重来还会撞同一个盾
+      return const ConnectCodeResult.failed(
+        failureDetail: 'challenge',
+        retryable: false,
+      );
+    }
+    final status = e.response?.statusCode;
+    return ConnectCodeResult.failed(
+      failureDetail: status != null ? 'HTTP $status' : e.type.name,
+    );
   }
 
   /// 每一跳都手动处理：自动跟随会把回调地址也请求一遍

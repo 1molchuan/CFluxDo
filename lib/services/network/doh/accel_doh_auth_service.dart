@@ -369,6 +369,7 @@ class AccelDohAuthService extends ChangeNotifier {
         case ConnectTokenOutcome.failed:
         case ConnectTokenOutcome.serverUnavailable:
         case ConnectTokenOutcome.connectUnavailable:
+        case ConnectTokenOutcome.cancelled:
           // 令牌还没过期，先接着用
           _scheduleRetry();
           return;
@@ -429,6 +430,7 @@ class AccelDohAuthService extends ChangeNotifier {
         case ConnectTokenOutcome.stale:
           return;
         case ConnectTokenOutcome.failed:
+        case ConnectTokenOutcome.cancelled:
         case ConnectTokenOutcome.serverUnavailable:
           _scheduleRetry();
       }

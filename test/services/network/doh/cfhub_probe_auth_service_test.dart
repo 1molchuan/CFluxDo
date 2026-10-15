@@ -206,6 +206,26 @@ void main() {
       });
     });
 
+    test('Connect 撞盾没过：failed 带 connect challenge，不重来；关掉验证页：cancelled', () async {
+      api.calls.clear();
+      sleeps.clear();
+      flow.result = const ConnectCodeResult.failed(
+        failureDetail: 'challenge',
+        retryable: false,
+      );
+      expect(await auth.enable(), CfhubEnableResult.failed);
+      expect(auth.lastFailureDetail, 'connect challenge');
+      expect(api.startCalls, 1);
+
+      flow.result = const ConnectCodeResult.cancelled();
+      expect(await auth.enable(), CfhubEnableResult.cancelled);
+      expect(auth.lastFailureDetail, isNull);
+      expect(api.startCalls, 2);
+      expect(sleeps, isEmpty);
+      expect(auth.token, isNull);
+      flow.result = const ConnectCodeResult.code('the-code', 'the-state');
+    });
+
     test('Connect 期间换号又换回来：结果丢弃，不换码', () async {
       api.calls.clear();
       api.issue('cfp_aba');

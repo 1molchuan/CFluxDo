@@ -191,6 +191,9 @@ class CfhubProbeAuthService extends ChangeNotifier {
       case ConnectTokenOutcome.connectUnavailable:
         debugPrint('[CFHUB] Connect 授权没拿到 code，放弃开启探针上报');
         return _fail(CfhubEnableResult.cancelled);
+      case ConnectTokenOutcome.cancelled:
+        // 撞盾后关掉了验证页：CF 那边已经提示过，不再追加
+        return _fail(CfhubEnableResult.cancelled);
       case ConnectTokenOutcome.stale:
         // 等结果期间退出或换了号：拿到的令牌已作废
         return _fail(CfhubEnableResult.cancelled);
