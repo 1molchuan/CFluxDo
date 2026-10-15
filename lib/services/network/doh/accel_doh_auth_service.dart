@@ -7,7 +7,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../../models/user.dart';
 import '../../../pages/network_settings_page/widgets/cf_select_privacy_dialog.dart';
 import 'accel_doh_api.dart';
-import 'accel_doh_connect_flow.dart';
+import 'accel_doh_consent_dialog.dart';
+import 'connect_bound_token.dart';
+import 'connect_code_flow.dart';
 import 'network_settings_service.dart';
 
 /// 加速 DoH 当前处在哪一档
@@ -47,6 +49,9 @@ enum AccelDohAuthStatus {
 /// 发给加速服务端的只有 code/state 和它自己发的令牌，
 /// 从不携带 linux.do 的 cookie、_t 或 API key。
 /// 会话被动失效不动令牌；只有主动退出登录才作废（[revoke]）。
+///
+/// 取授权地址 → Connect → 换码 → 续期 / 作废这条链路与 cfhub 探针共用
+/// [ConnectBoundToken]，这里只管何时授权、失败后怎么退避、令牌存哪。
 class AccelDohAuthService extends ChangeNotifier {
   AccelDohAuthService._();
 
@@ -94,15 +99,25 @@ class AccelDohAuthService extends ChangeNotifier {
   @visibleForTesting
   Duration consentPromptDelay = const Duration(seconds: 5);
 
+  /// 测试用：替换令牌接口的传输（假服务端）
   @visibleForTesting
-  AccelDohApi? debugApi;
+  ConnectTokenTransport? debugTransport;
 
   @visibleForTesting
-  AccelDohConnectFlow? debugConnectFlow;
+  ConnectCodeFlow? debugConnectFlow;
+
+  /// 测试用：替换授权说明弹窗
+  @visibleForTesting
+  Future<bool?> Function()? debugAskConsent;
+
+  /// 测试用：手动授权重试前不真等
+  @visibleForTesting
+  Future<void> Function(Duration delay)? debugSleep;
 
   SharedPreferences? _prefs;
-  AccelDohApi? _defaultApi;
-  AccelDohConnectFlow? _defaultFlow;
+  ConnectTokenTransport? _defaultTransport;
+  ConnectBoundToken? _boundToken;
+  ConnectCodeFlow? _defaultFlow;
   _AccelDohToken? _stored;
   String? _token;
   bool _member = false;
@@ -114,9 +129,6 @@ class AccelDohAuthService extends ChangeNotifier {
 
   /// 最近一次拿到的登录用户；主动退出后清空
   User? _user;
-
-  /// 主动退出时自增，用来丢弃退出前发出、退出后才返回的结果
-  int _epoch = 0;
 
   Future<void>? _inflight;
 
@@ -134,10 +146,17 @@ class AccelDohAuthService extends ChangeNotifier {
   DateTime? _rejectWindowStart;
   int _rejectCount = 0;
 
-  AccelDohApi get _api => debugApi ?? _defaultApi!;
+  /// 初始化之后才能用：传输要用 [initialize] 给的加速域名
+  ConnectBoundToken get _bound => _boundToken ??= ConnectBoundToken(
+    policy: AccelDohApi.policy,
+    transport: debugTransport ?? _defaultTransport!,
+    flow: () => debugConnectFlow ?? (_defaultFlow ??= ConnectCodeFlow()),
+    // 主动退出后 _user 为 null：进行中的结果一律丢弃
+    currentUserId: () => _user?.id,
+    sleep: debugSleep,
+  );
 
-  AccelDohConnectFlow get _flow =>
-      debugConnectFlow ?? (_defaultFlow ??= AccelDohConnectFlow());
+  Future<bool?> _askConsent() => (debugAskConsent ?? askAccelDohConsent)();
 
   /// 当前可用的令牌；null 表示没有
   String? get token => _token;
@@ -171,7 +190,10 @@ class AccelDohAuthService extends ChangeNotifier {
   }) {
     if (_prefs != null) return;
     _prefs = prefs;
-    _defaultApi = AccelDohApi(serverUrl: serverUrl, bootstrapIps: bootstrapIps);
+    _defaultTransport = AccelDohApi.transport(
+      serverUrl: serverUrl,
+      bootstrapIps: bootstrapIps,
+    );
     unawaited(prefs.remove(_legacyTokenKey));
     _stored = _AccelDohToken.decode(prefs.getString(_tokenKey));
     _member = prefs.getBool(_memberKey) ?? false;
@@ -194,6 +216,8 @@ class AccelDohAuthService extends ChangeNotifier {
     _user = user;
     if (previous != null && previous.id != user.id) {
       _resetRetry();
+      // 换号（哪怕很快又换回来）：之前账号发起的授权结果不能落到现在的账号上
+      _boundToken?.invalidate();
     }
     if (_prefs == null) return;
     unawaited(_sync());
@@ -207,13 +231,15 @@ class AccelDohAuthService extends ChangeNotifier {
   }
 
   /// 用户在设置里点了「用 L 站 Connect 授权」：没同意过就先弹说明，然后立即授权
+  ///
+  /// 网络类失败整条链路最多重来 2 次（2 s / 4 s）；后台自动授权仍只走一次、失败按退避再试
   Future<AccelDohAuthStatus> authorizeNow() async {
     final user = _user;
     if (_prefs == null || user == null || user.trustLevel < minTrustLevel) {
       return status;
     }
     if (_consentFor(user) != true) {
-      final answer = await _flow.askConsent();
+      final answer = await _askConsent();
       if (answer == null || _user?.id != user.id) return status;
       await _setConsent(user, answer);
       if (!answer) return status;
@@ -254,7 +280,7 @@ class AccelDohAuthService extends ChangeNotifier {
 
   /// 主动退出登录：作废令牌，清掉授权记录，改回 DNSPod
   Future<void> revoke() async {
-    _epoch++;
+    _boundToken?.invalidate();
     _user = null;
     _resetRetry();
     _rejectWindowStart = null;
@@ -272,7 +298,7 @@ class AccelDohAuthService extends ChangeNotifier {
     await _clearLastConnect();
     await _clearToken();
     if (stored != null && prefs != null) {
-      unawaited(_api.revoke(stored.token));
+      unawaited(_bound.revoke(stored.token));
     }
   }
 
@@ -298,7 +324,6 @@ class AccelDohAuthService extends ChangeNotifier {
   }
 
   Future<void> _doSync({required bool force, required bool interactive}) async {
-    final epoch = _epoch;
     final user = _user;
     // 不知道是谁（启动早期或会话已失效）：保持现状
     if (user == null) return;
@@ -310,7 +335,7 @@ class AccelDohAuthService extends ChangeNotifier {
       if (stored != null) {
         debugPrint('[DOH] 当前账号等级不足，停用加速令牌');
         await _clearToken();
-        unawaited(_api.revoke(stored.token));
+        unawaited(_bound.revoke(stored.token));
       }
       return;
     }
@@ -318,9 +343,9 @@ class AccelDohAuthService extends ChangeNotifier {
 
     var stored = _stored;
     if (stored != null && stored.userId != user.id) {
-      // 换了账号：旧账号的令牌马上作废
+      // 换了账号：旧账号的令牌马上作废（新账号换码前会先等它落地）
       await _clearToken();
-      unawaited(_api.revoke(stored.token));
+      unawaited(_bound.revoke(stored.token));
       stored = null;
     }
 
@@ -330,20 +355,24 @@ class AccelDohAuthService extends ChangeNotifier {
         return;
       }
       if (!force && _inRetryBackoff) return;
-      final result = await _api.refresh(stored.token);
-      if (epoch != _epoch) return;
+      final result = await _bound.refresh(stored.token, userId: user.id);
       switch (result.outcome) {
-        case AccelDohIssueOutcome.issued:
+        case ConnectTokenOutcome.issued:
           _resetRetry();
           await _saveToken(user.id, result);
           return;
-        case AccelDohIssueOutcome.failed:
+        case ConnectTokenOutcome.stale:
+          return;
+        case ConnectTokenOutcome.rejected:
+          // 续不了，下面重新走 Connect
+          await _clearToken();
+        case ConnectTokenOutcome.failed:
+        case ConnectTokenOutcome.serverUnavailable:
+        case ConnectTokenOutcome.connectUnavailable:
+        case ConnectTokenOutcome.cancelled:
           // 令牌还没过期，先接着用
           _scheduleRetry();
           return;
-        case AccelDohIssueOutcome.rejected:
-          // 续不了，下面重新走 Connect
-          await _clearToken();
       }
     } else if (stored != null) {
       await _clearToken();
@@ -374,59 +403,35 @@ class AccelDohAuthService extends ChangeNotifier {
         return;
       }
     }
-    await _connect(user, epoch, interactive: interactive);
+    await _connect(user, interactive: interactive);
   }
 
-  /// 走一遍 Connect 授权换令牌
-  Future<void> _connect(
-    User user,
-    int epoch, {
-    required bool interactive,
-  }) async {
+  /// 走一遍 Connect 授权换令牌；等结果期间退出或换了号，结果由 [ConnectBoundToken] 丢弃
+  Future<void> _connect(User user, {required bool interactive}) async {
     _connecting = true;
     notifyListeners();
     try {
-      final authorizeUrl = await _api.startConnect();
-      if (epoch != _epoch) return;
-      if (authorizeUrl == null) {
-        _scheduleRetry();
-        return;
-      }
-
-      final connect = await _flow.fetchCode(authorizeUrl, silent: !interactive);
-      if (epoch != _epoch || _user?.id != user.id) return;
-      switch (connect.outcome) {
-        case AccelDohConnectOutcome.failed:
-          _scheduleRetry();
-          return;
-        case AccelDohConnectOutcome.unavailable:
-          debugPrint('[DOH] 此账号用不了 Connect，使用公共加速');
-          await _setBackoff(user, _BackoffReason.unavailable);
-          return;
-        case AccelDohConnectOutcome.code:
-          break;
-      }
-
-      final result = await _api.exchangeCode(
-        code: connect.code!,
-        state: connect.state!,
+      final result = await _bound.authorize(
+        userId: user.id,
+        interactive: interactive,
       );
-      if (epoch != _epoch || _user?.id != user.id) {
-        // 等结果期间退出或换了号，这个令牌不能留
-        final token = result.token;
-        if (token != null) unawaited(_api.revoke(token));
-        return;
-      }
       switch (result.outcome) {
-        case AccelDohIssueOutcome.issued:
+        case ConnectTokenOutcome.issued:
           _resetRetry();
           await _clearBackoff();
           await _setLastConnect(user);
           await _saveToken(user.id, result);
-        case AccelDohIssueOutcome.rejected:
+        case ConnectTokenOutcome.rejected:
           debugPrint('[DOH] 加速服务端拒绝了此账号，使用公共加速');
           await _setBackoff(user, _BackoffReason.denied);
-        case AccelDohIssueOutcome.failed:
+        case ConnectTokenOutcome.connectUnavailable:
+          debugPrint('[DOH] 此账号用不了 Connect，使用公共加速');
+          await _setBackoff(user, _BackoffReason.unavailable);
+        case ConnectTokenOutcome.stale:
+          return;
+        case ConnectTokenOutcome.failed:
+        case ConnectTokenOutcome.cancelled:
+        case ConnectTokenOutcome.serverUnavailable:
           _scheduleRetry();
       }
     } finally {
@@ -458,7 +463,7 @@ class AccelDohAuthService extends ChangeNotifier {
       _consentPromptShowing = true;
       bool? answer;
       try {
-        answer = await _flow.askConsent();
+        answer = await _askConsent();
       } catch (e) {
         debugPrint('[DOH] 弹出加速授权说明失败: $e');
       } finally {
@@ -582,7 +587,7 @@ class AccelDohAuthService extends ChangeNotifier {
     _retryTimer?.cancel();
   }
 
-  Future<void> _saveToken(int userId, AccelDohIssueResult result) async {
+  Future<void> _saveToken(int userId, ConnectTokenResult result) async {
     final issuedAt = DateTime.now();
     final value = _AccelDohToken(
       token: result.token!,
