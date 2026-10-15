@@ -609,8 +609,8 @@ class _UserCardContentState extends ConsumerState<_UserCardContent> {
       listen: false,
     );
     if (!container.exists(topicDetailProvider(params))) return false;
-    return container.read(topicDetailProvider(params).notifier).usernameFilter ==
-        widget.username;
+    final notifier = container.read(topicDetailProvider(params).notifier);
+    return notifier.viewMode.username == widget.username;
   }
 
   /// 只看该用户/取消过滤:发到请求桥,由话题详情页消费(过滤重载 +

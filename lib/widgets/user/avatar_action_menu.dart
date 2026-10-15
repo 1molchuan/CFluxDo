@@ -92,7 +92,10 @@ List<RadialMenuItem> buildAvatarMenuItems(
     if (params != null && container.exists(topicDetailProvider(params))) {
       canFilter = true;
       isFilteringThisUser =
-          container.read(topicDetailProvider(params).notifier).usernameFilter ==
+          container
+              .read(topicDetailProvider(params).notifier)
+              .viewMode
+              .username ==
           username;
     }
   }

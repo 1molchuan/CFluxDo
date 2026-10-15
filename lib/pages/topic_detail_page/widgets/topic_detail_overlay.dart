@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:app_icons/app_icons.dart';
 import '../../../models/topic.dart';
 import '../../../providers/preferences_provider.dart';
+import '../../../providers/topic_detail/topic_view_mode.dart';
 import '../../../widgets/topic/topic_progress.dart';
 import 'topic_bottom_bar.dart';
 import 'topic_progress_gestures.dart';
@@ -29,10 +30,7 @@ class TopicDetailOverlay extends StatelessWidget {
   final VoidCallback onReply;
   final VoidCallback onProgressTap;
   final ValueChanged<ProgressGestureAction>? onProgressGesture;
-  final bool isSummaryMode;
-  final bool isActivityMode;
-  final bool isAuthorOnlyMode;
-  final bool isTopLevelMode;
+  final TopicViewMode viewMode;
   final bool isNestedMode;
   final bool isLoading;
   final VoidCallback? onShowTopReplies;
@@ -57,10 +55,7 @@ class TopicDetailOverlay extends StatelessWidget {
     required this.onReply,
     required this.onProgressTap,
     this.onProgressGesture,
-    this.isSummaryMode = false,
-    this.isActivityMode = false,
-    this.isAuthorOnlyMode = false,
-    this.isTopLevelMode = false,
+    this.viewMode = TopicViewMode.all,
     this.isNestedMode = false,
     this.isLoading = false,
     this.onShowTopReplies,
@@ -131,10 +126,7 @@ class TopicDetailOverlay extends StatelessWidget {
             onOpenInBrowser: onOpenInBrowser,
             hasSummary: detail.hasSummary,
             isPostVoting: detail.isPostVoting,
-            isSummaryMode: isSummaryMode,
-            isActivityMode: isActivityMode,
-            isAuthorOnlyMode: isAuthorOnlyMode,
-            isTopLevelMode: isTopLevelMode,
+            viewMode: viewMode,
             isNestedMode: isNestedMode,
             isLoading: isLoading,
             isPrivateMessage: detail.isPrivateMessage,

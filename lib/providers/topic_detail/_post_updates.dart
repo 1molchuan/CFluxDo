@@ -89,71 +89,39 @@ extension PostUpdateMethods on TopicDetailNotifier {
     Post updatedPost, {
     bool preserveCooked = false,
   }) {
-    final currentDetail = state.value;
-    if (currentDetail == null) return;
-    final currentPosts = currentDetail.postStream.posts;
-    final index = currentPosts.indexWhere((p) => p.id == postId);
-    if (index == -1) return;
+    final applied = _applyWindow(
+      (window) => window.updatePost(postId, (oldPost) {
+        // /posts/{id}.json 单帖接口不会预加载 boosts 关联，
+        // 导致返回的 JSON 中不包含 boosts/can_boost 字段。
+        // 此时 Post.fromJson 会将 boosts 设为 null、canBoost 设为 false。
+        // 为避免丢失已有的 boost 数据，当新数据不含 boosts 时保留旧值。
+        final mergedPost = updatedPost.boosts == null
+            ? updatedPost.copyWith(
+                boosts: oldPost.boosts,
+                canBoost: oldPost.canBoost,
+              )
+            : updatedPost;
+
+        return preserveCooked
+            ? mergedPost.copyWith(cooked: oldPost.cooked, read: oldPost.read)
+            : mergedPost;
+      }),
+    );
 
     // refreshPost 网络响应落地(msgbus acted/revised/deleted 的真正
     // 高度变化时刻,与发起请求隔了一次网络往返):在这里武装锚定哨兵
     // 才能覆盖到落地帧;在消息分发处武装会因异步而错帧失效。
-    AnchorGuardSliver.arm();
-
-    final oldPost = currentPosts[index];
-
-    // /posts/{id}.json 单帖接口不会预加载 boosts 关联，
-    // 导致返回的 JSON 中不包含 boosts/can_boost 字段。
-    // 此时 Post.fromJson 会将 boosts 设为 null、canBoost 设为 false。
-    // 为避免丢失已有的 boost 数据，当新数据不含 boosts 时保留旧值。
-    final mergedPost = updatedPost.boosts == null
-        ? updatedPost.copyWith(
-            boosts: oldPost.boosts,
-            canBoost: oldPost.canBoost,
-          )
-        : updatedPost;
-
-    final finalPost = preserveCooked
-        ? mergedPost.copyWith(cooked: oldPost.cooked, read: oldPost.read)
-        : mergedPost;
-
-    final newPosts = [...currentPosts];
-    newPosts[index] = finalPost;
-
-    state = AsyncValue.data(
-      currentDetail.copyWith(
-        postStream: PostStream(
-          posts: newPosts,
-          stream: currentDetail.postStream.stream,
-          gaps: currentDetail.postStream.gaps,
-        ),
-      ),
-    );
+    if (applied) AnchorGuardSliver.arm();
   }
 
   /// 从列表中移除帖子（用于 MessageBus destroyed 消息）
+  ///
+  /// 只在 stream 里、尚未加载内容的帖子也一并移除,免得翻页去取一条
+  /// 已不存在的帖子。
   void removePost(int postId) {
-    final currentDetail = state.value;
-    if (currentDetail == null) return;
-
-    final currentPosts = currentDetail.postStream.posts;
-    final newPosts = currentPosts.where((p) => p.id != postId).toList();
-
-    if (newPosts.length == currentPosts.length) return;
-
-    final newStream = currentDetail.postStream.stream
-        .where((id) => id != postId)
-        .toList();
-
-    state = AsyncValue.data(
-      currentDetail.copyWith(
-        postsCount: currentDetail.postsCount - 1,
-        postStream: PostStream(
-          posts: newPosts,
-          stream: newStream,
-          gaps: currentDetail.postStream.gaps,
-        ),
-      ),
+    _applyWindow(
+      (window) => window.removePost(postId),
+      detail: (detail) => detail.copyWith(postsCount: detail.postsCount - 1),
     );
   }
 
@@ -246,8 +214,8 @@ extension PostUpdateMethods on TopicDetailNotifier {
         true;
 
     var found = false;
-    final currentPosts = currentDetail.postStream.posts;
-    final newPosts = currentPosts.map((post) {
+    final window = PostStreamWindow.of(currentDetail.postStream);
+    final newWindow = window.mapPosts((post) {
       if (post.id == postId) {
         found = true;
         return post.copyWith(
@@ -258,7 +226,8 @@ extension PostUpdateMethods on TopicDetailNotifier {
         return post.copyWith(acceptedAnswer: false, canUnacceptAnswer: false);
       }
       return post;
-    }).toList();
+    });
+    final newPosts = newWindow.posts;
 
     late final List<AcceptedAnswer> newAcceptedAnswers;
     if (found) {
@@ -288,11 +257,7 @@ extension PostUpdateMethods on TopicDetailNotifier {
 
     state = AsyncValue.data(
       currentDetail.copyWith(
-        postStream: PostStream(
-          posts: newPosts,
-          stream: currentDetail.postStream.stream,
-          gaps: currentDetail.postStream.gaps,
-        ),
+        postStream: newWindow,
         acceptedAnswers: newAcceptedAnswers,
       ),
     );
@@ -301,64 +266,36 @@ extension PostUpdateMethods on TopicDetailNotifier {
   /// 添加新创建的帖子到列表（用于回复后直接更新）
   ///
   /// [wasAtBottom] 调用方在打开回复面板前捕获的快照，用于解决 MessageBus
-  /// created 事件先于 API 响应到达、将 _hasMoreAfter 改为 true 的竞态问题。
+  /// created 事件先于 API 响应到达、把窗口边界改掉的竞态问题。
+  /// 返回帖子是否进入了已加载楼层(否则只记了 id,由调用方提示跳转)。
   bool addPost(Post post, {bool wasAtBottom = false}) {
     final currentDetail = state.value;
     if (currentDetail == null) return false;
 
-    final currentPosts = currentDetail.postStream.posts;
+    final window = PostStreamWindow.of(currentDetail.postStream);
+    // onNewPostCreated 可能已为它递增过 postsCount(id 已入 stream,或到底
+    // 时进了待拉队列/正在拉取),避免双重递增
+    final alreadyCounted =
+        window.stream.contains(post.id) ||
+        _pendingNewPostIds.contains(post.id) ||
+        _loadingNewPostIds.contains(post.id);
 
-    if (currentPosts.any((p) => p.id == post.id)) return true;
+    final result = window.addOwnPost(post, wasAtBottom: wasAtBottom);
+    if (identical(result.window, window)) return result.loaded;
 
-    final currentStream = currentDetail.postStream.stream;
-    final alreadyInStream = currentStream.contains(post.id);
+    state = AsyncValue.data(
+      currentDetail.copyWith(
+        postsCount: alreadyCounted
+            ? currentDetail.postsCount
+            : currentDetail.postsCount + 1,
+        postStream: result.window,
+      ),
+    );
 
-    final newStream = [...currentStream];
-    if (!alreadyInStream) {
-      newStream.add(post.id);
+    if (result.loaded && post.replyToPostNumber > 0) {
+      _refreshReplyTarget(post.replyToPostNumber);
     }
-
-    if (!_hasMoreAfter || wasAtBottom) {
-      final newPosts = [...currentPosts, post];
-      newPosts.sort((a, b) => a.postNumber.compareTo(b.postNumber));
-
-      // onNewPostCreated 可能已递增过 postsCount，避免双重递增
-      final newPostsCount = alreadyInStream
-          ? currentDetail.postsCount
-          : currentDetail.postsCount + 1;
-
-      state = AsyncValue.data(
-        currentDetail.copyWith(
-          postsCount: newPostsCount,
-          postStream: PostStream(
-            posts: newPosts,
-            stream: newStream,
-            gaps: currentDetail.postStream.gaps,
-          ),
-        ),
-      );
-
-      // MessageBus 可能已将 _hasMoreAfter 设为 true，插入帖子后修正
-      _updateBoundaryState(newPosts, newStream);
-
-      if (post.replyToPostNumber > 0) {
-        _refreshReplyTarget(post.replyToPostNumber);
-      }
-
-      return true;
-    } else {
-      state = AsyncValue.data(
-        currentDetail.copyWith(
-          postsCount: currentDetail.postsCount + 1,
-          postStream: PostStream(
-            posts: currentPosts,
-            stream: newStream,
-            gaps: currentDetail.postStream.gaps,
-          ),
-        ),
-      );
-      return false;
-    }
+    return result.loaded;
   }
 
   /// 挂入一条当前用户的待审核回复(发帖 enqueued 后即时展示在底部待审块)
@@ -404,25 +341,7 @@ extension PostUpdateMethods on TopicDetailNotifier {
 
   /// 更新已存在的帖子（用于编辑后直接更新）
   void updatePost(Post post) {
-    final currentDetail = state.value;
-    if (currentDetail == null) return;
-
-    final currentPosts = currentDetail.postStream.posts;
-    final index = currentPosts.indexWhere((p) => p.id == post.id);
-    if (index == -1) return;
-
-    final newPosts = [...currentPosts];
-    newPosts[index] = post;
-
-    state = AsyncValue.data(
-      currentDetail.copyWith(
-        postStream: PostStream(
-          posts: newPosts,
-          stream: currentDetail.postStream.stream,
-          gaps: currentDetail.postStream.gaps,
-        ),
-      ),
-    );
+    _applyWindow((window) => window.replacePost(post));
   }
 
   /// 更新话题信息（用于编辑话题后直接更新）
@@ -435,20 +354,7 @@ extension PostUpdateMethods on TopicDetailNotifier {
     final currentDetail = state.value;
     if (currentDetail == null) return;
 
-    PostStream? updatedPostStream;
-    if (firstPost != null) {
-      final currentPosts = currentDetail.postStream.posts;
-      final index = currentPosts.indexWhere((p) => p.id == firstPost.id);
-      if (index != -1) {
-        final newPosts = [...currentPosts];
-        newPosts[index] = firstPost;
-        updatedPostStream = PostStream(
-          posts: newPosts,
-          stream: currentDetail.postStream.stream,
-          gaps: currentDetail.postStream.gaps,
-        );
-      }
-    }
+    final window = PostStreamWindow.of(currentDetail.postStream);
 
     state = AsyncValue.data(
       currentDetail.copyWith(
@@ -457,7 +363,7 @@ extension PostUpdateMethods on TopicDetailNotifier {
         tags: tags != null
             ? tags.map((name) => Tag(name: name)).toList()
             : currentDetail.tags,
-        postStream: updatedPostStream ?? currentDetail.postStream,
+        postStream: firstPost == null ? window : window.replacePost(firstPost),
       ),
     );
   }
@@ -496,7 +402,11 @@ extension PostUpdateMethods on TopicDetailNotifier {
           .setTopicNotificationLevel(currentDetail.id, level);
       if (!ref.mounted) return;
 
-      state = AsyncValue.data(currentDetail.copyWith(notificationLevel: level));
+      // 基于请求返回时的最新 detail:请求期间翻页/新回复落地的帖子不能被
+      // 请求前的快照盖掉(下面几个异步方法同理)
+      final latestDetail = state.value;
+      if (latestDetail == null) return;
+      state = AsyncValue.data(latestDetail.copyWith(notificationLevel: level));
     } catch (e) {
       debugPrint('[TopicDetail] 更新订阅级别失败: $e');
       rethrow;
@@ -538,9 +448,12 @@ extension PostUpdateMethods on TopicDetailNotifier {
       ref.read(bookmarkSyncControllerProvider.notifier).pullFirstPage(),
     );
 
-    state = AsyncValue.data(
-      currentDetail.copyWith(bookmarked: true, bookmarkId: newBookmarkId),
-    );
+    final latestDetail = state.value;
+    if (latestDetail != null) {
+      state = AsyncValue.data(
+        latestDetail.copyWith(bookmarked: true, bookmarkId: newBookmarkId),
+      );
+    }
     return newBookmarkId;
   }
 
@@ -565,8 +478,10 @@ extension PostUpdateMethods on TopicDetailNotifier {
     // 写穿透:书签列表 Hive 缓存同步删除
     unawaited(_purgeBookmarkCache(bookmarkId));
 
+    final latestDetail = state.value;
+    if (latestDetail == null) return;
     state = AsyncValue.data(
-      currentDetail.copyWith(
+      latestDetail.copyWith(
         bookmarked: false,
         clearBookmarkId: true,
         clearBookmarkName: true,
@@ -669,8 +584,7 @@ extension PostUpdateMethods on TopicDetailNotifier {
 
   /// 重新加载话题元数据（只更新元数据，不刷新帖子流）
   Future<void> reloadTopicMetadata() async {
-    final currentDetail = state.value;
-    if (currentDetail == null) return;
+    if (state.value == null) return;
 
     try {
       final service = ref.read(discourseServiceProvider);
@@ -679,7 +593,10 @@ extension PostUpdateMethods on TopicDetailNotifier {
         postNumber: 1,
       );
       if (!ref.mounted) return;
-      // 只更新元数据，保留当前帖子列表
+      // 只更新元数据，保留当前帖子列表(取请求返回时的最新 detail,
+      // 请求期间落地的翻页/新回复不能被回滚)
+      final currentDetail = state.value;
+      if (currentDetail == null) return;
       state = AsyncValue.data(
         currentDetail.copyWith(
           title: newDetail.title,

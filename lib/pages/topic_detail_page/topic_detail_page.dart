@@ -1505,15 +1505,11 @@ class _TopicDetailPageState extends ConsumerState<TopicDetailPage>
     final canAssignTopic =
         PreloadedDataService().assignEnabled &&
         (ref.read(currentUserProvider).value?.canAssign ?? false);
-    final hasFilter =
-        notifier.isSummaryMode ||
-        notifier.isActivityMode ||
-        notifier.isAuthorOnlyMode ||
-        notifier.isTopLevelMode ||
-        _isNestedView;
+    final viewMode = notifier.viewMode;
+    final hasFilter = viewMode.isFiltered || _isNestedView;
     // 用户过滤区分对象:楼主 → 「只看作者」项;其他参与者(用户卡片
     // 发起) → 单列一项显示具体用户名
-    final userFilter = notifier.usernameFilter;
+    final userFilter = viewMode.username;
     final isAuthorFilter =
         userFilter != null && userFilter == detail.createdBy?.username;
     final isOtherUserFilter = userFilter != null && !isAuthorFilter;
@@ -1620,9 +1616,9 @@ class _TopicDetailPageState extends ConsumerState<TopicDetailPage>
                 MenuQuickActionSubmenuChild(
                   icon: Symbols.history_rounded,
                   label: context.l10n.topicDetail_sortByActivity,
-                  selected: notifier.isActivityMode,
+                  selected: viewMode.isActivity,
                   onTap: () {
-                    if (notifier.isActivityMode) {
+                    if (viewMode.isActivity) {
                       _handleCancelFilter();
                     } else {
                       _handleShowByActivity();
@@ -1631,13 +1627,13 @@ class _TopicDetailPageState extends ConsumerState<TopicDetailPage>
                 ),
               if (detail.hasSummary)
                 MenuQuickActionSubmenuChild(
-                  icon: notifier.isSummaryMode
+                  icon: viewMode.isSummary
                       ? Symbols.local_fire_department_rounded
                       : Symbols.local_fire_department_rounded,
                   label: context.l10n.topicDetail_hotOnly,
-                  selected: notifier.isSummaryMode,
+                  selected: viewMode.isSummary,
                   onTap: () {
-                    if (notifier.isSummaryMode) {
+                    if (viewMode.isSummary) {
                       _handleCancelFilter();
                     } else {
                       _handleShowTopReplies();
@@ -1664,13 +1660,13 @@ class _TopicDetailPageState extends ConsumerState<TopicDetailPage>
                   onTap: _handleCancelFilter,
                 ),
               MenuQuickActionSubmenuChild(
-                icon: notifier.isTopLevelMode
+                icon: viewMode.isTopLevel
                     ? Symbols.account_tree_rounded
                     : Symbols.account_tree_rounded,
                 label: context.l10n.topicDetail_topLevelOnly,
-                selected: notifier.isTopLevelMode,
+                selected: viewMode.isTopLevel,
                 onTap: () {
-                  if (notifier.isTopLevelMode) {
+                  if (viewMode.isTopLevel) {
                     _handleCancelFilter();
                   } else {
                     _handleShowTopLevelReplies();
@@ -1962,10 +1958,7 @@ class _TopicDetailPageState extends ConsumerState<TopicDetailPage>
       hasSummary: detail.hasSummary,
       isPostVoting: detail.isPostVoting,
       isPrivateMessage: detail.isPrivateMessage,
-      isSummaryMode: notifier.isSummaryMode,
-      isActivityMode: notifier.isActivityMode,
-      isAuthorOnlyMode: notifier.isAuthorOnlyMode,
-      isTopLevelMode: notifier.isTopLevelMode,
+      viewMode: notifier.viewMode,
       isNestedMode: _isNestedView,
       isLoading: _isSwitchingMode,
     );
@@ -1987,10 +1980,7 @@ class _TopicDetailPageState extends ConsumerState<TopicDetailPage>
       onReply: () => _handleReply(null),
       onProgressTap: _showTimelineSheetForCurrent,
       onProgressGesture: _handleProgressGestureForCurrent,
-      isSummaryMode: notifier.isSummaryMode,
-      isActivityMode: notifier.isActivityMode,
-      isAuthorOnlyMode: notifier.isAuthorOnlyMode,
-      isTopLevelMode: notifier.isTopLevelMode,
+      viewMode: notifier.viewMode,
       isNestedMode: _isNestedView,
       isLoading: _isSwitchingMode,
       onShowTopReplies: _handleShowTopReplies,
@@ -2924,7 +2914,7 @@ class _TopicDetailPageState extends ConsumerState<TopicDetailPage>
 
     // 计算分割线位置（热门回复模式下不显示）
     int? dividerPostIndex;
-    if (!notifier.isSummaryMode) {
+    if (!notifier.viewMode.isSummary) {
       final lastRead = detail.lastReadPostNumber;
       final totalPosts = detail.postsCount;
       if (lastRead != null && lastRead > 3 && (totalPosts - lastRead) > 1) {
@@ -3079,7 +3069,7 @@ class _TopicDetailPageState extends ConsumerState<TopicDetailPage>
               highlightPostNumber: highlightPostNumber,
               highlightBoostUsername: widget.highlightBoostUsername,
               isLoggedIn: isLoggedIn,
-              isActivitySort: notifier.isActivityMode,
+              isActivitySort: notifier.viewMode.isActivity,
               onAnswerSortChanged: (byActivity) =>
                   byActivity ? _handleShowByActivity() : _handleCancelFilter(),
               headingAnchorRegistry: _tocController.registry,
@@ -3129,7 +3119,7 @@ class _TopicDetailPageState extends ConsumerState<TopicDetailPage>
               onFillGapBefore: (postId) => notifier.fillGapBefore(postId),
               onFillGapAfter: (postId) => notifier.fillGapAfter(postId),
               onExpandHiddenPost: (postId) => notifier.expandHiddenPost(postId),
-              useReplyDialog: notifier.isTopLevelMode,
+              useReplyDialog: notifier.viewMode.isTopLevel,
               onShowPostDetail: (post) => showPostRepliesSheet(
                 context: context,
                 post: post,

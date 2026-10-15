@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:app_icons/app_icons.dart';
 import '../../../l10n/s.dart';
+import '../../../providers/topic_detail/topic_view_mode.dart';
 import 'package:common_ui/common_ui.dart';
 
 /// 话题详情页底部操作栏
@@ -12,10 +13,7 @@ class TopicBottomBar extends StatelessWidget {
   final VoidCallback? onOpenInBrowser;
   final bool hasSummary;
   final bool isPostVoting;
-  final bool isSummaryMode;
-  final bool isActivityMode;
-  final bool isAuthorOnlyMode;
-  final bool isTopLevelMode;
+  final TopicViewMode viewMode;
   final bool isNestedMode;
   final bool isLoading;
   final VoidCallback? onShowTopReplies;
@@ -35,10 +33,7 @@ class TopicBottomBar extends StatelessWidget {
     this.onOpenInBrowser,
     this.hasSummary = false,
     this.isPostVoting = false,
-    this.isSummaryMode = false,
-    this.isActivityMode = false,
-    this.isAuthorOnlyMode = false,
-    this.isTopLevelMode = false,
+    this.viewMode = TopicViewMode.all,
     this.isNestedMode = false,
     this.isLoading = false,
     this.isPrivateMessage = false,
@@ -50,7 +45,7 @@ class TopicBottomBar extends StatelessWidget {
     this.onShowNestedView,
   });
 
-  bool get _hasActiveFilter => isSummaryMode || isActivityMode || isAuthorOnlyMode || isTopLevelMode || isNestedMode;
+  bool get _hasActiveFilter => viewMode.isFiltered || isNestedMode;
 
   @override
   Widget build(BuildContext context) {
@@ -110,10 +105,10 @@ class TopicBottomBar extends StatelessWidget {
   }
 
   (IconData, String) _activeFilterInfo(BuildContext context) {
-    if (isSummaryMode) return (Symbols.local_fire_department_rounded, context.l10n.topicDetail_hotOnly);
-    if (isActivityMode) return (Symbols.history_rounded, context.l10n.topicDetail_sortByActivity);
-    if (isAuthorOnlyMode) return (Symbols.person_rounded, context.l10n.topicDetail_authorOnly);
-    if (isTopLevelMode) return (Symbols.account_tree_rounded, context.l10n.topicDetail_topLevelOnly);
+    if (viewMode.isSummary) return (Symbols.local_fire_department_rounded, context.l10n.topicDetail_hotOnly);
+    if (viewMode.isActivity) return (Symbols.history_rounded, context.l10n.topicDetail_sortByActivity);
+    if (viewMode.isUserFilter) return (Symbols.person_rounded, context.l10n.topicDetail_authorOnly);
+    if (viewMode.isTopLevel) return (Symbols.account_tree_rounded, context.l10n.topicDetail_topLevelOnly);
     if (isNestedMode) return (Symbols.forum_rounded, context.l10n.nested_title);
     return (Symbols.filter_list_rounded, '');
   }

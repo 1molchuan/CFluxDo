@@ -434,7 +434,6 @@ extension _ScrollActions on _TopicDetailPageState {
     final detail = _filteredDetail(rawDetail);
     final posts = detail.postStream.posts;
     final postIndex = posts.indexWhere((p) => p.postNumber == postNumber);
-    final notifier = ref.read(topicDetailProvider(params).notifier);
 
     if (postIndex == -1) {
       debugPrint(
@@ -443,13 +442,7 @@ extension _ScrollActions on _TopicDetailPageState {
       _controller.prepareJumpToPost(postNumber);
       _controller.skipNextJumpHighlight = false;
 
-      if (notifier.isSummaryMode ||
-          notifier.isAuthorOnlyMode ||
-          notifier.isTopLevelMode) {
-        await _reloadWithFilterFallback(postNumber: postNumber);
-      } else {
-        await notifier.reloadWithPostNumber(postNumber);
-      }
+      await _reloadForJump(postNumber: postNumber);
       return;
     }
 
@@ -563,18 +556,7 @@ extension _ScrollActions on _TopicDetailPageState {
       _controller.prepareJumpToPost(realPostNumber);
       _controller.skipNextJumpHighlight = false;
 
-      final notifier = ref.read(topicDetailProvider(params).notifier);
-
-      if (notifier.isSummaryMode ||
-          notifier.isAuthorOnlyMode ||
-          notifier.isTopLevelMode) {
-        await _reloadWithFilterFallback(
-          postNumber: realPostNumber,
-          postId: postId,
-        );
-      } else {
-        await notifier.reloadWithPostNumber(realPostNumber);
-      }
+      await _reloadForJump(postNumber: realPostNumber, postId: postId);
     } catch (e) {
       debugPrint('[TopicDetail] Error fetching post $postId: $e');
     }

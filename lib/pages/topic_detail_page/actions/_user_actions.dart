@@ -25,14 +25,11 @@ extension _UserActions on _TopicDetailPageState {
     final updatedDetail = ref.read(topicDetailProvider(params)).value;
     if (updatedDetail == null) return;
 
-    final isFiltered =
-        notifier.isSummaryMode ||
-        notifier.isAuthorOnlyMode ||
-        notifier.isTopLevelMode;
+    // 过滤视图(含按活动排序)刷新从头重载,锚点楼层不一定还在窗口里
     final hasAnchor = updatedDetail.postStream.posts.any(
       (p) => p.postNumber == anchorPostNumber,
     );
-    if (!isFiltered || hasAnchor) {
+    if (notifier.viewMode.refreshesNearAnchor || hasAnchor) {
       _controller.prepareRefresh(anchorPostNumber, skipHighlight: true);
     } else {
       _controller.clearJumpTarget();
@@ -1696,17 +1693,14 @@ extension _UserActions on _TopicDetailPageState {
     // 四项互斥单选：进入树形视图时清掉内容/顶层筛选，保证同时只有一项生效。
     // （树形视图走独立的 nestedTopicProvider，取消筛选只把底层流恢复成未筛选。）
     final notifier = ref.read(topicDetailProvider(_params).notifier);
-    final hadFilter =
-        notifier.isSummaryMode ||
-        notifier.isAuthorOnlyMode ||
-        notifier.isTopLevelMode;
+    final hadFilter = notifier.viewMode.isFiltered;
     setState(() {
       _isNestedView = true;
       // 手动开启:失败时显示错误页可重试,不做静默回落
       _nestedAutoEnabled = false;
     });
     if (hadFilter) {
-      unawaited(notifier.cancelFilter());
+      unawaited(notifier.setViewMode(TopicViewMode.all));
     }
     _scheduleCheckTitleVisibility();
   }
