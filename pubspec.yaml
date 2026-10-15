@@ -164,6 +164,10 @@ dependency_overrides:
   # 锁定 flutter_rust_bridge 版本，与 rhttp 插件的 codegen 版本保持一致。
   # rhttp_plus 已同步 upstream 0.18.0，生成代码基于 2.12.0。
   flutter_rust_bridge: 2.12.0
+  # Linux WebView（WPE WebKit）插件内置一份：要加「预先放行代理叶子证书」的接口，
+  # 并兼容旧版 WPE 的编译（见 packages/flutter_inappwebview_linux/CFLUXDO_PATCHES.md）
+  flutter_inappwebview_linux:
+    path: packages/flutter_inappwebview_linux
 dev_dependencies:
   flutter_test:
     sdk: flutter

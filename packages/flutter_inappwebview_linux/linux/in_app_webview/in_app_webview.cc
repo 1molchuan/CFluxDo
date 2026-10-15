@@ -6210,8 +6210,14 @@ void InAppWebView::setMicrophoneCaptureState(int state) {
 std::optional<std::string> InAppWebView::getMetaThemeColor() const {
   if (webview_ == nullptr) return std::nullopt;
   
+#if WEBKIT_CHECK_VERSION(2, 50, 0)
   WebKitColor color;
   gboolean hasColor = webkit_web_view_get_theme_color(webview_, &color);
+#else
+  // cfluxdo: webkit_web_view_get_theme_color 是 WPE 2.50 新增，旧版本（如 Debian 13 的 2.48）没有
+  WebKitColor color{};
+  gboolean hasColor = FALSE;
+#endif
   
   if (!hasColor) {
     return std::nullopt;

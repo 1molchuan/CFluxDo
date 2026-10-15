@@ -10,6 +10,7 @@
 #include <cstring>
 #include <memory>
 
+#include "cfluxdo_tls_channel.h"
 #include "cookie_manager.h"
 #include "credential_database.h"
 #include "headless_in_app_webview/headless_in_app_webview_manager.h"
@@ -116,6 +117,8 @@ void flutter_inappwebview_linux_plugin_register_with_registrar(FlPluginRegistrar
 
   plugin->webview_environment = std::make_unique<flutter_inappwebview_plugin::WebViewEnvironment>(pluginInstance);
   pluginInstance->webViewEnvironment = plugin->webview_environment.get();
+
+  cfluxdo_tls_channel_register(registrar);
 
   // Note: We don't unref the plugin here as it needs to stay alive
   // for the lifetime of the application
