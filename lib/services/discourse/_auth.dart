@@ -6,18 +6,18 @@ mixin _AuthMixin on _DiscourseServiceBase {
   // 收到 discourse-logged-out 等信号后，不立即登出，而是累积 strike 并通过
   // probe（GET /session/current.json）做二次验证，避免瞬时 cookie 传输问题
   // 或 token rotation 窗口导致的误判。
+  //
+  // `_t` 本身的真相（两端血缘、候选池、被拒冷却、上一枚值、恢复链）归
+  // SessionTokenAuthority；这里只管 strike 计数、何时探测、以及拿到结论后
+  // 的用户状态与登出体验。
   static const Duration _strikeWindow = Duration(seconds: 45);
   static const Duration _inconclusiveCooldown = Duration(seconds: 30);
-  static const Duration _candidateProbeFailureCooldown = Duration(minutes: 5);
-  static const Duration _previousTTokenFallbackTtl = Duration(minutes: 15);
   int _authStrikeCount = 0;
   DateTime? _lastStrikeAt;
   DateTime? _lastInconclusiveAt;
-  String? _lastRejectedSessionCandidateHash;
-  DateTime? _lastRejectedSessionCandidateAt;
-  String? _previousTTokenFallback;
-  DateTime? _previousTTokenFallbackAt;
   Future<bool?>? _activeProbe;
+
+  SessionTokenAuthority get _sessionToken => SessionTokenAuthority.instance;
 
   void _resetStrikes() {
     _authStrikeCount = 0;
@@ -44,75 +44,6 @@ mixin _AuthMixin on _DiscourseServiceBase {
 
   bool _hasTokenValue(String? token) => token != null && token.isNotEmpty;
 
-  bool _isRejectedSessionCandidateInCooldown(String? token) {
-    final hash = _safeTokenHash(token);
-    final rejectedAt = _lastRejectedSessionCandidateAt;
-    if (hash == null ||
-        rejectedAt == null ||
-        hash != _lastRejectedSessionCandidateHash) {
-      return false;
-    }
-    return DateTime.now().difference(rejectedAt) <=
-        _candidateProbeFailureCooldown;
-  }
-
-  void _markRejectedSessionCandidate(String? token) {
-    final hash = _safeTokenHash(token);
-    if (hash == null) return;
-    _lastRejectedSessionCandidateHash = hash;
-    _lastRejectedSessionCandidateAt = DateTime.now();
-  }
-
-  void _clearRejectedSessionCandidate() {
-    _lastRejectedSessionCandidateHash = null;
-    _lastRejectedSessionCandidateAt = null;
-  }
-
-  void _rememberPreviousTTokenFallback(
-    String? token, {
-    required String reason,
-    String? replacementToken,
-    RequestOptions? requestOptions,
-  }) {
-    if (!_hasTokenValue(token) || token == replacementToken) return;
-
-    _previousTTokenFallback = token;
-    _previousTTokenFallbackAt = DateTime.now();
-
-    LogWriter.instance.write({
-      'timestamp': DateTime.now().toIso8601String(),
-      'level': 'info',
-      'type': 'auth',
-      'event': 'previous_t_token_fallback_stored',
-      'message': '已临时保存上一枚 _t，供登录失效 probe 回退使用',
-      'reason': reason,
-      'previousTLen': _tokenLength(token),
-      'previousTHash': _safeTokenHash(token),
-      'replacementTLen': _tokenLength(replacementToken),
-      'replacementTHash': _safeTokenHash(replacementToken),
-      if (requestOptions != null) 'method': requestOptions.method,
-      if (requestOptions != null) 'url': requestOptions.uri.toString(),
-    });
-  }
-
-  String? _readPreviousTTokenFallback({String? sentTToken, String? jarTToken}) {
-    final token = _previousTTokenFallback;
-    final storedAt = _previousTTokenFallbackAt;
-    if (!_hasTokenValue(token) || storedAt == null) return null;
-
-    if (DateTime.now().difference(storedAt) > _previousTTokenFallbackTtl) {
-      _clearPreviousTTokenFallback();
-      return null;
-    }
-    if (token == sentTToken || token == jarTToken) return null;
-    return token;
-  }
-
-  void _clearPreviousTTokenFallback() {
-    _previousTTokenFallback = null;
-    _previousTTokenFallbackAt = null;
-  }
-
   bool? _sameNonEmptyToken(String? left, String? right) {
     if (left == null || left.isEmpty || right == null || right.isEmpty) {
       return null;
@@ -120,15 +51,8 @@ mixin _AuthMixin on _DiscourseServiceBase {
     return left == right;
   }
 
-  String? _sentTTokenFromRequest(RequestOptions requestOptions) {
-    final sentCookieHeader =
-        requestOptions.headers[HttpHeaders.cookieHeader]?.toString() ??
-        requestOptions.headers['Cookie']?.toString() ??
-        '';
-    return RegExp(
-      r'(?:^|;\s*)_t=([^;]*)',
-    ).firstMatch(sentCookieHeader)?.group(1);
-  }
+  String? _sentTTokenFromRequest(RequestOptions requestOptions) =>
+      SessionTokenAuthority.sentTokenFromRequest(requestOptions);
 
   Map<String, dynamic> _sentTDiagnostics(RequestOptions requestOptions) {
     final sentTToken = _sentTTokenFromRequest(requestOptions);
@@ -326,49 +250,134 @@ mixin _AuthMixin on _DiscourseServiceBase {
     return future;
   }
 
+  /// 恢复链交给 [SessionTokenAuthority.recover]：WebView 候选 → 候选环 →
+  /// jar 主探测 → 上一枚值 → User API Key。这里只按结论处理用户状态、
+  /// strike 与登出体验。
   Future<bool?> _probeSessionImpl({
     required String source,
     String? triggerInfo,
     RequestOptions? signalRequestOptions,
   }) async {
     final strikeSnapshot = _authStrikeCount;
-    final requestGeneration =
-        signalRequestOptions?.extra['_sessionGeneration'] as int?;
-    if (requestGeneration != null &&
-        !AuthSession().isValid(requestGeneration)) {
-      return null;
-    }
-
-    final recoveredUser = await _recoverWebViewSessionBeforeProbe(
+    final verdict = await _sessionToken.recover(
       source: source,
       triggerInfo: triggerInfo,
       signalRequestOptions: signalRequestOptions,
     );
-    if (recoveredUser != null) {
-      currentUserNotifier.value = recoveredUser;
-      if (recoveredUser.username.isNotEmpty) {
-        _username = recoveredUser.username;
+
+    switch (verdict.kind) {
+      case SessionTokenVerdictKind.valid:
+        await _applyRecoveredSession(
+          verdict,
+          source: source,
+          triggerInfo: triggerInfo,
+          signalRequestOptions: signalRequestOptions,
+        );
+        _resetStrikes();
+        return true;
+      case SessionTokenVerdictKind.inconclusive:
+        // 信号来自已经过去的会话代：什么都不做（不计冷却）
+        if (verdict.staleGeneration) return null;
+        // 主探测网络类失败且 strike 已累积：升级为登出
+        if (verdict.networkFailure && strikeSnapshot >= 2) {
+          LogWriter.instance.write({
+            'timestamp': DateTime.now().toIso8601String(),
+            'level': 'warning',
+            'type': 'auth',
+            'event': 'auth_inconclusive_escalated',
+            'message': 'probe 不确定但 strike 已累积 $strikeSnapshot 次，升级为登出',
+            'source': source,
+            'trigger': ?triggerInfo,
+          });
+          await _handleAuthInvalid(
+            S.current.auth_loginExpiredRelogin,
+            source: 'probe_escalated',
+            triggerInfo: triggerInfo,
+          );
+          return false;
+        }
+        _lastInconclusiveAt = DateTime.now();
+        return null;
+      case SessionTokenVerdictKind.dead:
+      case SessionTokenVerdictKind.absent:
+        final failedToken = verdict.failedJarToken;
+        LogWriter.instance.write({
+          'timestamp': DateTime.now().toIso8601String(),
+          'level': 'warning',
+          'type': 'auth',
+          'event': 'auth_probe_failed',
+          'message': verdict.jarProbe?.statusCode == 404
+              ? 'session probe 返回 404，确认会话失效'
+              : 'session probe 确认 current_user 不存在，执行登出',
+          'source': source,
+          'trigger': ?triggerInfo,
+          'statusCode': verdict.jarProbe?.statusCode,
+          'sentHasT': _hasTokenValue(failedToken),
+          'sentTLen': _tokenLength(failedToken),
+          'sentTHash': _safeTokenHash(failedToken),
+        });
+        await _handleAuthInvalid(
+          S.current.auth_loginExpiredRelogin,
+          source: 'probe_confirmed',
+          triggerInfo: triggerInfo,
+        );
+        return false;
+    }
+  }
+
+  /// 恢复链给出有效会话：同步当前用户、用户名与内存 token。
+  Future<void> _applyRecoveredSession(
+    SessionTokenVerdict verdict, {
+    required String source,
+    String? triggerInfo,
+    RequestOptions? signalRequestOptions,
+  }) async {
+    final userJson = verdict.currentUser;
+    if (userJson != null) {
+      final user = User.fromJson(userJson);
+      currentUserNotifier.value = user;
+      if (user.username.isNotEmpty) {
+        _username = user.username;
         await _storage.write(
           key: DiscourseService._usernameKey,
-          value: recoveredUser.username,
+          value: user.username,
         );
       }
-      LogWriter.instance.write({
-        'timestamp': DateTime.now().toIso8601String(),
-        'level': 'info',
-        'type': 'auth',
-        'event': 'auth_probe_success',
-        'message': 'WebView 候选 session 已确认有效，跳过重复 probe',
-        'source': source,
-        if (triggerInfo != null) 'trigger': triggerInfo,
-        'username': recoveredUser.username,
-        if (signalRequestOptions != null)
-          ..._sentTDiagnostics(signalRequestOptions),
-      });
-      _resetStrikes();
-      return true;
     }
+    if (_hasTokenValue(verdict.token)) _tToken = verdict.token;
 
+    final message = switch (verdict.source) {
+      SessionTokenSource.webView ||
+      SessionTokenSource.recentWebView => 'WebView 候选 session 已确认有效，跳过重复 probe',
+      SessionTokenSource.previous => '上一枚 session 候选已确认有效，取消本次登出',
+      // 主探测成功在探测时已记日志，User API Key 自愈由 authority 记日志
+      _ => null,
+    };
+    if (message == null) return;
+    LogWriter.instance.write({
+      'timestamp': DateTime.now().toIso8601String(),
+      'level': 'info',
+      'type': 'auth',
+      'event': 'auth_probe_success',
+      'message': message,
+      'source': source,
+      'trigger': ?triggerInfo,
+      'username': currentUserNotifier.value?.username,
+      'recoveredFrom': verdict.source?.name,
+      if (signalRequestOptions != null)
+        ..._sentTDiagnostics(signalRequestOptions),
+    });
+  }
+
+  /// 主探测：用 CookieJar 当前的会话请求 `/session/current.json`。
+  ///
+  /// 404 / 200 无 current_user 是服务端明确答复会话失效；其余请求失败是
+  /// 网络类无结论（strike 可据此升级）；非预期响应体是无结论但不升级。
+  Future<SessionTokenProbeResult> _probeJarSession({
+    required String source,
+    String? triggerInfo,
+    int? requestGeneration,
+  }) async {
     // probe 前同步 cf_clearance，避免 CF 验证态落后导致 probe 不确定。
     try {
       await BoundarySyncService.instance.syncFromWebView(
@@ -387,7 +396,7 @@ mixin _AuthMixin on _DiscourseServiceBase {
       'event': 'auth_probe_started',
       'message': '开始 session probe',
       'source': source,
-      if (triggerInfo != null) 'trigger': triggerInfo,
+      'trigger': ?triggerInfo,
       'memHasToken': _tToken != null && _tToken!.isNotEmpty,
       'memTLen': _tokenLength(_tToken),
       'memTHash': _safeTokenHash(_tToken),
@@ -415,30 +424,17 @@ mixin _AuthMixin on _DiscourseServiceBase {
           'event': 'auth_probe_inconclusive',
           'message': 'probe 返回非预期数据结构，暂不登出',
           'source': source,
-          if (triggerInfo != null) 'trigger': triggerInfo,
+          'trigger': ?triggerInfo,
           'statusCode': response.statusCode,
           ..._sentTDiagnostics(response.requestOptions),
         });
-        _lastInconclusiveAt = DateTime.now();
-        return null;
+        return SessionTokenProbeResult.inconclusive(
+          statusCode: response.statusCode,
+        );
       }
 
       final currentUser = data['current_user'];
       if (currentUser is Map<String, dynamic>) {
-        // 会话有效，恢复
-        final user = User.fromJson(currentUser);
-        currentUserNotifier.value = user;
-        if (user.username.isNotEmpty) {
-          _username = user.username;
-          await _storage.write(
-            key: DiscourseService._usernameKey,
-            value: user.username,
-          );
-        }
-        final liveToken = await _cookieJar.getTToken();
-        if (liveToken != null && liveToken.isNotEmpty) {
-          _tToken = liveToken;
-        }
         LogWriter.instance.write({
           'timestamp': DateTime.now().toIso8601String(),
           'level': 'info',
@@ -446,151 +442,20 @@ mixin _AuthMixin on _DiscourseServiceBase {
           'event': 'auth_probe_success',
           'message': 'session probe 确认会话有效，保持登录',
           'source': source,
-          if (triggerInfo != null) 'trigger': triggerInfo,
-          'username': user.username,
+          'trigger': ?triggerInfo,
+          'username': currentUser['username']?.toString(),
           ..._sentTDiagnostics(response.requestOptions),
         });
-        _clearPreviousTTokenFallback();
-        _resetStrikes();
-        return true;
+        return SessionTokenProbeResult.valid(currentUser);
       }
-
-      final recoveredByPrevious = await _recoverPreviousSessionBeforeLogout(
-        source: source,
-        triggerInfo: triggerInfo,
-        signalRequestOptions: signalRequestOptions,
-        failedJarTToken: probeJarTToken,
-      );
-      if (recoveredByPrevious != null) {
-        currentUserNotifier.value = recoveredByPrevious;
-        if (recoveredByPrevious.username.isNotEmpty) {
-          _username = recoveredByPrevious.username;
-          await _storage.write(
-            key: DiscourseService._usernameKey,
-            value: recoveredByPrevious.username,
-          );
-        }
-        LogWriter.instance.write({
-          'timestamp': DateTime.now().toIso8601String(),
-          'level': 'info',
-          'type': 'auth',
-          'event': 'auth_probe_success',
-          'message': '上一枚 session 候选已确认有效，取消本次登出',
-          'source': source,
-          if (triggerInfo != null) 'trigger': triggerInfo,
-          'username': recoveredByPrevious.username,
-          ..._sentTDiagnostics(response.requestOptions),
-        });
-        _resetStrikes();
-        return true;
-      }
-
-      // 200 但无 current_user → 先尝试 User API Key 自愈,再确认失效
-      final healedUser = await _recoverViaUserApiKeySelfHeal(
-        source: source,
-        triggerInfo: triggerInfo,
-      );
-      if (healedUser != null) {
-        currentUserNotifier.value = healedUser;
-        if (healedUser.username.isNotEmpty) {
-          _username = healedUser.username;
-          await _storage.write(
-            key: DiscourseService._usernameKey,
-            value: healedUser.username,
-          );
-        }
-        _resetStrikes();
-        return true;
-      }
-
-      // 200 但无 current_user → 确认失效
-      LogWriter.instance.write({
-        'timestamp': DateTime.now().toIso8601String(),
-        'level': 'warning',
-        'type': 'auth',
-        'event': 'auth_probe_failed',
-        'message': 'session probe 确认 current_user 不存在，执行登出',
-        'source': source,
-        if (triggerInfo != null) 'trigger': triggerInfo,
-        ..._sentTDiagnostics(response.requestOptions),
-      });
-      await _handleAuthInvalid(
-        S.current.auth_loginExpiredRelogin,
-        source: 'probe_confirmed',
-        triggerInfo: triggerInfo,
-      );
-      return false;
+      // 200 但无 current_user：会话已失效
+      return SessionTokenProbeResult.rejected(statusCode: response.statusCode);
     } on DioException catch (e) {
       final status = e.response?.statusCode;
       // 404 = 无用户（session_controller.rb:676）
       if (status == 404) {
-        final recoveredByPrevious = await _recoverPreviousSessionBeforeLogout(
-          source: source,
-          triggerInfo: triggerInfo,
-          signalRequestOptions: signalRequestOptions,
-          failedJarTToken: probeJarTToken,
-        );
-        if (recoveredByPrevious != null) {
-          currentUserNotifier.value = recoveredByPrevious;
-          if (recoveredByPrevious.username.isNotEmpty) {
-            _username = recoveredByPrevious.username;
-            await _storage.write(
-              key: DiscourseService._usernameKey,
-              value: recoveredByPrevious.username,
-            );
-          }
-          LogWriter.instance.write({
-            'timestamp': DateTime.now().toIso8601String(),
-            'level': 'info',
-            'type': 'auth',
-            'event': 'auth_probe_success',
-            'message': '上一枚 session 候选已确认有效，取消本次登出',
-            'source': source,
-            if (triggerInfo != null) 'trigger': triggerInfo,
-            'username': recoveredByPrevious.username,
-            ..._sentTDiagnostics(
-              e.response?.requestOptions ?? e.requestOptions,
-            ),
-          });
-          _resetStrikes();
-          return true;
-        }
-
-        final healedUser404 = await _recoverViaUserApiKeySelfHeal(
-          source: source,
-          triggerInfo: triggerInfo,
-        );
-        if (healedUser404 != null) {
-          currentUserNotifier.value = healedUser404;
-          if (healedUser404.username.isNotEmpty) {
-            _username = healedUser404.username;
-            await _storage.write(
-              key: DiscourseService._usernameKey,
-              value: healedUser404.username,
-            );
-          }
-          _resetStrikes();
-          return true;
-        }
-
-        LogWriter.instance.write({
-          'timestamp': DateTime.now().toIso8601String(),
-          'level': 'warning',
-          'type': 'auth',
-          'event': 'auth_probe_failed',
-          'message': 'session probe 返回 404，确认会话失效',
-          'source': source,
-          if (triggerInfo != null) 'trigger': triggerInfo,
-          ..._sentTDiagnostics(e.response?.requestOptions ?? e.requestOptions),
-        });
-        await _handleAuthInvalid(
-          S.current.auth_loginExpiredRelogin,
-          source: 'probe_confirmed',
-          triggerInfo: triggerInfo,
-        );
-        return false;
+        return const SessionTokenProbeResult.rejected(statusCode: 404);
       }
-      // 网络异常 → inconclusive
       LogWriter.instance.write({
         'timestamp': DateTime.now().toIso8601String(),
         'level': 'warning',
@@ -598,284 +463,25 @@ mixin _AuthMixin on _DiscourseServiceBase {
         'event': 'auth_probe_inconclusive',
         'message': 'session probe 请求失败，暂不登出',
         'source': source,
-        if (triggerInfo != null) 'trigger': triggerInfo,
+        'trigger': ?triggerInfo,
         'statusCode': status,
         'errorType': e.type.toString(),
         ..._sentTDiagnostics(e.response?.requestOptions ?? e.requestOptions),
       });
-      // 如果累积 strike 较多，升级为登出
-      if (strikeSnapshot >= 2) {
-        LogWriter.instance.write({
-          'timestamp': DateTime.now().toIso8601String(),
-          'level': 'warning',
-          'type': 'auth',
-          'event': 'auth_inconclusive_escalated',
-          'message': 'probe 不确定但 strike 已累积 $strikeSnapshot 次，升级为登出',
-          'source': source,
-          if (triggerInfo != null) 'trigger': triggerInfo,
-        });
-        await _handleAuthInvalid(
-          S.current.auth_loginExpiredRelogin,
-          source: 'probe_escalated',
-          triggerInfo: triggerInfo,
-        );
-        return false;
-      }
-      _lastInconclusiveAt = DateTime.now();
-      return null;
+      return SessionTokenProbeResult.inconclusive(
+        networkFailure: true,
+        statusCode: status,
+      );
     } catch (e) {
       debugPrint('[Auth] probe 异常: $e');
-      _lastInconclusiveAt = DateTime.now();
-      return null;
+      return const SessionTokenProbeResult.inconclusive();
     }
   }
 
-  /// auth 信号可能来自 native CookieJar 落后于 WebView，也可能来自 WebView
-  /// 残留了更旧的 session。这里不信任 WebView，只把它的值当候选：
-  /// 先用候选值单独 probe，服务端确认有效后才写回 CookieJar。
-  ///
-  /// WebView 当前值不可用（为空 / 与 jar 相同 / 刚被拒绝）时，退而尝试
-  /// 血缘服务最近在 WebView 里见过的 `_t`：哨兵清理多变体、priming 覆盖
-  /// 都可能把 WebView 里更新的那枚值抹掉，但它可能仍在服务端有效。
-  Future<User?> _recoverWebViewSessionBeforeProbe({
-    required String source,
-    String? triggerInfo,
-    RequestOptions? signalRequestOptions,
-  }) async {
-    final sentTToken = signalRequestOptions == null
-        ? null
-        : _sentTTokenFromRequest(signalRequestOptions);
-    if (!_hasTokenValue(sentTToken)) return null;
-
-    final requestGeneration =
-        signalRequestOptions?.extra['_sessionGeneration'] as int?;
-    if (requestGeneration != null &&
-        !AuthSession().isValid(requestGeneration)) {
-      return null;
-    }
-
-    final beforeJarTToken = await _cookieJar.getTToken();
-    String? liveTToken;
-    try {
-      liveTToken = await BoundarySyncService.instance
-          .readCookieValueFromWebView(
-            currentUrl: AppConstants.baseUrl,
-            name: '_t',
-            allowLowConfidenceSessionCookies: true,
-          );
-    } catch (e) {
-      debugPrint('[Auth] probe 前读取 WebView session 失败: $e');
-      liveTToken = null;
-    }
-
-    final liveUsable =
-        _hasTokenValue(liveTToken) &&
-        liveTToken != beforeJarTToken &&
-        liveTToken != sentTToken &&
-        !_isRejectedSessionCandidateInCooldown(liveTToken);
-
-    // 候选顺序：WebView 当前值优先，其后是血缘环里最近见过的值（最多两枚）。
-    final candidates = <String>[if (liveUsable) liveTToken!];
-    final ringCandidates = SessionTokenLineage.instance.recentWebViewCandidates(
-      exclude: [beforeJarTToken, sentTToken, liveTToken],
-    );
-    for (final ring in ringCandidates) {
-      if (candidates.length >= 3) break;
-      if (_isRejectedSessionCandidateInCooldown(ring)) continue;
-      candidates.add(ring);
-    }
-    if (candidates.isEmpty) return null;
-
-    String? candidateForumSession;
-    if (liveUsable) {
-      try {
-        candidateForumSession = await BoundarySyncService.instance
-            .readCookieValueFromWebView(
-              currentUrl: AppConstants.baseUrl,
-              name: '_forum_session',
-              allowLowConfidenceSessionCookies: true,
-            );
-      } catch (e) {
-        debugPrint('[Auth] probe 前读取 WebView _forum_session 失败: $e');
-      }
-    }
-
-    String? candidateTToken;
-    User? candidateUser;
-    var candidateIsLive = false;
-    var rejectedCandidates = 0;
-    var inconclusiveCandidates = 0;
-    for (final candidate in candidates) {
-      final isLive = liveUsable && candidate == liveTToken;
-      final cookies = <String, String>{
-        '_t': candidate,
-        if (isLive && _hasTokenValue(candidateForumSession))
-          '_forum_session': candidateForumSession!,
-      };
-      final probeResult = await _probeCandidateSessionDetailed(
-        cookies,
-        requestGeneration: requestGeneration,
-      );
-      final user = probeResult.user;
-      if (user != null) {
-        candidateTToken = candidate;
-        candidateUser = user;
-        candidateIsLive = isLive;
-        break;
-      }
-      if (probeResult.conclusive) {
-        rejectedCandidates++;
-        _markRejectedSessionCandidate(candidate);
-      } else {
-        // 网关错误 / 网络异常 / 撞盾：不是服务端拒绝，不打入冷却，
-        // 下一次信号再试。
-        inconclusiveCandidates++;
-      }
-    }
-    if (candidateTToken == null || candidateUser == null) {
-      LogWriter.instance.write({
-        'timestamp': DateTime.now().toIso8601String(),
-        'level': 'info',
-        'type': 'auth',
-        'event': 'auth_probe_session_candidates_exhausted',
-        'message': 'probe 前的 WebView/血缘候选都没能确认有效',
-        'source': source,
-        if (triggerInfo != null) 'trigger': triggerInfo,
-        'candidatesTried': candidates.length,
-        'rejected': rejectedCandidates,
-        'inconclusive': inconclusiveCandidates,
-        'liveUsable': liveUsable,
-      });
-      return null;
-    }
-    _clearRejectedSessionCandidate();
-
-    if (requestGeneration != null &&
-        !AuthSession().isValid(requestGeneration)) {
-      return null;
-    }
-
-    // 候选已经服务端确认有效，必须以可信写入进 jar：jar 里旧值的版本号已被
-    // 之前的可信轮换抬高，非可信写入会被 isFresherThan 丢弃，恢复就会静默失败。
-    if (candidateIsLive) {
-      final candidateSessionCookies = <String, String>{
-        '_t': candidateTToken,
-        if (_hasTokenValue(candidateForumSession))
-          '_forum_session': candidateForumSession!,
-      };
-      try {
-        await BoundarySyncService.instance.syncFromWebView(
-          currentUrl: AppConstants.baseUrl,
-          cookieNames: candidateSessionCookies.keys.toSet(),
-          acceptValues: candidateSessionCookies,
-          requestGeneration: requestGeneration,
-          trusted: true,
-        );
-      } catch (e) {
-        debugPrint('[Auth] 已验证的 WebView session 同步失败: $e');
-        return null;
-      }
-    } else {
-      // 血缘环里的候选只有值没有过期时间，让 jar 补上（否则不落盘）。
-      await _cookieJar.setSessionTokenTrusted(candidateTToken);
-    }
-
-    final afterJarTToken = await _cookieJar.getTToken();
-    if (!_hasTokenValue(afterJarTToken) || afterJarTToken != candidateTToken) {
-      LogWriter.instance.write({
-        'timestamp': DateTime.now().toIso8601String(),
-        'level': 'warning',
-        'type': 'auth',
-        'event': 'auth_probe_session_cookie_recover_write_failed',
-        'message': '已验证的候选 _t 写入 CookieJar 后读回不符，放弃恢复',
-        'source': source,
-        'candidateIsLive': candidateIsLive,
-        'candidateTLen': _tokenLength(candidateTToken),
-        'candidateTHash': _safeTokenHash(candidateTToken),
-        'afterJarTLen': _tokenLength(afterJarTToken),
-        'afterJarTHash': _safeTokenHash(afterJarTToken),
-      });
-      return null;
-    }
-
-    _rememberPreviousTTokenFallback(
-      beforeJarTToken,
-      reason: 'webview_session_recovered',
-      replacementToken: afterJarTToken,
-      requestOptions: signalRequestOptions,
-    );
-    _tToken = afterJarTToken;
-    if (candidateIsLive) {
-      // WebView 本来就持有这枚值，现在 jar 也有了：两端一致。
-      SessionTokenLineage.instance.markAgreed(afterJarTToken);
-    } else {
-      // 来自血缘环：WebView 当前值已不是它，推回去让两端收敛。
-      unawaited(
-        SessionTokenLineage.instance.pushJarCookieToWebView(
-          name: '_t',
-          reason: 'auth_recover_ring_candidate',
-          nukeVariantsFirst: true,
-        ),
-      );
-    }
-    LogWriter.instance.write({
-      'timestamp': DateTime.now().toIso8601String(),
-      'level': 'info',
-      'type': 'auth',
-      'event': 'auth_probe_session_cookie_recovered',
-      'message': candidateIsLive
-          ? 'probe 前从 WebView 恢复了不同的 session cookie'
-          : 'probe 前用最近在 WebView 见过的 _t 恢复了 session cookie',
-      'source': source,
-      if (triggerInfo != null) 'trigger': triggerInfo,
-      'candidateIsLive': candidateIsLive,
-      'candidatesTried': candidates.length,
-      'sentTLen': _tokenLength(sentTToken),
-      'sentTHash': _safeTokenHash(sentTToken),
-      'beforeJarTLen': _tokenLength(beforeJarTToken),
-      'beforeJarTHash': _safeTokenHash(beforeJarTToken),
-      'afterJarTLen': _tokenLength(afterJarTToken),
-      'afterJarTHash': _safeTokenHash(afterJarTToken),
-      'afterMatchesSentT': _sameNonEmptyToken(afterJarTToken, sentTToken),
-      if (requestGeneration != null) 'requestGeneration': requestGeneration,
-    });
-    return candidateUser;
-  }
-
-  /// 血缘对账的探测钩子：用 WebView 里的候选 `_t` 单独探测服务端。
-  ///
-  /// true/false 是服务端的明确答复；null 表示探测没结论（网关 502、超时、
-  /// 撞盾、会话代已变）。对账方拿到 null 必须按「无结论」处理、两端都不动：
-  /// 冷启动时探测撞上一次 502 就把 WebView 里的活 token 当死值推翻，
-  /// 正是无征兆掉登录的触发点之一。
-  Future<bool?> _probeWebViewTokenForLineage(
-    String candidate, {
-    int? requestGeneration,
-  }) async {
-    if (requestGeneration != null &&
-        !AuthSession().isValid(requestGeneration)) {
-      return null;
-    }
-    if (_isRejectedSessionCandidateInCooldown(candidate)) return false;
-    final result = await _probeCandidateSessionDetailed({
-      '_t': candidate,
-    }, requestGeneration: requestGeneration);
-    if (result.accepted) {
-      _clearRejectedSessionCandidate();
-      return true;
-    }
-    if (!result.conclusive) return null;
-    _markRejectedSessionCandidate(candidate);
-    return false;
-  }
-
-  /// 2xx 响应里服务端明确删除了 `_t`（Set-Cookie `_t=` 空值 / del）。
-  ///
-  /// Discourse 的 `refresh_session` 只在「请求带了 `_t` 却找不到用户」时这么
-  /// 做，等价于「你手里这枚 token 已死」。CookieManager 已把这条删除指令拦下
-  /// 不动 jar，这里把它当强信号交给 probe：jar 的值若真死，probe 会依次试
-  /// WebView 的候选、上一枚值、User API Key，都不行才登出并留下日志；若只是
-  /// jar 落后于 WebView，probe 顺手就把活值捞回来。之前这条路径不产生任何
+  /// 2xx 响应里服务端静默删 `_t` 的指令被拦下（jar 不动），由
+  /// [SessionTokenAuthority] 转来：当强信号交给 probe。恢复链会依次试
+  /// WebView 候选、上一枚值、User API Key，都不行才登出并留下日志；若只是
+  /// jar 落后于 WebView，恢复链顺手就把活值捞回来。之前这条路径不产生任何
   /// 信号，jar 的 `_t` 被静默删掉，App 就无征兆地变成匿名。
   void _onSessionTokenDeletionDeferred(
     RequestOptions requestOptions,
@@ -896,144 +502,16 @@ mixin _AuthMixin on _DiscourseServiceBase {
     );
   }
 
-  /// 血缘对账采纳了 WebView 的 `_t` 之后：把被替换掉的 jar 旧值留作上一枚
-  /// 候选（轮换窗口内服务端仍接受），并同步内存里的 token。
-  void _onLineageAdoptedWebViewToken(String adopted, String? previousJar) {
-    _rememberPreviousTTokenFallback(
-      previousJar,
-      reason: 'lineage_adopt_webview',
-      replacementToken: adopted,
-    );
-    _tToken = adopted;
-  }
-
-  void _registerSessionTokenLineageHooks() {
-    SessionTokenLineage.instance.registerHooks(
-      probe: _probeWebViewTokenForLineage,
-      onAdopted: _onLineageAdoptedWebViewToken,
-    );
-    AppCookieManager.sessionTokenDeletionObserver =
-        _onSessionTokenDeletionDeferred;
-  }
-
-  Future<User?> _recoverPreviousSessionBeforeLogout({
-    required String source,
-    String? triggerInfo,
-    RequestOptions? signalRequestOptions,
-    String? failedJarTToken,
-  }) async {
-    final sentTToken = signalRequestOptions == null
-        ? null
-        : _sentTTokenFromRequest(signalRequestOptions);
-    final candidateTToken = _readPreviousTTokenFallback(
-      sentTToken: sentTToken,
-      jarTToken: failedJarTToken,
-    );
-    if (!_hasTokenValue(candidateTToken)) return null;
-    final candidateTTokenValue = candidateTToken!;
-
-    final requestGeneration =
-        signalRequestOptions?.extra['_sessionGeneration'] as int?;
-    if (requestGeneration != null &&
-        !AuthSession().isValid(requestGeneration)) {
-      return null;
-    }
-    if (_isRejectedSessionCandidateInCooldown(candidateTTokenValue)) {
-      return null;
-    }
-
-    final probeResult = await _probeCandidateSessionDetailed({
-      '_t': candidateTTokenValue,
-    }, requestGeneration: requestGeneration);
-    final candidateUser = probeResult.user;
-    if (candidateUser == null) {
-      // 只有服务端明确拒绝才打入冷却；网关/网络无结论时留给下次再试。
-      if (probeResult.conclusive) {
-        _markRejectedSessionCandidate(candidateTTokenValue);
-      }
-      return null;
-    }
-    _clearRejectedSessionCandidate();
-
-    if (requestGeneration != null &&
-        !AuthSession().isValid(requestGeneration)) {
-      return null;
-    }
-
-    // 上一枚值只有值没有过期时间，让 jar 补上（否则不落盘，冷启动又丢）。
-    await _cookieJar.setSessionTokenTrusted(candidateTTokenValue);
-    final afterJarTToken = await _cookieJar.getTToken();
-    if (!_hasTokenValue(afterJarTToken) ||
-        afterJarTToken != candidateTTokenValue) {
-      return null;
-    }
-
-    _tToken = afterJarTToken;
-    _clearPreviousTTokenFallback();
-    // WebView 里多半还是那枚已死的值，推回去让两端收敛（读回校验、失败记日志）。
-    unawaited(
-      SessionTokenLineage.instance.pushJarCookieToWebView(
-        name: '_t',
-        reason: 'auth_recover_previous_t',
-        nukeVariantsFirst: true,
-      ),
-    );
-    LogWriter.instance.write({
-      'timestamp': DateTime.now().toIso8601String(),
-      'level': 'info',
-      'type': 'auth',
-      'event': 'auth_probe_previous_session_cookie_recovered',
-      'message': '登录失效前用上一枚 _t 候选恢复了 session cookie',
-      'source': source,
-      if (triggerInfo != null) 'trigger': triggerInfo,
-      'sentTLen': _tokenLength(sentTToken),
-      'sentTHash': _safeTokenHash(sentTToken),
-      'failedJarTLen': _tokenLength(failedJarTToken),
-      'failedJarTHash': _safeTokenHash(failedJarTToken),
-      'afterJarTLen': _tokenLength(afterJarTToken),
-      'afterJarTHash': _safeTokenHash(afterJarTToken),
-      'afterMatchesSentT': _sameNonEmptyToken(afterJarTToken, sentTToken),
-      if (requestGeneration != null) 'requestGeneration': requestGeneration,
-    });
-    return candidateUser;
-  }
-
-  /// 第三级恢复:WebView 候选与上一枚 _t 候选都失败后,若存在已授权的
-  /// User API Key,静默补发 OTP 兑换全新 _t(DiscourseHub 模式自愈)。
-  /// 成功 = 服务端签发了与密码登录同源的新 UserAuthToken,取消本次登出。
-  Future<User?> _recoverViaUserApiKeySelfHeal({
-    required String source,
-    String? triggerInfo,
-  }) async {
-    try {
-      final currentUserJson = await UserApiKeyService().selfHeal(_dio);
-      if (currentUserJson == null) return null;
-
-      final newToken = await _cookieJar.getTToken();
-      if (!_hasTokenValue(newToken)) return null;
-
-      _tToken = newToken;
-      _clearPreviousTTokenFallback();
-      _clearRejectedSessionCandidate();
-
-      final user = User.fromJson(currentUserJson);
-      LogWriter.instance.write({
-        'timestamp': DateTime.now().toIso8601String(),
-        'level': 'info',
-        'type': 'auth',
-        'event': 'auth_probe_user_api_key_recovered',
-        'message': 'User API Key 自愈成功,已兑换新 _t,取消本次登出',
-        'source': source,
-        if (triggerInfo != null) 'trigger': triggerInfo,
-        'username': user.username,
-        'newTLen': _tokenLength(newToken),
-        'newTHash': _safeTokenHash(newToken),
-      });
-      return user;
-    } catch (e) {
-      debugPrint('[Auth] User API Key 自愈异常: $e');
-      return null;
-    }
+  /// 把服务端探测、User API Key 自愈与认证层回调接给 [SessionTokenAuthority]
+  /// （显式依赖，取代原先 AppCookieManager 上的静态回调）。
+  ///
+  /// 注意：仍在 DiscourseService 构造时接入。冷启动时它是被
+  /// CfhubProbeAuthService.initialize 顺手构造出来的（早于 BrowserTrust 的
+  /// priming）；若哪天那条依赖没了，priming 的对账会在没有探测的情况下运行
+  /// （只按血缘，不会采纳），启动顺序的整理见计划第 10 项。
+  void _attachSessionTokenAuthority() {
+    final link = _AuthSessionTokenLink(this);
+    _sessionToken.attachAuth(probe: link, userApiKey: link, listener: link);
   }
 
   /// 用候选会话 cookie 探测 `/session/current.json`。
@@ -1042,13 +520,13 @@ mixin _AuthMixin on _DiscourseServiceBase {
   /// [classifySessionCheckFailure]）才算有结论的拒绝；网关 502、超时、撞 CF
   /// 盾、非预期响应体一律是「无结论」。调用方不得把无结论当拒绝：既不能把
   /// 候选打入冷却，更不能据此覆盖另一端的值。
-  Future<_CandidateProbeResult> _probeCandidateSessionDetailed(
+  Future<SessionTokenProbeResult> _probeCandidateSession(
     Map<String, String> candidateCookies, {
     int? requestGeneration,
   }) async {
     if (requestGeneration != null &&
         !AuthSession().isValid(requestGeneration)) {
-      return const _CandidateProbeResult.inconclusive();
+      return const SessionTokenProbeResult.inconclusive();
     }
 
     final cookieHeader = await _cookieHeaderReplacingSessionCookies(
@@ -1077,28 +555,36 @@ mixin _AuthMixin on _DiscourseServiceBase {
       );
       final data = response.data;
       if (data is! Map<String, dynamic>) {
-        return const _CandidateProbeResult.inconclusive();
+        return SessionTokenProbeResult.inconclusive(
+          statusCode: response.statusCode,
+        );
       }
       final currentUser = data['current_user'];
       if (currentUser is! Map<String, dynamic>) {
         // Discourse 对匿名是 404，2xx 却没有 current_user 不是正常形态，
         // 按无结论处理。
-        return const _CandidateProbeResult.inconclusive();
+        return SessionTokenProbeResult.inconclusive(
+          statusCode: response.statusCode,
+        );
       }
-      return _CandidateProbeResult.accepted(User.fromJson(currentUser));
+      return SessionTokenProbeResult.valid(currentUser);
     } on DioException catch (e) {
+      final status = e.response?.statusCode;
       final verdict = classifySessionCheckFailure(e.response);
       if (verdict == SessionCheckVerdict.sessionInvalid) {
-        return const _CandidateProbeResult.rejected();
+        return SessionTokenProbeResult.rejected(statusCode: status);
       }
       debugPrint(
         '[Auth] candidate session probe 无结论: '
-        'status=${e.response?.statusCode} type=${e.type} verdict=$verdict',
+        'status=$status type=${e.type} verdict=$verdict',
       );
-      return const _CandidateProbeResult.inconclusive();
+      return SessionTokenProbeResult.inconclusive(
+        networkFailure: true,
+        statusCode: status,
+      );
     } catch (e) {
       debugPrint('[Auth] candidate session probe 异常: $e');
-      return const _CandidateProbeResult.inconclusive();
+      return const SessionTokenProbeResult.inconclusive();
     }
   }
 
@@ -1140,10 +626,10 @@ mixin _AuthMixin on _DiscourseServiceBase {
           final sessionState = await _readSessionCookieState();
           final liveToken = sessionState.tToken;
           if (liveToken != _tToken) {
-            _rememberPreviousTTokenFallback(
+            _sessionToken.notePreviousToken(
               _tToken,
               reason: 'request_cookie_jar_changed',
-              replacementToken: liveToken,
+              replacement: liveToken,
               requestOptions: options,
             );
             if ((liveToken == null || liveToken.isEmpty) &&
@@ -1391,10 +877,10 @@ mixin _AuthMixin on _DiscourseServiceBase {
       return sessionState;
     }
 
-    _rememberPreviousTTokenFallback(
+    _sessionToken.notePreviousToken(
       beforeFingerprint,
       reason: 'response_session_cookie_changed',
-      replacementToken: afterFingerprint,
+      replacement: afterFingerprint,
       requestOptions: requestOptions,
     );
     requestOptions.extra['_sessionCookieFingerprint'] = afterFingerprint;
@@ -1712,11 +1198,31 @@ mixin _AuthMixin on _DiscourseServiceBase {
       // 登出会连用户名一起删，所以「用户名还在、jar 没 _t」是 jar 异常丢值
       // （会话 cookie 没落盘、文件损坏等），不是用户登出。WebView 会把会话
       // cookie 跨重启保留，先看它手里有没有活会话，再决定是否判未登录。
-      final recovered = await _recoverStartupTokenFromWebView(
-        storedUsername: username,
-      );
-      if (!_hasTokenValue(recovered)) return false;
-      tToken = recovered!;
+      final verdict = await _sessionToken.recoverMissingJarToken();
+      switch (verdict.kind) {
+        case SessionTokenVerdictKind.valid:
+        case SessionTokenVerdictKind.inconclusive:
+          if (verdict.source == SessionTokenSource.userApiKey) {
+            final userJson = verdict.currentUser;
+            if (userJson != null) {
+              currentUserNotifier.value = User.fromJson(userJson);
+            }
+            _tToken = verdict.token;
+          }
+        case SessionTokenVerdictKind.dead:
+          // 两端都是死值：会话确实已失效，按被动登出收尾，不要悄悄变匿名。
+          await _handleAuthInvalid(
+            S.current.auth_loginExpiredRelogin,
+            source: 'startup_webview_token_rejected',
+            triggerInfo: 'startup jar _t missing, WebView _t rejected',
+          );
+          return false;
+        case SessionTokenVerdictKind.absent:
+          return false;
+      }
+      final recovered = verdict.token;
+      if (recovered == null || recovered.isEmpty) return false;
+      tToken = recovered;
     }
 
     // 服务端验证
@@ -1859,156 +1365,10 @@ mixin _AuthMixin on _DiscourseServiceBase {
     return true;
   }
 
-  /// 冷启动时 jar 没有 `_t` 但用户名还在：从 WebView 找回会话。
-  ///
-  /// 顺序：WebView 当前 `_t`（探测通过才标记两端一致；探测无结论时也先
-  /// 采纳，交给随后的登录态检查和 strike 机制裁决，与「网络异常保守保留
-  /// 本地状态」一致）→ User API Key 自愈 → 都不行返回 null。
-  ///
-  /// WebView 的值被服务端明确拒绝、自愈也失败时，按被动登出收尾（提示 +
-  /// logout_passive 日志），让用户知道会话已失效，而不是悄悄变成匿名态。
-  /// WebView 根本没有 `_t` 时沿用旧行为：静默判未登录。
-  Future<String?> _recoverStartupTokenFromWebView({
-    required String storedUsername,
-  }) async {
-    const source = 'startup_jar_token_missing';
-    final boundary = BoundarySyncService.instance;
-
-    String? webViewTToken;
-    String? webViewForumSession;
-    try {
-      webViewTToken = await boundary.readCookieValueFromWebView(
-        currentUrl: AppConstants.baseUrl,
-        name: '_t',
-        allowLowConfidenceSessionCookies: true,
-      );
-      if (_hasTokenValue(webViewTToken)) {
-        webViewForumSession = await boundary.readCookieValueFromWebView(
-          currentUrl: AppConstants.baseUrl,
-          name: '_forum_session',
-          allowLowConfidenceSessionCookies: true,
-        );
-      }
-    } catch (e) {
-      debugPrint('[Auth] 启动恢复读取 WebView session 失败: $e');
-      webViewTToken = null;
-    }
-
-    var webViewRejected = false;
-    if (_hasTokenValue(webViewTToken)) {
-      final candidate = webViewTToken!;
-      final cookies = <String, String>{
-        '_t': candidate,
-        if (_hasTokenValue(webViewForumSession))
-          '_forum_session': webViewForumSession!,
-      };
-      final probeResult = await _probeCandidateSessionDetailed(cookies);
-      final verified = probeResult.user != null;
-      if (verified || !probeResult.conclusive) {
-        String? afterJarTToken;
-        try {
-          // 可信写回：WebView 里这枚 _t 若没有过期时间，syncFromWebView 会
-          // 补上，保证落盘。
-          await boundary.syncFromWebView(
-            currentUrl: AppConstants.baseUrl,
-            cookieNames: cookies.keys.toSet(),
-            acceptValues: cookies,
-            allowLowConfidenceSessionCookies: true,
-            trusted: true,
-          );
-          afterJarTToken = await _cookieJar.getTToken();
-        } catch (e) {
-          debugPrint('[Auth] 启动恢复写回 WebView session 失败: $e');
-        }
-        if (afterJarTToken == candidate) {
-          if (verified) {
-            _clearRejectedSessionCandidate();
-            SessionTokenLineage.instance.markAgreed(candidate);
-          }
-          LogWriter.instance.write({
-            'timestamp': DateTime.now().toIso8601String(),
-            'level': verified ? 'info' : 'warning',
-            'type': 'auth',
-            'event': verified
-                ? 'auth_startup_session_recovered_from_webview'
-                : 'auth_startup_session_adopted_unverified',
-            'message': verified
-                ? 'jar 没有 _t 但 WebView 持有有效会话，已可信写回 jar'
-                : 'jar 没有 _t，WebView 的 _t 探测无结论，先采纳交给后续检查裁决',
-            'source': source,
-            'webViewTLen': _tokenLength(candidate),
-            'webViewTHash': _safeTokenHash(candidate),
-            'hasForumSession': cookies.containsKey('_forum_session'),
-          });
-          return afterJarTToken;
-        }
-        LogWriter.instance.write({
-          'timestamp': DateTime.now().toIso8601String(),
-          'level': 'warning',
-          'type': 'auth',
-          'event': 'auth_startup_session_recover_write_failed',
-          'message': 'WebView 的 _t 写入 CookieJar 后读回不符，继续尝试自愈',
-          'source': source,
-          'verified': verified,
-          'webViewTLen': _tokenLength(candidate),
-          'webViewTHash': _safeTokenHash(candidate),
-          'afterJarTLen': _tokenLength(afterJarTToken),
-          'afterJarTHash': _safeTokenHash(afterJarTToken),
-        });
-      } else {
-        webViewRejected = true;
-        _markRejectedSessionCandidate(candidate);
-        LogWriter.instance.write({
-          'timestamp': DateTime.now().toIso8601String(),
-          'level': 'warning',
-          'type': 'auth',
-          'event': 'auth_startup_webview_token_rejected',
-          'message': 'jar 没有 _t，WebView 的 _t 被服务端明确拒绝',
-          'source': source,
-          'webViewTLen': _tokenLength(candidate),
-          'webViewTHash': _safeTokenHash(candidate),
-        });
-      }
-    }
-
-    final healedUser = await _recoverViaUserApiKeySelfHeal(
-      source: source,
-      triggerInfo: 'startup jar _t missing',
-    );
-    if (healedUser != null) {
-      currentUserNotifier.value = healedUser;
-      final healedTToken = await _cookieJar.getTToken();
-      if (_hasTokenValue(healedTToken)) return healedTToken;
-    }
-
-    if (webViewRejected) {
-      // 两端都是死值：会话确实已失效，按被动登出收尾，不要悄悄变匿名。
-      await _handleAuthInvalid(
-        S.current.auth_loginExpiredRelogin,
-        source: 'startup_webview_token_rejected',
-        triggerInfo: 'startup jar _t missing, WebView _t rejected',
-      );
-      return null;
-    }
-
-    LogWriter.instance.write({
-      'timestamp': DateTime.now().toIso8601String(),
-      'level': 'warning',
-      'type': 'auth',
-      'event': 'auth_startup_jar_token_missing',
-      'message': 'jar 没有 _t 且 WebView 也没有可用会话，按未登录处理',
-      'source': source,
-      'webViewHasT': _hasTokenValue(webViewTToken),
-      'storedUsernameLen': storedUsername.length,
-    });
-    return null;
-  }
-
   /// 仅设置 token，不触发状态广播（登录流程中先设置 token，等数据就绪后再广播）
   void setToken(String tToken) {
-    _clearPreviousTTokenFallback();
-    // 新登录的 _t 与旧血缘无关，清掉旧的一致记录与候选环。
-    SessionTokenLineage.instance.clear();
+    // 新登录的 _t 与旧血缘无关，清掉旧的一致记录、候选环与上一枚值。
+    _sessionToken.resetLineage();
     _tToken = tToken;
     _credentialsLoaded = false;
   }
@@ -2016,8 +1376,7 @@ mixin _AuthMixin on _DiscourseServiceBase {
   /// 登录成功后通知监听者（应在预加载数据就绪后调用）
   /// 会话写入由显式边界同步统一处理。
   void onLoginSuccess(String tToken, {bool forceBrowserSessionSync = true}) {
-    _clearPreviousTTokenFallback();
-    SessionTokenLineage.instance.clear();
+    _sessionToken.resetLineage();
     _tToken = tToken;
     _credentialsLoaded = false;
     AuthIssueNoticeService.instance.clearSessionCookieRepairHint();
@@ -2109,8 +1468,7 @@ mixin _AuthMixin on _DiscourseServiceBase {
     // 的中间态(UI 仍以为在登录中)。secure storage 写入与 cookie 清理都是
     // 平台通道调用,理论上可能抛,那时也必须把广播补上。
     try {
-      _clearPreviousTTokenFallback();
-      SessionTokenLineage.instance.clear();
+      _sessionToken.resetLineage();
       _tToken = null;
       _username = null;
       _cachedUserSummary = null;
@@ -2164,24 +1522,51 @@ mixin _AuthMixin on _DiscourseServiceBase {
   }
 }
 
-/// 候选会话探测的结果：服务端接受 / 服务端明确拒绝 / 没结论。
-class _CandidateProbeResult {
-  const _CandidateProbeResult._({this.user, required this.conclusive});
+/// 认证层接给 [SessionTokenAuthority] 的端口实现：服务端探测、User API Key
+/// 自愈、`_t` 被替换 / 被静默删除的回调。
+class _AuthSessionTokenLink
+    implements
+        SessionTokenProbe,
+        SessionTokenUserApiKey,
+        SessionTokenAuthListener {
+  _AuthSessionTokenLink(this._auth);
 
-  /// 服务端返回了 current_user。
-  const _CandidateProbeResult.accepted(User user)
-    : this._(user: user, conclusive: true);
+  final _AuthMixin _auth;
 
-  /// 服务端明确答复会话失效（404 / 带登出信号的 401、403）。
-  const _CandidateProbeResult.rejected() : this._(conclusive: true);
+  @override
+  Future<SessionTokenProbeResult> probeCandidate(
+    String token, {
+    String? forumSession,
+    int? requestGeneration,
+  }) {
+    return _auth._probeCandidateSession({
+      '_t': token,
+      if (forumSession != null && forumSession.isNotEmpty)
+        '_forum_session': forumSession,
+    }, requestGeneration: requestGeneration);
+  }
 
-  /// 网关错误、超时、撞盾、会话代已变等，探测本身没结论。
-  const _CandidateProbeResult.inconclusive() : this._(conclusive: false);
+  @override
+  Future<SessionTokenProbeResult> probeJarSession({
+    required String source,
+    String? triggerInfo,
+    int? requestGeneration,
+  }) {
+    return _auth._probeJarSession(
+      source: source,
+      triggerInfo: triggerInfo,
+      requestGeneration: requestGeneration,
+    );
+  }
 
-  final User? user;
+  @override
+  Future<Map<String, dynamic>?> heal() =>
+      UserApiKeyService().selfHeal(_auth._dio);
 
-  /// 服务端给出了明确答复（接受或拒绝）。
-  final bool conclusive;
+  @override
+  void onTokenReplaced(String token) => _auth._tToken = token;
 
-  bool get accepted => user != null;
+  @override
+  void onDeletionDeferred(RequestOptions requestOptions, int? statusCode) =>
+      _auth._onSessionTokenDeletionDeferred(requestOptions, statusCode);
 }

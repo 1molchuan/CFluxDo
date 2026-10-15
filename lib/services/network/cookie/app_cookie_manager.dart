@@ -7,11 +7,12 @@ import 'package:flutter/foundation.dart';
 
 import '../../auth_session.dart';
 import '../../log/log_writer.dart';
+import '../../session/session_token_authority.dart';
 import '../flux_request_spec.dart';
 import 'cookie_jar_service.dart';
 import 'raw_cookie_writer.dart';
 import 'session_cookie_sentinel.dart';
-import 'session_token_lineage.dart';
+import 'webview_cookie_push.dart';
 
 /// 服务端下发会话 cookie 删除指令（value 为空 / del / 已过期）时的处理方式。
 enum SessionCookieDeletionPolicy {
@@ -33,18 +34,23 @@ enum SessionCookieDeletionPolicy {
 /// App-specific CookieManager.
 /// Avoids saving Set-Cookie into redirect target domains by default.
 class AppCookieManager extends Interceptor {
-  AppCookieManager(this.cookieJar, {this.saveRedirectedCookies = false});
+  AppCookieManager(
+    this.cookieJar, {
+    this.saveRedirectedCookies = false,
+    SessionTokenAuthority? sessionToken,
+  }) : _sessionTokenOverride = sessionToken;
 
   /// The cookie jar used to load and save cookies.
   final CookieJar cookieJar;
 
   static const String skipCookieManagerExtraKey = 'skipCookieManager';
 
-  /// `_t` 的删除指令按 [SessionCookieDeletionPolicy.deferToProbe] 拦下时的
-  /// 回调（由 DiscourseService 注册，把它当强 auth 信号送去 probe）。
-  /// 参数是触发响应的请求与状态码。
-  static void Function(RequestOptions requestOptions, int? statusCode)?
-  sessionTokenDeletionObserver;
+  /// `_t` 的真相来源：服务端新发的 `_t` 交它推进 WebView，2xx 静默删 `_t`
+  /// 的指令拦下后交它转给认证层探测（显式依赖，取代原先的静态回调）。
+  final SessionTokenAuthority? _sessionTokenOverride;
+
+  SessionTokenAuthority get _sessionToken =>
+      _sessionTokenOverride ?? SessionTokenAuthority.instance;
 
   /// 判定会话 cookie 删除指令的处理方式。
   @visibleForTesting
@@ -58,7 +64,7 @@ class AppCookieManager extends Interceptor {
       return SessionCookieDeletionPolicy.apply;
     }
     if (hasLoggedOutHeader) return SessionCookieDeletionPolicy.blockMixedSignal;
-    if (name == SessionTokenLineage.cookieName) {
+    if (name == SessionTokenAuthority.cookieName) {
       return SessionCookieDeletionPolicy.deferToProbe;
     }
     return SessionCookieDeletionPolicy.apply;
@@ -667,14 +673,10 @@ class AppCookieManager extends Interceptor {
               'pathB': response.requestOptions.extra[_viaExtraKey] ==
                   _viaAdapter,
             });
-            final observer = sessionTokenDeletionObserver;
-            if (observer != null) {
-              try {
-                observer(response.requestOptions, response.statusCode);
-              } catch (e) {
-                debugPrint('[CookieManager] _t 删除回调异常: $e');
-              }
-            }
+            _sessionToken.onServerDeletedToken(
+              response.requestOptions,
+              response.statusCode,
+            );
             continue;
           }
         }
@@ -787,10 +789,19 @@ class AppCookieManager extends Interceptor {
         final canonical = await _canonicalAuthCookieIfManaged(cookie.name);
         final rawSetCookie =
             canonical?.toSetCookieHeader() ?? filteredSetCookieHeaders[i];
+        if (cookie.name == SessionTokenAuthority.cookieName) {
+          // 服务端新发的 _t：交 authority 推进 WebView 并读回，确认后两端一致
+          // （推不进去而无人知晓，就是两端分叉、最终掉登录的起点）。
+          await _sessionToken.onServerIssuedToken(
+            value: canonical?.value ?? cookie.value,
+            rawSetCookie: rawSetCookie,
+            url: resolvedUri.toString(),
+          );
+          continue;
+        }
         if (CookieJarService.sessionCookieNames.contains(cookie.name)) {
-          // 会话 cookie 推送后读回校验（失败重试一次并记日志）：_t 推不进
-          // WebView 而无人知晓，就是两端分叉、最终掉登录的起点。
-          await SessionTokenLineage.instance.pushJarCookieToWebView(
+          // 其他会话 cookie 同样推送后读回校验（失败重试一次并记日志）。
+          await WebViewCookiePush.instance.push(
             url: resolvedUri.toString(),
             name: cookie.name,
             rawSetCookie: rawSetCookie,

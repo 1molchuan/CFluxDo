@@ -12,8 +12,8 @@ import '../cookie/app_cookie_manager.dart';
 import '../cookie/boundary_sync_service.dart';
 import '../cookie/cookie_jar_service.dart';
 import '../cookie/session_cookie_sentinel.dart';
-import '../cookie/session_token_lineage.dart';
 import '../cookie/webview_cookie_priming.dart';
+import '../../session/session_token_authority.dart';
 import '../../webview_settings.dart';
 import '../../windows_webview_environment_service.dart';
 import 'adapter_log_metadata.dart';
@@ -1592,7 +1592,7 @@ document.close();
     // 写入，jar 里的值版本号更高时会被静默丢弃，这正是 jar 长期落后、
     // 最终带着死 token 触发掉登录的根源。
     try {
-      await SessionTokenLineage.instance.reconcile(
+      await SessionTokenAuthority.instance.reconcile(
         url: currentUrl,
         reason: 'adapter_back_sync',
         requestGeneration: requestGeneration,

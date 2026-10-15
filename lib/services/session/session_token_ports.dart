@@ -131,6 +131,7 @@ abstract interface class SessionTokenProbe {
   Future<SessionTokenProbeResult> probeJarSession({
     required String source,
     String? triggerInfo,
+    int? requestGeneration,
   });
 }
 

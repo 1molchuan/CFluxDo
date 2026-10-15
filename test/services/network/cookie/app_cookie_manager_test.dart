@@ -6,6 +6,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:fluxdo/services/network/cookie/app_cookie_manager.dart';
 import 'package:fluxdo/services/network/cookie/cookie_jar_service.dart';
 
+import '../../session/session_token_fakes.dart';
+
 void main() {
   group('AppCookieManager.loadCookies', () {
     test('忽略 RequestOptions 上残留的旧 Cookie 头，始终使用 CookieJar 最新值', () async {
@@ -227,6 +229,36 @@ void main() {
         classify(name: '_forum_session', loggedOutHeader: true),
         SessionCookieDeletionPolicy.blockMixedSignal,
       );
+    });
+
+    test('2xx 静默删 _t：jar 里的值不动，交 SessionTokenAuthority 请求一次探测', () async {
+      final jar = CookieJar();
+      final uri = Uri.parse('https://linux.do/latest.json');
+      await jar.saveFromResponse(uri, [Cookie('_t', 'T1')..path = '/']);
+      final rig = SessionTokenRig(jar: 'T1', webView: 'T1');
+      final manager = AppCookieManager(jar, sessionToken: rig.authority);
+      final options = RequestOptions(
+        path: '/latest.json',
+        baseUrl: 'https://linux.do',
+        headers: {HttpHeaders.cookieHeader: '_t=T1'},
+      );
+
+      await manager.saveCookies(
+        Response<dynamic>(
+          requestOptions: options,
+          statusCode: 200,
+          headers: Headers.fromMap({
+            HttpHeaders.setCookieHeader: [
+              '_t=; Path=/; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT',
+            ],
+          }),
+          data: const {},
+        ),
+      );
+
+      final cookies = await jar.loadForRequest(uri);
+      expect(cookies.singleWhere((c) => c.name == '_t').value, 'T1');
+      expect(rig.server.deletionSignals, hasLength(1));
     });
 
     test('2xx 无登出头删 _t 交 probe 判定，_forum_session 照常删', () {

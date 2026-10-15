@@ -897,6 +897,7 @@ class SessionTokenAuthority {
       jarProbe = await probe.probeJarSession(
         source: source,
         triggerInfo: triggerInfo,
+        requestGeneration: requestGeneration,
       );
     } catch (e) {
       debugPrint('[SessionToken] 主探测异常: $e');

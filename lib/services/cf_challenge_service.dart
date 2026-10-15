@@ -10,7 +10,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../constants.dart';
 import 'network/cookie/boundary_sync_service.dart';
 import 'network/cookie/cookie_jar_service.dart';
-import 'network/cookie/session_token_lineage.dart';
+import 'session/session_token_authority.dart';
 import 'local_notification_service.dart'; // 用于获取全局 navigatorKey
 import 'cf_challenge_logger.dart';
 import 'cf_clearance_authority.dart';
@@ -803,7 +803,7 @@ class _ServiceRoundEnvironment implements CfRoundEnvironment {
     // 若与 jar 不一致，只按血缘判断方向，不向服务端探测——探测请求此刻
     // 自己也会被 CF 拦下。无论结果如何都不阻塞验证流程。
     try {
-      await SessionTokenLineage.instance
+      await SessionTokenAuthority.instance
           .reconcile(
             reason: 'cf_challenge_prepare',
             allowProbe: false,
@@ -866,7 +866,7 @@ class _ServiceRoundEnvironment implements CfRoundEnvironment {
     // 交给血缘对账（必要时探测服务端）。不 await：对账可能正等着
     // 另一次对账的探测，而那个探测恰恰在等这次验证结束。
     unawaited(
-      SessionTokenLineage.instance
+      SessionTokenAuthority.instance
           .reconcile(
             url: CfChallengeService._verifyUrl,
             reason: 'cf_challenge_passed',

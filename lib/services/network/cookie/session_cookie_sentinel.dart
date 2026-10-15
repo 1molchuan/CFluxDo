@@ -6,11 +6,11 @@ import 'package:flutter/foundation.dart';
 import 'package:synchronized/synchronized.dart';
 
 import '../../auth_session.dart';
+import '../../session/session_token_authority.dart';
 import 'cookie_full_info.dart';
 import 'cookie_jar_service.dart';
 import 'cookie_logger.dart';
 import 'raw_cookie_writer.dart';
-import 'session_token_lineage.dart';
 
 /// Cookie 变体清扫内核（"Sweep" 操作）。
 ///
@@ -39,6 +39,11 @@ class SessionCookieSentinel {
   RawCookieWriter _writer = RawCookieWriter.instance;
   CookieJarService _jar = CookieJarService();
   AuthSession _auth = AuthSession();
+  SessionTokenAuthority? _sessionTokenOverride;
+
+  /// `_t` 该留哪一枚由它决定（Sentinel 只报告看到的变体、按结论动手）。
+  SessionTokenAuthority get _sessionToken =>
+      _sessionTokenOverride ?? SessionTokenAuthority.instance;
 
   /// 仅测试用：替换内部依赖。
   @visibleForTesting
@@ -46,10 +51,12 @@ class SessionCookieSentinel {
     RawCookieWriter? writer,
     CookieJarService? jar,
     AuthSession? auth,
+    SessionTokenAuthority? sessionToken,
   }) {
     if (writer != null) _writer = writer;
     if (jar != null) _jar = jar;
     if (auth != null) _auth = auth;
+    if (sessionToken != null) _sessionTokenOverride = sessionToken;
   }
 
   /// 仅测试用：直接走「winner 反向同步到 jar」这一步。
@@ -177,10 +184,10 @@ class SessionCookieSentinel {
       try {
         final wvCookies = await _writer.getAllCookieInfos(url);
         namesToNuke.addAll(wvCookies.map((c) => c.name));
-        // 全量清空前把 WV 里的 _t 记进血缘候选环（可能比 jar 新）
+        // 全量清空前把 WV 里的 _t 记进候选环（可能比 jar 新）
         _noteSessionTokenVariants(
-          SessionTokenLineage.cookieName,
-          wvCookies.where((c) => c.name == SessionTokenLineage.cookieName),
+          SessionTokenAuthority.cookieName,
+          wvCookies.where((c) => c.name == SessionTokenAuthority.cookieName),
         );
       } catch (e) {
         debugPrint('[Sentinel] nuclearReset wv lookup failed: $e');
@@ -245,11 +252,8 @@ class SessionCookieSentinel {
   }
 
   void _noteSessionTokenVariants(String name, Iterable<CookieFullInfo> variants) {
-    if (name != SessionTokenLineage.cookieName) return;
-    for (final variant in variants) {
-      if (variant.value.isEmpty) continue;
-      SessionTokenLineage.instance.noteWebViewCandidate(variant.value);
-    }
+    if (name != SessionTokenAuthority.cookieName) return;
+    _sessionToken.noteWebViewValues(variants.map((v) => v.value));
   }
 
   /// 取消所有进行中的 sweep。
@@ -418,13 +422,8 @@ class SessionCookieSentinel {
       // 单变体 ≠ 与 jar 一致：WV 里唯一那枚 _t 可能是 WebView 自己轮换到
       // 的新值，也可能是 jar 已经换掉的旧值。交给血缘对账判断方向；
       // 不在 per-name 锁内等它（对账推回时还要拿这把锁做 delete sweep）。
-      if (name == SessionTokenLineage.cookieName) {
-        unawaited(
-          SessionTokenLineage.instance.reconcile(
-            url: url,
-            reason: 'sentinel_noop',
-          ),
-        );
+      if (name == SessionTokenAuthority.cookieName) {
+        unawaited(_sessionToken.reconcile(url: url, reason: 'sentinel_noop'));
       }
       return result;
     }

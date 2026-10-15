@@ -4,12 +4,12 @@ import 'package:enhanced_cookie_jar/enhanced_cookie_jar.dart';
 import 'package:flutter/foundation.dart';
 
 import '../../log/log_writer.dart';
+import '../../session/session_token_authority.dart';
 import 'cookie_jar_service.dart';
 import 'cookie_logger.dart';
 import 'cookie_store_observer.dart';
 import 'raw_cookie_writer.dart';
 import 'session_cookie_sentinel.dart';
-import 'session_token_lineage.dart';
 
 /// WV 启动重灌服务。
 ///
@@ -33,6 +33,10 @@ class WebViewCookiePriming {
   RawCookieWriter _writer = RawCookieWriter.instance;
   CookieJarService _jar = CookieJarService();
   SessionCookieSentinel _sentinel = SessionCookieSentinel.instance;
+  SessionTokenAuthority? _sessionTokenOverride;
+
+  SessionTokenAuthority get _sessionToken =>
+      _sessionTokenOverride ?? SessionTokenAuthority.instance;
 
   /// 仅测试用：替换内部依赖。
   @visibleForTesting
@@ -40,10 +44,12 @@ class WebViewCookiePriming {
     RawCookieWriter? writer,
     CookieJarService? jar,
     SessionCookieSentinel? sentinel,
+    SessionTokenAuthority? sessionToken,
   }) {
     if (writer != null) _writer = writer;
     if (jar != null) _jar = jar;
     if (sentinel != null) _sentinel = sentinel;
+    if (sessionToken != null) _sessionTokenOverride = sessionToken;
   }
 
   // ---------------------------------------------------------------------------
@@ -68,8 +74,6 @@ class WebViewCookiePriming {
 
   /// 是否有 priming 正在进行。
   bool get isPriming => _primingFuture != null;
-
-  static const Duration _lineageReconcileTimeout = Duration(seconds: 10);
 
   /// 确保 WV 中的 critical cookies 与 jar 同步。
   ///
@@ -134,28 +138,11 @@ class WebViewCookiePriming {
 
       // 1.5 重灌会无条件用 jar 覆盖 WV。若 WV 里的 _t 比 jar 新（上个进程里
       // WebView 自己轮换过、jar 没跟上），直接覆盖等于把活 token 抹掉。
-      // 先做一次血缘对账：WV 值经服务端确认有效就先采纳进 jar，再重灌。
-      //
-      // 只有对账给出明确结论（两端一致 / 已采纳 / 已推回 / WV 本来就没有）
-      // 才重灌 _t。无结论（探测撞上网关 502、超时、等锁超时、读 WV 失败）时
-      // 这一轮不碰 WV 的 _t：它可能正是唯一还活着的那枚，而 jar 里的可能已
-      // 死；覆盖掉就两边全死、无征兆掉登录。其余 cookie 照常重灌，WV 的 _t
-      // 已记进候选环，后续对账 / 登出恢复会再收敛。
-      SessionTokenReconcileOutcome? lineageOutcome;
-      try {
-        lineageOutcome = await SessionTokenLineage.instance
-            .reconcile(url: url, reason: 'webview_priming')
-            .timeout(_lineageReconcileTimeout);
-      } catch (e) {
-        debugPrint('[Priming] _t 血缘对账跳过: $e');
-      }
-      final injectSessionToken = switch (lineageOutcome) {
-        SessionTokenReconcileOutcome.agreed ||
-        SessionTokenReconcileOutcome.adoptedWebView ||
-        SessionTokenReconcileOutcome.repushedJar ||
-        SessionTokenReconcileOutcome.webViewEmpty => true,
-        _ => false,
-      };
+      // _t 能不能重灌由 SessionTokenAuthority 决定（先对账：WV 值经服务端
+      // 确认有效就先采纳进 jar；无结论时这一轮不碰 WV 的 _t）。其余 cookie
+      // 照常重灌，WV 的 _t 已记进候选环，后续对账 / 登出恢复会再收敛。
+      final sessionTokenPlan = await _sessionToken.planPriming(url);
+      final injectSessionToken = sessionTokenPlan.injectJarToken;
       var heldSessionToken = false;
 
       // 2. 从 jar 读"当前 url 适用的所有 cookie" (RFC 6265 domain matching)
@@ -201,8 +188,8 @@ class WebViewCookiePriming {
         if (initialCookie.name == 'cf_clearance') {
           continue;
         }
-        // _t 只在血缘对账有明确结论时重灌（见 1.5）。
-        if (initialCookie.name == SessionTokenLineage.cookieName &&
+        // _t 只在对账有明确结论时重灌（见 1.5）。
+        if (initialCookie.name == SessionTokenAuthority.cookieName &&
             !injectSessionToken) {
           heldSessionToken = true;
           continue;
@@ -267,9 +254,9 @@ class WebViewCookiePriming {
         if (!isOk) mismatched[writtenCookie.name] = observedPostCount;
         if (isOk &&
             writeResult.written &&
-            writtenCookie.name == SessionTokenLineage.cookieName) {
+            writtenCookie.name == SessionTokenAuthority.cookieName) {
           // jar 的 _t 已写进 WV 且恰好 1 条：两端一致，记进血缘。
-          SessionTokenLineage.instance.markAgreed(writtenCookie.value);
+          _sessionToken.markAgreed(writtenCookie.value);
         }
         debugPrint(
           '[Priming] ${writtenCookie.name} '
@@ -319,7 +306,7 @@ class WebViewCookiePriming {
           'event': 'priming_session_token_held',
           'message': '_t 血缘对账无明确结论，本轮重灌不覆盖 WebView 的 _t',
           'url': url,
-          'lineageOutcome': lineageOutcome?.name,
+          'lineageOutcome': sessionTokenPlan.outcome?.name,
         });
       }
 

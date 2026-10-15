@@ -37,7 +37,6 @@ import '../network/cookie/app_cookie_manager.dart';
 import '../network/cookie/cookie_jar_service.dart';
 import '../network/cookie/boundary_sync_service.dart';
 import '../network/cookie/session_snapshot.dart';
-import '../network/cookie/session_token_lineage.dart';
 import '../cf_challenge_service.dart';
 import '../cf_clearance_authority.dart';
 import '../message_bus_service.dart';
@@ -48,6 +47,7 @@ import '../network/discourse_dio.dart';
 import '../network/doh/accel_doh_auth_service.dart';
 import '../network/flux_request_spec.dart';
 import '../preloaded_data_service.dart';
+import '../session/session_token_authority.dart';
 import '../webview_session_cookie_refresh_service.dart';
 import '../app_logger.dart';
 import '../log/log_writer.dart';
@@ -217,8 +217,8 @@ class DiscourseService extends _DiscourseServiceBase
     // 独立 Dio 只装 3 个拦截器,在后台/会话失效窗口撞 CF 会静默失败。
     _cookieSync.attachDio(_dio);
     _initInterceptors();
-    // _t 血缘对账：探测与采纳回调都走本服务的候选会话探测链路
-    _registerSessionTokenLineageHooks();
+    // _t 的唯一真相来源：服务端探测、User API Key 自愈与认证层回调接给它
+    _attachSessionTokenAuthority();
     // 加速 DoH 令牌跟随登录账号，只用到 id / 用户名 / 等级
     currentUserNotifier.addListener(
       () =>

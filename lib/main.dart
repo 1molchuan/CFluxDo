@@ -34,7 +34,6 @@ import 'services/network/system_proxy_service.dart';
 import 'services/network/cookie/cookie_devtools_extension.dart';
 import 'services/network/cookie/cookie_jar_service.dart';
 import 'services/network/cookie/cookie_store_observer.dart';
-import 'services/network/cookie/session_token_lineage.dart';
 import 'services/local_notification_service.dart';
 import 'services/data_management/cache_size_service.dart';
 import 'services/discourse_cache_manager.dart';
@@ -76,6 +75,7 @@ import 'services/migration_service.dart';
 import 'services/navigation/app_route_observer.dart';
 import 'services/navigation/back_exit_guard.dart';
 import 'services/navigation/keyboard_focus_guard.dart';
+import 'services/session/session_token_authority.dart';
 import 'services/webview_settings.dart';
 import 'services/windows_webview_environment_service.dart';
 import 'services/user_presence_service.dart';
@@ -1292,7 +1292,7 @@ class _MainPageState extends ConsumerState<MainPage>
       // WebView 没有 _t（后台被服务端删掉 / 存储被清）时直接把 jar 的推过去。
       // 对账有上限时长，超时就按原流程继续。
       try {
-        await SessionTokenLineage.instance
+        await SessionTokenAuthority.instance
             .reconcile(reason: 'app_resume', pushIfWebViewEmpty: true)
             .timeout(const Duration(seconds: 5));
       } catch (e) {

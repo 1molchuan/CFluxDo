@@ -154,6 +154,7 @@ class FakeServer
   Future<SessionTokenProbeResult> probeJarSession({
     required String source,
     String? triggerInfo,
+    int? requestGeneration,
   }) async {
     jarProbes.add(jar.value);
     return judge(jar.value);

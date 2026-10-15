@@ -14,8 +14,8 @@ import '../services/deep_link_service.dart';
 import '../services/toast_service.dart';
 import '../services/app_link_service.dart';
 import '../services/network/cookie/cookie_store_observer.dart';
-import '../services/network/cookie/session_token_lineage.dart';
 import '../services/network/cookie/webview_cookie_priming.dart';
+import '../services/session/session_token_authority.dart';
 import '../services/webview_settings.dart';
 import '../services/windows_webview_environment_service.dart';
 import '../widgets/common/app_link_confirm_dialog.dart';
@@ -107,7 +107,7 @@ class _WebViewPageState extends ConsumerState<WebViewPage> {
     // 站内页打开期间 WebView 的 _t 被服务端删掉（页内请求带了死值）时，
     // 把 jar 里仍有效的值推过去，页面下一次请求就能恢复登录态。
     unawaited(
-      SessionTokenLineage.instance
+      SessionTokenAuthority.instance
           .reconcile(url: siteUrl, reason: reason, pushIfWebViewEmpty: true)
           .catchError((Object e) {
             debugPrint('[WebViewPage] _t 对账失败($reason): $e');
