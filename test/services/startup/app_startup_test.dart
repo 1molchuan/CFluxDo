@@ -300,6 +300,58 @@ void main() {
       expect(ports.storedSessionChecks, 0);
     });
 
+    test('启动页错误页上退出登录再重试：匿名预加载 → 判定未登录，不启动登录后启动项', () async {
+      ports = FakeStartupPorts(preloadedUser: aliceJson)
+        ..preloadError = Exception('offline');
+      startup = build(ports);
+      startup.registerPostLogin(FakePostLoginStart(ports.log));
+      startup.storesReady();
+      startup.launch();
+      await settle();
+      expect(ports.log, contains('preload:failed'));
+
+      // 错误页「退出登录」：清掉用户名与 _t，广播登出（启动判定还没开始，不另起）
+      ports.preloadedUser = null;
+      ports.storedSession = false;
+      ports.auth.add(null);
+      await settle();
+      expect(ports.storedSessionChecks, 0);
+
+      // 「重试连接」
+      await startup.ensurePreloaded(reason: 'preheat_gate');
+      await settle();
+      expect(startup.isLoggedIn, isFalse);
+      expect(ports.storedSessionChecks, 1);
+      expect(ports.log, isNot(contains('message_bus:start')));
+      expect(
+        ports.log.where((e) => e.startsWith('startClearanceRefresh')),
+        isEmpty,
+      );
+    });
+
+    test('首启引导页里登录：登录广播后判定为已登录；引导结束后不重复预加载，频道注册即启动', () async {
+      // 全新安装：启动预加载是匿名的，本地也没有会话
+      ports = FakeStartupPorts(storedSession: false);
+      startup = build(ports);
+      startup.storesReady();
+      startup.launch();
+      await settle();
+      expect(startup.isLoggedIn, isFalse);
+
+      // 引导页上登录：登录收口先备好预加载数据再广播
+      ports.preloadedUser = aliceJson;
+      ports.auth.add(null);
+      await settle();
+      expect(startup.isLoggedIn, isTrue);
+      expect(ports.log, contains('startClearanceRefresh:current_user_ready'));
+
+      // 引导结束：PreheatGate 等预加载（已加载过，不再请求），MainPage 注册频道
+      ports.log.clear();
+      await startup.ensurePreloaded(reason: 'preheat_gate');
+      startup.registerPostLogin(FakePostLoginStart(ports.log));
+      expect(ports.log, ['message_bus:start']);
+    });
+
     test('已登录后注册的启动项立即启动，注销时停止', () async {
       ports = FakeStartupPorts(preloadedUser: aliceJson);
       startup = build(ports);
