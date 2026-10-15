@@ -77,6 +77,14 @@ Future<bool?> showCfSelectPrivacyDialog(
 /// 把 cfhub 授权结果转成给用户看的提示；成功返回 null（无需提示）
 ///
 /// 首启弹窗（main.dart）与设置卡片共用，保证两处文案一致。
+/// 「分享失败」带上卡在哪一步（如 start HTTP 403），方便用户反馈
+String _shareFailedMessage() {
+  final l10n = S.current;
+  final detail = CfhubProbeAuthService.instance.lastFailureDetail;
+  if (detail == null || detail.isEmpty) return l10n.common_shareFailed;
+  return l10n.cfSelect_shareFailedWith(detail);
+}
+
 String? cfhubEnableResultMessage(CfhubEnableResult result) {
   final l10n = S.current;
   return switch (result) {
@@ -85,7 +93,7 @@ String? cfhubEnableResultMessage(CfhubEnableResult result) {
     CfhubEnableResult.needTrust => l10n.cfSelect_shareNeedTrust,
     CfhubEnableResult.hubUnavailable => l10n.cfSelect_shareHubUnavailable,
     CfhubEnableResult.rejected => l10n.cfSelect_shareRejected,
-    CfhubEnableResult.failed => l10n.common_shareFailed,
+    CfhubEnableResult.failed => _shareFailedMessage(),
     // 用户自己取消了授权页，不再追加提示
     CfhubEnableResult.cancelled => null,
   };

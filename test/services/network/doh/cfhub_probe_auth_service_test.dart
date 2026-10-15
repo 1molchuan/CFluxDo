@@ -10,6 +10,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 /// 假的 cfhub：记录调用，按设定返回
 class _FakeApi implements CfhubApi {
+  @override
+  String? lastFailure;
+
   int startCalls = 0;
   CfhubStartResult startResult = CfhubStartResult.ok(
     Uri.parse('https://connect.linux.do/oauth2/authorize?client_id=x'),

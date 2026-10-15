@@ -102,6 +102,9 @@ class CfhubProbeAuthService extends ChangeNotifier {
   /// 当前的探针令牌；null 表示没有
   String? get token => _token;
 
+  /// 最近一次开启失败卡在哪一步（`start HTTP 403` / `connect failed` 等），给提示用
+  String? lastFailureDetail;
+
   /// 是否已拿到探针令牌
   bool get isAuthorized => _token != null;
 
@@ -165,6 +168,7 @@ class CfhubProbeAuthService extends ChangeNotifier {
     if (_currentUser?.id != user.id) return _fail(CfhubEnableResult.cancelled);
     switch (connect.outcome) {
       case AccelDohConnectOutcome.failed:
+        _effectiveApi.lastFailure = 'connect failed';
         return _fail(CfhubEnableResult.failed);
       case AccelDohConnectOutcome.unavailable:
         debugPrint('[CFHUB] Connect 授权没拿到 code，放弃开启探针上报');
@@ -202,6 +206,9 @@ class CfhubProbeAuthService extends ChangeNotifier {
 
   /// 没开成：确保上报是关的，再把结果原样返回
   Future<CfhubEnableResult> _fail(CfhubEnableResult result) async {
+    lastFailureDetail = result == CfhubEnableResult.failed
+        ? _effectiveApi.lastFailure
+        : null;
     await _setShare(false);
     notifyListeners();
     return result;

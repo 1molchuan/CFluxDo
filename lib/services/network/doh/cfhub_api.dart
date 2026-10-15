@@ -92,6 +92,9 @@ class CfhubApi {
   final Uri _baseUri;
   final CfhubPost? _customPost;
 
+  /// 最近一次失败卡在哪一步（如 `start HTTP 403`、`token 网络错误`），给界面提示用；不含任何敏感值
+  String? lastFailure;
+
   static Uri _baseOf(String baseUrl) {
     final uri = Uri.parse(baseUrl);
     return Uri(
@@ -113,6 +116,7 @@ class CfhubApi {
       }
       if (status != HttpStatus.ok) {
         debugPrint('[CFHUB] 获取 Connect 授权地址失败: HTTP $status');
+        lastFailure = 'start HTTP $status';
         return const CfhubStartResult.failed();
       }
       final json = jsonDecode(body);
@@ -123,11 +127,14 @@ class CfhubApi {
           uri.host != 'connect.linux.do' ||
           !uri.path.startsWith('/oauth2/authorize')) {
         debugPrint('[CFHUB] Connect 授权地址不对，忽略');
+        lastFailure = 'start bad url';
         return const CfhubStartResult.failed();
       }
+      lastFailure = null;
       return CfhubStartResult.ok(uri);
     } catch (e) {
       debugPrint('[CFHUB] 获取 Connect 授权地址失败: $e');
+      lastFailure = 'start ${e.runtimeType}';
       return const CfhubStartResult.failed();
     }
   }
@@ -149,18 +156,22 @@ class CfhubApi {
       }
       if (status != HttpStatus.ok) {
         debugPrint('[CFHUB] 申请探针令牌失败: HTTP $status');
+        lastFailure = 'token HTTP $status';
         return const CfhubTokenResult.failed();
       }
       final json = jsonDecode(text);
       final token = json is Map ? json['token'] : null;
       if (token is! String || !_tokenPattern.hasMatch(token)) {
         debugPrint('[CFHUB] 探针令牌格式不对，忽略');
+        lastFailure = 'token bad body';
         return const CfhubTokenResult.failed();
       }
       debugPrint('[CFHUB] 已拿到探针令牌');
+      lastFailure = null;
       return CfhubTokenResult.ok(token);
     } catch (e) {
       debugPrint('[CFHUB] 申请探针令牌失败: $e');
+      lastFailure = 'token ${e.runtimeType}';
       return const CfhubTokenResult.failed();
     }
   }
