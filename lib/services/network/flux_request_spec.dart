@@ -43,6 +43,11 @@ class FluxRequestKeys {
   /// 诊断链路标签,进网络日志与 CF 检测日志,便于按链路而非 URL 归因。
   static const String requestTag = 'requestTag';
 
+  /// 请求过程旁观者([FluxRequestObserver]):恢复层决定重放、CF 拦截器
+  /// 识别到挑战时通知它。网络层只转告,不关心谁在听(启动预加载用它把
+  /// 「第 N 次重试 / 撞盾」报给启动页)。
+  static const String observer = 'requestObserver';
+
   // --- 逐环节豁免 ---
 
   /// 跳过 CSRF 注入与"POST 前自动刷新 CSRF"。
@@ -98,6 +103,17 @@ class FluxRequestKeys {
   static const String skipCfBlock = 'skipCfBlock';
 }
 
+/// 请求过程的旁观者,经 `extra[FluxRequestKeys.observer]` 挂在单个请求上。
+///
+/// 只旁观:回调抛错不影响请求本身,网络层也不据此改变任何决策。
+abstract interface class FluxRequestObserver {
+  /// 恢复层决定第 [attempt] 次重放(从 1 起),[error] 是上一轮的失败。
+  void onRetry(int attempt, DioException error);
+
+  /// CF 拦截器识别到挑战页,[statusCode] 为挑战响应的状态码。
+  void onCfChallenge(int? statusCode);
+}
+
 /// 调度优先级取值。
 class FluxRequestPriority {
   FluxRequestPriority._();
@@ -129,6 +145,12 @@ extension type const FluxRequestSpec(Map<String, dynamic> _extra) {
   String? get requestTag {
     final value = _extra[FluxRequestKeys.requestTag]?.toString();
     return (value == null || value.isEmpty) ? null : value;
+  }
+
+  /// 发起方挂上的过程旁观者;没有返回 null。
+  FluxRequestObserver? get observer {
+    final value = _extra[FluxRequestKeys.observer];
+    return value is FluxRequestObserver ? value : null;
   }
 
   bool get skipCsrf => _extra[FluxRequestKeys.skipCsrf] == true;

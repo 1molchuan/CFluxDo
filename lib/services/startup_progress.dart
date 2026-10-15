@@ -2,6 +2,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 
 import '../l10n/s.dart';
+import 'network/flux_request_spec.dart';
 
 /// 启动预加载当前所处的阶段。
 ///
@@ -88,11 +89,10 @@ class StartupProgress {
 
 /// 启动预加载进度的发布者。
 ///
-/// 预加载链路(BrowserTrustCoordinator、恢复策略、CF 拦截器)往这里写,
-/// 启动页监听 [progress] 把当前阶段和异常原因显示出来。
+/// 预加载链路经 [StartupPreloadProgress] 往这里写,启动页监听 [progress]
+/// 把当前阶段和异常原因显示出来。
 ///
-/// 只在 [begin] 与 [clear] 之间接受更新:运行期同样带 `preload-home`
-/// 标签的刷新请求不会往已经消失的启动页上写状态。
+/// 只在 [begin] 与 [clear] 之间接受更新:启动页消失后迟到的进度不会再写上去。
 class StartupProgressReporter {
   StartupProgressReporter._();
 
@@ -141,6 +141,53 @@ class StartupProgressReporter {
   void clear() {
     _startedAt = null;
     progress.value = null;
+  }
+}
+
+/// 预加载链路向启动序列报告进度的出口。
+///
+/// 阶段推进由 BrowserTrust 的预加载路径报告;重试与撞盾由挂在首页请求上的
+/// [FluxRequestObserver] 报告(网络层只认旁观者接口,不认启动页)。
+abstract interface class StartupPreloadProgress implements FluxRequestObserver {
+  void stage(StartupStage stage, {StartupDetourReason? reason, String? detail});
+}
+
+/// 把预加载进度写到启动页([StartupProgressReporter])。
+///
+/// 文案口径与 d53a2f82 一致:重试显示「第几次 + 简短原因」,撞盾显示 HTTP 状态码。
+class ReporterPreloadProgress implements StartupPreloadProgress {
+  ReporterPreloadProgress(this._reporter);
+
+  final StartupProgressReporter _reporter;
+
+  @override
+  void stage(
+    StartupStage stage, {
+    StartupDetourReason? reason,
+    String? detail,
+  }) {
+    _reporter.set(stage, reason: reason, detail: detail);
+  }
+
+  @override
+  void onRetry(int attempt, DioException error) {
+    if (!_reporter.isActive) return;
+    _reporter.set(
+      StartupStage.retrying,
+      attempt: attempt,
+      detail: describeStartupFailure(error),
+    );
+  }
+
+  @override
+  void onCfChallenge(int? statusCode) {
+    if (!_reporter.isActive) return;
+    _reporter.set(
+      StartupStage.cfChallenge,
+      detail: statusCode != null
+          ? S.current.preheat_detailHttp(statusCode)
+          : null,
+    );
   }
 }
 

@@ -7,6 +7,7 @@ import '../constants.dart';
 import '../models/topic.dart';
 import '../models/category.dart';
 import 'network/discourse_dio.dart';
+import 'network/flux_request_spec.dart';
 import 'network/cookie/csrf_token_service.dart';
 import 'cf_challenge_service.dart';
 import 'cf_clearance_refresh_service.dart';
@@ -87,8 +88,10 @@ class PreloadedDataService {
   }
 
   /// 确保预加载数据已准备好
-  Future<void> ensureLoaded() async {
-    await _ensureLoaded();
+  ///
+  /// [observer] 挂到首页请求上，旁观重试与撞盾（启动预加载用它报进度）。
+  Future<void> ensureLoaded({FluxRequestObserver? observer}) async {
+    await _ensureLoaded(observer: observer);
   }
 
   /// 获取 currentUser 数据（包含通知计数等）
@@ -510,7 +513,7 @@ class PreloadedDataService {
   }
 
   /// 确保数据已加载
-  Future<void> _ensureLoaded() async {
+  Future<void> _ensureLoaded({FluxRequestObserver? observer}) async {
     if (_loaded) return;
     if (_loading) {
       // 等待正在进行的加载完成
@@ -519,11 +522,11 @@ class PreloadedDataService {
       }
       if (_loaded) return; // 上次成功了才跳过
     }
-    await _loadPreloadedData();
+    await _loadPreloadedData(observer: observer);
   }
 
   /// 加载预加载数据
-  Future<void> _loadPreloadedData() async {
+  Future<void> _loadPreloadedData({FluxRequestObserver? observer}) async {
     if (_loading) return;
     _loading = true;
 
@@ -538,6 +541,7 @@ class PreloadedDataService {
             if (AppConstants.skipCsrfForHomeRequest) 'skipCsrf': true,
             // 诊断标注:首页 HTML 是 CF 盾高发路径,日志里需可辨识
             'requestTag': 'preload-home',
+            FluxRequestKeys.observer: ?observer,
           },
         ),
       );

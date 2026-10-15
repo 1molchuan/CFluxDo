@@ -113,8 +113,11 @@ class BrowserTrustCoordinator {
   /// 只用于启动页向用户解释为什么没走直连。
   StartupDetourReason? _nativeUntrustedReason;
 
-  /// 启动页进度发布者,预加载各阶段往这里写。
+  /// 启动页进度发布者。
   StartupProgressReporter get _progress => StartupProgressReporter.instance;
+
+  /// 本轮预加载的进度出口:阶段推进写这里,首页请求也挂上它旁观重试与撞盾。
+  StartupPreloadProgress? _preloadProgress;
 
   void setNavigatorContext(BuildContext context) {
     _navigatorContext = context;
@@ -174,13 +177,19 @@ class BrowserTrustCoordinator {
 
     late final Future<void> future;
     _progress.begin();
-    future = _ensurePreloadedInternal(reason: reason).whenComplete(() {
-      if (identical(_activePreload, future)) {
-        _activePreload = null;
-      }
-      // 无论成功失败都清掉启动页状态,避免下次手动重试时先显示旧阶段
-      _progress.clear();
-    });
+    final progress = ReporterPreloadProgress(_progress);
+    _preloadProgress = progress;
+    future = _ensurePreloadedInternal(reason: reason, progress: progress)
+        .whenComplete(() {
+          if (identical(_activePreload, future)) {
+            _activePreload = null;
+          }
+          if (identical(_preloadProgress, progress)) {
+            _preloadProgress = null;
+          }
+          // 无论成功失败都清掉启动页状态,避免下次手动重试时先显示旧阶段
+          _progress.clear();
+        });
     _activePreload = future;
     return future;
   }
@@ -271,14 +280,17 @@ class BrowserTrustCoordinator {
     CfClearanceRefreshService().start();
   }
 
-  Future<void> _ensurePreloadedInternal({required String reason}) async {
+  Future<void> _ensurePreloadedInternal({
+    required String reason,
+    required StartupPreloadProgress progress,
+  }) async {
     final nativeTrusted = await _isNativePreloadTrusted();
     if (nativeTrusted) {
       _lastPreloadPath = BrowserTrustPreloadPath.native;
       _log('preload path=native reason=$reason');
-      _progress.set(StartupStage.connecting);
+      progress.stage(StartupStage.connecting);
       try {
-        await _preload.ensureLoaded();
+        await _preload.ensureLoaded(observer: progress);
         _log('native preload success reason=$reason');
         _startBrowserTrustAfterNativePreload(reason: reason);
         return;
@@ -287,14 +299,14 @@ class BrowserTrustCoordinator {
           'trusted native preload failed, switching to startup WebView: $e',
           level: 'warning',
         );
-        _progress.set(
+        progress.stage(
           StartupStage.webViewLoading,
           reason: StartupDetourReason.nativeFailed,
           detail: describeStartupFailure(e),
         );
       }
     } else {
-      _progress.set(
+      progress.stage(
         StartupStage.webViewLoading,
         reason: _nativeUntrustedReason ?? StartupDetourReason.noClearance,
       );
@@ -330,13 +342,13 @@ class BrowserTrustCoordinator {
       level: 'warning',
     );
     // 回退直连:原因行换成「内置浏览器没拿到数据 / 超时」,阶段回到直连
-    _progress.set(
+    progress.stage(
       StartupStage.connecting,
       reason: hydrateResult == null
           ? StartupDetourReason.webViewTimeout
           : StartupDetourReason.webViewNoData,
     );
-    await _preload.ensureLoaded();
+    await _preload.ensureLoaded(observer: progress);
     _log('fallback native preload success reason=$reason');
     _startBrowserTrustAfterNativePreload(reason: reason);
   }
@@ -628,7 +640,7 @@ class BrowserTrustCoordinator {
       );
       if (cancellation.isCancelled) return false;
 
-      _progress.set(StartupStage.webViewSnapshot);
+      _preloadProgress?.stage(StartupStage.webViewSnapshot);
       final html = await _readPreloadedSnapshot(c, cancellation: cancellation);
       if (cancellation.isCancelled) return false;
       final hydrated =
@@ -645,7 +657,7 @@ class BrowserTrustCoordinator {
       if (tToken != null && tToken.isNotEmpty) {
         if (cancellation.isCancelled) return false;
         _log('startup WebView session bootstrap begin reason=$reason');
-        _progress.set(StartupStage.webViewBootstrap);
+        _preloadProgress?.stage(StartupStage.webViewBootstrap);
         final bootstrapResult = await WebViewSessionCookieRefreshService
             .instance
             .runOnController(

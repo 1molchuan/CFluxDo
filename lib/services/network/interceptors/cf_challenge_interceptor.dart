@@ -6,7 +6,6 @@ import '../../cf_challenge_logger.dart';
 import '../../cf_clearance_refresh_service.dart';
 import '../../cf_clearance_authority.dart';
 import '../../app_logger.dart';
-import '../../startup_progress.dart';
 import '../adapters/platform_adapter.dart';
 import '../cf/cf_challenge_classifier.dart';
 import '../cf/cf_challenge_recovery.dart';
@@ -145,15 +144,8 @@ class CfChallengeInterceptor extends Interceptor {
         'tag=${requestTag ?? '-'}, skipCsrf=${options.spec.skipCsrf})';
     debugPrint('[Dio] $logMessage');
     AppLogger.warning(logMessage, tag: 'CfChallengeInterceptor');
-    // 启动预加载撞盾是启动变慢最常见的原因之一,让启动页把它显示出来
-    if (requestTag == 'preload-home') {
-      StartupProgressReporter.instance.set(
-        StartupStage.cfChallenge,
-        detail: statusCode != null
-            ? S.current.preheat_detailHttp(statusCode)
-            : null,
-      );
-    }
+    // 告诉请求上挂的旁观者(启动预加载借此把撞盾显示在启动页上)
+    options.spec.observer?.onCfChallenge(statusCode);
     // 撞盾是排查网络问题的关键时刻:把此刻的通道健康全貌拍进日志,
     // 免得事后只有"某请求 403"这一条结果、没有引擎/降级/凭证状态。
     NetworkHealthController.instance.dumpToLog('cf_challenge_detected');
