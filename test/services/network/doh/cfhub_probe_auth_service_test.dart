@@ -1,9 +1,9 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fluxdo/models/user.dart';
-import 'package:fluxdo/services/network/doh/accel_doh_connect_flow.dart';
 import 'package:fluxdo/services/network/doh/cfhub_api.dart';
 import 'package:fluxdo/services/network/doh/cfhub_probe_auth_service.dart';
+import 'package:fluxdo/services/network/doh/connect_code_flow.dart';
 import 'package:fluxdo/services/network/doh/network_settings_service.dart';
 import 'package:fluxdo/services/network/doh_proxy/doh_proxy_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -40,19 +40,17 @@ class _FakeApi implements CfhubApi {
 }
 
 /// 假的 Connect 授权：不弹窗、不发请求
-class _FakeConnectFlow implements AccelDohConnectFlow {
-  AccelDohConnectResult result = const AccelDohConnectResult.code(
+class _FakeConnectFlow implements ConnectCodeFlow {
+  ConnectCodeResult result = const ConnectCodeResult.code(
     'the-code',
     'the-state',
   );
 
   @override
-  Future<bool?> askConsent() async => true;
-
-  @override
-  Future<AccelDohConnectResult> fetchCode(
+  Future<ConnectCodeResult> fetchCode(
     Uri authorizeUrl, {
     bool silent = true,
+    String requestTag = '',
   }) async => result;
 }
 
@@ -170,11 +168,11 @@ void main() {
 
     test('Connect 没拿到 code：cancelled，上报关', () async {
       api.tokenResult = const CfhubTokenResult.ok('cfp_second');
-      flow.result = const AccelDohConnectResult.unavailable();
+      flow.result = const ConnectCodeResult.unavailable();
       expect(await auth.enable(), CfhubEnableResult.cancelled);
       expect(auth.token, isNull);
       expect(service.current.shareMeasurements, isFalse);
-      flow.result = const AccelDohConnectResult.code('code-2', 'state-2');
+      flow.result = const ConnectCodeResult.code('code-2', 'state-2');
     });
 
     test('换账号：令牌作废、上报关', () async {

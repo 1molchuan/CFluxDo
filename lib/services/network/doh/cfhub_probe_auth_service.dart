@@ -5,8 +5,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../models/user.dart';
 import '../../discourse/discourse_service.dart';
-import 'accel_doh_connect_flow.dart';
 import 'cfhub_api.dart';
+import 'connect_code_flow.dart';
 import 'network_settings_service.dart';
 
 /// 开启「帮助优选」（探针上报）的结果
@@ -45,7 +45,7 @@ enum CfhubEnableResult {
 class CfhubProbeAuthService extends ChangeNotifier {
   CfhubProbeAuthService._({
     CfhubApi? api,
-    AccelDohConnectFlow? flow,
+    ConnectCodeFlow? flow,
     ValueListenable<User?>? userNotifier,
   }) : _api = api,
        _flow = flow,
@@ -57,7 +57,7 @@ class CfhubProbeAuthService extends ChangeNotifier {
   @visibleForTesting
   static void resetForTest({
     CfhubApi? api,
-    AccelDohConnectFlow? flow,
+    ConnectCodeFlow? flow,
     ValueListenable<User?>? userNotifier,
   }) {
     instance._detachUserListener();
@@ -78,7 +78,7 @@ class CfhubProbeAuthService extends ChangeNotifier {
   final ValueNotifier<int> rejectedNotifier = ValueNotifier<int>(0);
 
   CfhubApi? _api;
-  AccelDohConnectFlow? _flow;
+  ConnectCodeFlow? _flow;
   ValueListenable<User?>? _userNotifier;
   bool _userListenerAttached = false;
 
@@ -93,7 +93,7 @@ class CfhubProbeAuthService extends ChangeNotifier {
 
   CfhubApi get _effectiveApi => _api ??= CfhubApi();
 
-  AccelDohConnectFlow get _effectiveFlow => _flow ??= AccelDohConnectFlow();
+  ConnectCodeFlow get _effectiveFlow => _flow ??= ConnectCodeFlow();
 
   /// 用户通知器默认取 DiscourseService 的；测试里注入假的，免得构造整个服务
   ValueListenable<User?> get _effectiveUserNotifier =>
@@ -192,13 +192,13 @@ class CfhubProbeAuthService extends ChangeNotifier {
     final connect = await _effectiveFlow.fetchCode(authorizeUrl, silent: false);
     if (_currentUser?.id != user.id) return _fail(CfhubEnableResult.cancelled);
     switch (connect.outcome) {
-      case AccelDohConnectOutcome.failed:
+      case ConnectCodeOutcome.failed:
         _effectiveApi.lastFailure = 'connect failed';
         return _fail(CfhubEnableResult.failed);
-      case AccelDohConnectOutcome.unavailable:
+      case ConnectCodeOutcome.unavailable:
         debugPrint('[CFHUB] Connect 授权没拿到 code，放弃开启探针上报');
         return _fail(CfhubEnableResult.cancelled);
-      case AccelDohConnectOutcome.code:
+      case ConnectCodeOutcome.code:
         break;
     }
 

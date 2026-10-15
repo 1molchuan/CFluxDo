@@ -4,7 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:fluxdo/models/user.dart';
 import 'package:fluxdo/services/network/doh/accel_doh_api.dart';
 import 'package:fluxdo/services/network/doh/accel_doh_auth_service.dart';
-import 'package:fluxdo/services/network/doh/accel_doh_connect_flow.dart';
+import 'package:fluxdo/services/network/doh/connect_code_flow.dart';
 import 'package:fluxdo/services/network/doh/network_settings_service.dart';
 import 'package:fluxdo/services/network/doh_proxy/doh_proxy_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -47,26 +47,26 @@ class _FakeApi implements AccelDohApi {
   Future<void> revoke(String token) async => revoked.add(token);
 }
 
-/// 假的 Connect 授权：不弹窗、不发请求
-class _FakeConnectFlow implements AccelDohConnectFlow {
+/// 假的 Connect 授权与授权说明：不弹窗、不发请求
+class _FakeConnectFlow implements ConnectCodeFlow {
   /// null 表示现在弹不了窗
   bool? consentAnswer;
   int consentAsks = 0;
-  AccelDohConnectResult result = const AccelDohConnectResult.code(
+  ConnectCodeResult result = const ConnectCodeResult.code(
     'the-code',
     'the-state',
   );
 
-  @override
   Future<bool?> askConsent() async {
     consentAsks++;
     return consentAnswer;
   }
 
   @override
-  Future<AccelDohConnectResult> fetchCode(
+  Future<ConnectCodeResult> fetchCode(
     Uri authorizeUrl, {
     bool silent = true,
+    String requestTag = '',
   }) async => result;
 }
 
@@ -108,6 +108,7 @@ void main() {
       auth
         ..debugApi = api
         ..debugConnectFlow = flow
+        ..debugAskConsent = flow.askConsent
         ..consentPromptDelay = Duration.zero
         ..rejectCooldown = Duration.zero;
       await service.initialize(prefs);
@@ -217,7 +218,7 @@ void main() {
     test('换成用不了 Connect 的账号（青春版）：同意后仍走公共加速', () async {
       flow
         ..consentAnswer = true
-        ..result = const AccelDohConnectResult.unavailable();
+        ..result = const ConnectCodeResult.unavailable();
       final asksBefore = flow.consentAsks;
       auth.onUserChanged(User(id: 8, username: 'bob', trustLevel: 1));
       await pumpEventQueue();
@@ -231,7 +232,7 @@ void main() {
     test('选了暂不：走公共加速；之后在设置里手动授权就切到专属加速', () async {
       flow
         ..consentAnswer = false
-        ..result = const AccelDohConnectResult.code('code-9', 'state-9');
+        ..result = const ConnectCodeResult.code('code-9', 'state-9');
       api.exchangeResult = const AccelDohIssueResult.issued(
         'token-9',
         Duration(days: 7),

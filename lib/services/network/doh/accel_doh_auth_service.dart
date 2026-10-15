@@ -7,7 +7,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../../models/user.dart';
 import '../../../pages/network_settings_page/widgets/cf_select_privacy_dialog.dart';
 import 'accel_doh_api.dart';
-import 'accel_doh_connect_flow.dart';
+import 'accel_doh_consent_dialog.dart';
+import 'connect_code_flow.dart';
 import 'network_settings_service.dart';
 
 /// 加速 DoH 当前处在哪一档
@@ -98,11 +99,15 @@ class AccelDohAuthService extends ChangeNotifier {
   AccelDohApi? debugApi;
 
   @visibleForTesting
-  AccelDohConnectFlow? debugConnectFlow;
+  ConnectCodeFlow? debugConnectFlow;
+
+  /// 测试用：替换授权说明弹窗
+  @visibleForTesting
+  Future<bool?> Function()? debugAskConsent;
 
   SharedPreferences? _prefs;
   AccelDohApi? _defaultApi;
-  AccelDohConnectFlow? _defaultFlow;
+  ConnectCodeFlow? _defaultFlow;
   _AccelDohToken? _stored;
   String? _token;
   bool _member = false;
@@ -136,8 +141,10 @@ class AccelDohAuthService extends ChangeNotifier {
 
   AccelDohApi get _api => debugApi ?? _defaultApi!;
 
-  AccelDohConnectFlow get _flow =>
-      debugConnectFlow ?? (_defaultFlow ??= AccelDohConnectFlow());
+  ConnectCodeFlow get _flow =>
+      debugConnectFlow ?? (_defaultFlow ??= ConnectCodeFlow());
+
+  Future<bool?> _askConsent() => (debugAskConsent ?? askAccelDohConsent)();
 
   /// 当前可用的令牌；null 表示没有
   String? get token => _token;
@@ -213,7 +220,7 @@ class AccelDohAuthService extends ChangeNotifier {
       return status;
     }
     if (_consentFor(user) != true) {
-      final answer = await _flow.askConsent();
+      final answer = await _askConsent();
       if (answer == null || _user?.id != user.id) return status;
       await _setConsent(user, answer);
       if (!answer) return status;
@@ -396,14 +403,14 @@ class AccelDohAuthService extends ChangeNotifier {
       final connect = await _flow.fetchCode(authorizeUrl, silent: !interactive);
       if (epoch != _epoch || _user?.id != user.id) return;
       switch (connect.outcome) {
-        case AccelDohConnectOutcome.failed:
+        case ConnectCodeOutcome.failed:
           _scheduleRetry();
           return;
-        case AccelDohConnectOutcome.unavailable:
+        case ConnectCodeOutcome.unavailable:
           debugPrint('[DOH] 此账号用不了 Connect，使用公共加速');
           await _setBackoff(user, _BackoffReason.unavailable);
           return;
-        case AccelDohConnectOutcome.code:
+        case ConnectCodeOutcome.code:
           break;
       }
 
@@ -458,7 +465,7 @@ class AccelDohAuthService extends ChangeNotifier {
       _consentPromptShowing = true;
       bool? answer;
       try {
-        answer = await _flow.askConsent();
+        answer = await _askConsent();
       } catch (e) {
         debugPrint('[DOH] 弹出加速授权说明失败: $e');
       } finally {
