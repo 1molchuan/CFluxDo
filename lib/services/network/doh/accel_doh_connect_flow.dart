@@ -145,7 +145,10 @@ class AccelDohConnectFlow {
       options: Options(
         followRedirects: false,
         responseType: ResponseType.plain,
-        validateStatus: (status) => status != null && status < 500,
+        // 4xx 也按错误走：CF 的 403/429 挑战要进 CfChallengeInterceptor 过盾后重放，
+        // 之前把 <500 都当正常响应，撞盾就直接「授权页打不开」失败。
+        // 移动网络换出口 IP 后 cf_clearance 失效、撞盾很常见
+        validateStatus: (status) => status != null && status < 400,
         extra: {
           FluxRequestKeys.skipCsrf: true,
           FluxRequestKeys.skipRedirect: true,

@@ -86,6 +86,10 @@ class CfhubApi {
   static const Duration _connectTimeout = Duration(seconds: 5);
   static const Duration _requestTimeout = Duration(seconds: 10);
 
+  /// Rust 路径的外层超时要盖过它内部的最坏情况（经优选节点 2+3+8 s，再回退 reqwest 10 s），
+  /// 否则 Dart 这边提前放弃、改用自己的客户端再发一次，令牌换码那一步的一次性 code 会被烧掉
+  static const Duration _nativeTimeout = Duration(seconds: 25);
+
   /// 探针令牌固定以 cfp_ 开头，其余是可打印 ASCII
   static final RegExp _tokenPattern = RegExp(r'^cfp_[\x21-\x7E]{1,4096}$');
 
@@ -247,7 +251,7 @@ class CfhubApi {
             headers: headers,
             body: body == null ? null : jsonEncode(body),
           )
-          .timeout(_requestTimeout);
+          .timeout(_nativeTimeout);
       if (result == null) return null;
       return (result.status, result.body);
     } catch (e) {

@@ -135,9 +135,34 @@ class CfhubProbeAuthService extends ChangeNotifier {
   Future<CfhubEnableResult> enable() {
     final running = _inflight;
     if (running != null) return running;
-    final future = _enable().whenComplete(() => _inflight = null);
+    final future = _enableWithRetry().whenComplete(() => _inflight = null);
     _inflight = future;
     return future;
+  }
+
+  /// 整条链路（取授权地址 → Connect → 换令牌）有 4 跳、每跳只请求一次，
+  /// 移动网络上任一跳瞬时失败就整体失败。只对「网络类失败」整体重来：
+  /// 每次都是新的 state，重来是安全的；被拒 / 未开放 / 用户取消不重来
+  static const int _maxAttempts = 3;
+
+  /// 重试间隔；测试里置空让用例不用真等
+  @visibleForTesting
+  static List<Duration> retryDelays = const [
+    Duration(seconds: 2),
+    Duration(seconds: 4),
+  ];
+
+  Future<CfhubEnableResult> _enableWithRetry() async {
+    CfhubEnableResult result = CfhubEnableResult.failed;
+    for (var attempt = 0; attempt < _maxAttempts; attempt++) {
+      if (attempt > 0) {
+        await Future<void>.delayed(retryDelays[attempt - 1]);
+        debugPrint('[CFHUB] 开启失败，第 ${attempt + 1} 次尝试');
+      }
+      result = await _enable();
+      if (result != CfhubEnableResult.failed) break;
+    }
+    return result;
   }
 
   Future<CfhubEnableResult> _enable() async {

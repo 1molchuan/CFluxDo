@@ -71,6 +71,7 @@ void main() {
     setUpAll(() async {
       SharedPreferences.setMockInitialValues({});
       prefs = await SharedPreferences.getInstance();
+      CfhubProbeAuthService.retryDelays = const [Duration.zero, Duration.zero];
       CfhubProbeAuthService.resetForTest(
         api: api,
         flow: flow,
