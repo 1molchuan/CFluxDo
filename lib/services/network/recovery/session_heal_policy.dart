@@ -2,22 +2,46 @@ import 'package:dio/dio.dart';
 import 'package:enhanced_cookie_jar/enhanced_cookie_jar.dart';
 import 'package:flutter/foundation.dart';
 
+import '../../session/session_token_authority.dart';
 import '../cookie/cookie_jar_service.dart';
 import '../cookie/cookie_logger.dart';
 import '../cookie/session_cookie_sentinel.dart';
 import 'recovery_action.dart';
 import 'recovery_policy.dart';
 
-/// 会话 cookie 修复动作:Sentinel sweep,失败后升级为 Nuclear Reset。
+/// 自愈前对账 `_t` 的钩子（origin、原因）。默认交 [SessionTokenAuthority]。
+typedef SessionTokenReconcileHook =
+    Future<void> Function(String origin, String reason);
+
+Future<void> _reconcileWithAuthority(String origin, String reason) async {
+  await SessionTokenAuthority.instance.reconcile(
+    url: origin,
+    reason: reason,
+    // 别让一次正在探测的对账把失败请求的重放拖太久
+    lockTimeout: const Duration(seconds: 3),
+  );
+}
+
+/// 会话 cookie 修复动作:先对账 `_t`,再 Sentinel sweep,失败后升级为
+/// Nuclear Reset。
 ///
 /// 修复的是"jar 与 WebView 之间 cookie 变体不一致导致服务端拒绝"这个全局
 /// 环境问题,因此并发失败请求共享一次执行(基类提供单飞)。
+///
+/// `_t` 谁对不由这里决定:先交 SessionTokenAuthority 对账(服务端探测决定,
+/// WebView 的值经确认有效就先采纳进 jar,重放就带上它;无结论两端都不动),
+/// 随后的 sweep / Nuclear Reset 对 `_t` 也只按它的结论动手。以前这里直接
+/// sweep / nuclear,`_t` 一律 jar 赢,会把 WebView 里唯一活着的值抹成 jar
+/// 里的死值。
 class SessionSweepAction extends RecoveryAction {
   SessionSweepAction({
     required this.origin,
     this.nuclear = false,
     SessionCookieSentinel? sentinel,
-  }) : _sentinel = sentinel ?? SessionCookieSentinel.instance;
+    SessionTokenReconcileHook? reconcileSessionToken,
+  }) : _sentinel = sentinel ?? SessionCookieSentinel.instance,
+       _reconcileSessionToken =
+           reconcileSessionToken ?? _reconcileWithAuthority;
 
   /// 目标源(scheme://host)。
   final String origin;
@@ -26,12 +50,21 @@ class SessionSweepAction extends RecoveryAction {
   final bool nuclear;
 
   final SessionCookieSentinel _sentinel;
+  final SessionTokenReconcileHook _reconcileSessionToken;
 
   @override
   String get name => nuclear ? 'session-nuclear-reset' : 'session-sweep';
 
   @override
   Future<bool> perform() async {
+    try {
+      await _reconcileSessionToken(
+        origin,
+        nuclear ? 'self_heal_nuclear' : 'self_heal',
+      );
+    } catch (e) {
+      debugPrint('[Recovery] $name 前对账 _t 失败: $e');
+    }
     try {
       if (nuclear) {
         await _sentinel.nuclearReset(origin);
@@ -66,13 +99,16 @@ class SessionSelfHealPolicy implements RecoveryPolicy {
   SessionSelfHealPolicy({
     Future<CanonicalCookie?> Function()? readSessionToken,
     SessionCookieSentinel? sentinel,
+    SessionTokenReconcileHook? reconcileSessionToken,
   }) : _readSessionToken =
            readSessionToken ??
            (() => CookieJarService().getCanonicalCookie('_t')),
-       _sentinel = sentinel;
+       _sentinel = sentinel,
+       _reconcileSessionToken = reconcileSessionToken;
 
   final Future<CanonicalCookie?> Function() _readSessionToken;
   final SessionCookieSentinel? _sentinel;
+  final SessionTokenReconcileHook? _reconcileSessionToken;
 
   /// sweep 重试次数上限,之后升级 Nuclear Reset。
   static const _sweepAttempts = 2;
@@ -161,6 +197,7 @@ class SessionSelfHealPolicy implements RecoveryPolicy {
         origin: origin,
         nuclear: useNuclear,
         sentinel: _sentinel,
+        reconcileSessionToken: _reconcileSessionToken,
       ),
     );
   }

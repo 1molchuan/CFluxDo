@@ -170,6 +170,10 @@ class SessionCookieSentinel {
   /// - 先 nuke jar+WV 联合 name set 的所有 variant
   /// - 从 jar 把适用 cookie 全量重灌
   /// - 校验每个 jar cookie 在 WV 中变体数 ≤ 1
+  ///
+  /// `_t` 例外：只有 SessionTokenAuthority 判定 WebView 里没有可能比 jar 新的
+  /// 值时才清空重灌；否则这一轮不动 WebView 的 `_t`，交对账由服务端探测决定
+  /// （以前这里一律 jar 赢，会把 WebView 里唯一还活着的那枚抹掉）。
   Future<NuclearResetResult> nuclearReset(String url) async {
     final stopwatch = Stopwatch()..start();
     Duration? primingDuration;
@@ -181,8 +185,9 @@ class SessionCookieSentinel {
       // 1. 清空 WV: jar+WV 联合 name set 的所有 variant
       final namesToNuke = <String>{};
       namesToNuke.addAll(jarCookies.map((c) => c.name));
+      List<CookieFullInfo>? wvCookies;
       try {
-        final wvCookies = await _writer.getAllCookieInfos(url);
+        wvCookies = await _writer.getAllCookieInfos(url);
         namesToNuke.addAll(wvCookies.map((c) => c.name));
         // 全量清空前把 WV 里的 _t 记进候选环（可能比 jar 新）
         _noteSessionTokenVariants(
@@ -192,6 +197,20 @@ class SessionCookieSentinel {
       } catch (e) {
         debugPrint('[Sentinel] nuclearReset wv lookup failed: $e');
       }
+      const tokenName = SessionTokenAuthority.cookieName;
+      final jarToken = jarCookies
+          .firstWhereOrNull((c) => c.name == tokenName && c.value.isNotEmpty)
+          ?.value;
+      // 读不到 WV（无从判断）同样不动 _t
+      final holdSessionToken =
+          wvCookies == null ||
+          !_sessionToken.mayOverwriteWebViewToken(
+            jarValue: jarToken,
+            webViewValues: wvCookies
+                .where((c) => c.name == tokenName)
+                .map((c) => c.value),
+          );
+      if (holdSessionToken) namesToNuke.remove(tokenName);
       for (final name in namesToNuke) {
         await _executeDelete(url, name);
       }
@@ -208,6 +227,7 @@ class SessionCookieSentinel {
         // Dio 侧不产新值。回灌经 toSetCookieHeader 会丢 Partitioned,在 WV
         // 里复制出一枚 CF 从未签发的非分区副本(双变体来源),一律不回写。
         if (cookie.name == 'cf_clearance') continue;
+        if (holdSessionToken && cookie.name == tokenName) continue;
         // 用 toSetCookieHeader 保留 hostOnly/Domain/SameSite, 避免与 WV
         // 网络层写入的同名 cookie 共存 (详见 _writeWinnerToWebView 注释)
         await _writer.setRawCookie(
@@ -224,6 +244,7 @@ class SessionCookieSentinel {
       int? duplicatedCount;
       for (final cookie in jarCookies) {
         if (cookie.value.isEmpty) continue;
+        if (holdSessionToken && cookie.name == tokenName) continue;
         final count = await _writer.countCookiesByName(url, cookie.name);
         if (count > 1) {
           allOk = false;
@@ -231,6 +252,14 @@ class SessionCookieSentinel {
           duplicatedCount = count;
           break;
         }
+      }
+
+      if (holdSessionToken && jarToken != null) {
+        debugPrint('[Sentinel] nuclearReset 保留 WebView 的 _t，交对账决定');
+        // 不在这里等：可能正处在某次对账的推送里（它持有对账锁）
+        unawaited(
+          _sessionToken.reconcile(url: url, reason: 'nuclear_reset_held'),
+        );
       }
 
       return NuclearResetResult(
@@ -494,6 +523,13 @@ class SessionCookieSentinel {
       if (winnerResult != null && winnerResult.source == 'webview') {
         await _syncWinnerToJar(url, winnerResult.cookieInfo);
       }
+      // _t 留下的是 WebView 自己的值、jar 没动：收敛完交对账由服务端探测
+      // 决定谁对。不在 per-name 锁内等它（对账推回时还要拿这把锁）。
+      if (winnerResult != null && winnerResult.reconcileSessionToken) {
+        unawaited(
+          _sessionToken.reconcile(url: url, reason: 'sentinel_variants'),
+        );
+      }
 
       final result = SweepResult(
         name: name,
@@ -634,6 +670,10 @@ class SessionCookieSentinel {
       debugPrint('[Sentinel] _pickWinner jar lookup failed: $e');
     }
 
+    if (name == SessionTokenAuthority.cookieName) {
+      return _pickSessionTokenWinner(variants, jarCookie);
+    }
+
     if (jarCookie != null && jarCookie.value.isNotEmpty) {
       final jarValue = jarCookie.value;
       final jarValueDecoded = CookieValueCodec.decode(jarValue);
@@ -644,6 +684,7 @@ class SessionCookieSentinel {
       // Auth cookies are server-authoritative. A WebView snapshot can contain
       // stale host/domain variants, so never pick a non-jar value merely
       // because it differs from the jar value.
+      // （`_t` 不走这条，见 _pickSessionTokenWinner。）
       if (CookieJarService.authCookieNames.contains(name)) {
         return _WinnerInfo(
           cookieInfo:
@@ -695,6 +736,54 @@ class SessionCookieSentinel {
     return _WinnerInfo(cookieInfo: sorted.first, source: 'webview');
   }
 
+  /// `_t` 多变体收敛时留哪一枚：问 SessionTokenAuthority（不探测、不加锁）。
+  ///
+  /// WebView 里选优排第一的那枚只有在「不可能比 jar 新」（与 jar 相同 / 是
+  /// 两端此前一致过、之后 jar 才前移的旧值 / 刚被服务端拒绝）时才让 jar 赢；
+  /// 否则留 WebView 自己的值、jar 不动，收敛后对账交服务端探测决定。
+  /// 以前这里是「jar 有值就 jar 赢」，会把 WebView 刚轮换到的活值抹成 jar
+  /// 里的旧值，与对账规则相矛盾。
+  _WinnerInfo _pickSessionTokenWinner(
+    List<CookieFullInfo> variants,
+    CanonicalCookie? jarCookie,
+  ) {
+    final sorted = [...variants]..sort(_compareCookieVariants);
+    final best = sorted.first;
+    final jarValue = jarCookie == null || jarCookie.value.isEmpty
+        ? null
+        : jarCookie.value;
+    final jarValueDecoded = jarValue == null
+        ? null
+        : CookieValueCodec.decode(jarValue);
+    final jarMatch = jarValue == null
+        ? null
+        : variants.firstWhereOrNull(
+            (v) => v.value == jarValue || v.value == jarValueDecoded,
+          );
+    final bestIsJarValue =
+        jarValue != null &&
+        (best.value == jarValue || best.value == jarValueDecoded);
+    final choice = _sessionToken.chooseVariantToKeep(
+      jarValue: jarValue,
+      webViewBest: bestIsJarValue ? jarValue : best.value,
+    );
+    if (choice.keepJarValue) {
+      return _WinnerInfo(
+        cookieInfo:
+            jarMatch ??
+            CookieFullInfo(name: best.name, value: jarCookie!.value),
+        source: 'jar',
+        canonical: jarCookie,
+      );
+    }
+    return _WinnerInfo(
+      cookieInfo: best,
+      source: 'webview',
+      canonical: jarCookie,
+      reconcileSessionToken: choice.needsReconcile,
+    );
+  }
+
   /// 比较两个变体，返回负值表示 a 更优。
   int _compareCookieVariants(CookieFullInfo a, CookieFullInfo b) {
     // 2. value 非空 > 空
@@ -742,9 +831,22 @@ class SessionCookieSentinel {
       final winnerValue = winnerResult.cookieInfo.value;
       // 如果 winner value 跟 canonical 一致 (source='jar'), 直接用 canonical
       // 否则 (source='webview' 规则 1b), 用 canonical 元字段 + winner 新 value
+      final winnerExpires = winnerResult.cookieInfo.expiresMillis;
       final cookieToWrite = winnerValue == canonical.value
           ? canonical
-          : canonical.copyWith(value: winnerValue);
+          : canonical.copyWith(
+              value: winnerValue,
+              // _t 留的是 WebView 自己的值：带上它自己的过期时间（有的话）
+              expiresAt:
+                  winnerResult.cookieInfo.name ==
+                          SessionTokenAuthority.cookieName &&
+                      winnerExpires != null
+                  ? DateTime.fromMillisecondsSinceEpoch(
+                      winnerExpires,
+                      isUtc: true,
+                    )
+                  : null,
+            );
       await _writer.setRawCookie(
         url,
         cookieToWrite.toSetCookieHeader(),
@@ -813,12 +915,12 @@ class SessionCookieSentinel {
               isUtc: true,
             )
           : null;
-      // `_t` 走可信写入的统一入口，保证带过期时间（WebView 的 → jar 原值的 →
-      // 兜底 60 天）。直接 setCookie 且 WebView 没给过期时间时写出的是会话
-      // cookie，jar 不落盘，下次冷启动 jar 为空就判未登录（同 d72e0db5）。
-      // 主站 host-only、Path=/、HttpOnly 由该入口和 auth 策略保证，与下面一致
-      if (winner.name == '_t') {
-        await _jar.setSessionTokenTrusted(winner.value, expires: expires);
+      // `_t` 从不由 Sentinel 写进 jar：WebView 的值要不要采纳只由
+      // SessionTokenAuthority 按服务端探测决定（多变体收敛后会对账；jar 没有
+      // `_t` 时只有冷启动恢复能采纳）。以前这里不经探测把 WebView 的 `_t`
+      // 可信写进 jar。
+      if (winner.name == SessionTokenAuthority.cookieName) {
+        debugPrint('[Sentinel] 不反向同步 _t（交 SessionTokenAuthority）');
         return;
       }
       final uri = Uri.parse(url);
@@ -1137,8 +1239,16 @@ class CookieSweepException implements Exception {
 /// 写回 WV 时的规范化 source of truth(完整的 hostOnly/Domain/SameSite
 /// 等字段)。winner 来自 WV 时为 null,fallback 到 [cookieInfo]。
 class _WinnerInfo {
-  _WinnerInfo({required this.cookieInfo, required this.source, this.canonical});
+  _WinnerInfo({
+    required this.cookieInfo,
+    required this.source,
+    this.canonical,
+    this.reconcileSessionToken = false,
+  });
   final CookieFullInfo cookieInfo;
   final String source;
   final CanonicalCookie? canonical;
+
+  /// `_t` 收敛时留了 WebView 自己的值、jar 没动：收敛后要对账。
+  final bool reconcileSessionToken;
 }
