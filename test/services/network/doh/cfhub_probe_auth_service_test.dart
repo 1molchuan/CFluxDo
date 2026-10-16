@@ -11,6 +11,7 @@ import 'package:fluxdo/services/network/doh_proxy/doh_proxy_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'connect_token_fakes.dart';
+import 'fake_app_dirs.dart';
 
 /// 假的 cfhub：换码默认发 cfp_first
 class _FakeServer extends FakeTokenServer {
@@ -39,8 +40,10 @@ void main() {
     late CfhubProbeAuthService auth;
     final sleeps = <Duration>[];
     void Function()? onSleep;
+    late Directory appDirs;
 
     setUpAll(() async {
+      appDirs = useTempAppDirs();
       SharedPreferences.setMockInitialValues({});
       prefs = await SharedPreferences.getInstance();
       CfhubProbeAuthService.resetForTest(
@@ -66,6 +69,7 @@ void main() {
         await Future<void>.delayed(const Duration(milliseconds: 100));
       }
       await DohProxyService.instance.stop();
+      appDirs.deleteSync(recursive: true);
     });
 
     test('冷启动没有记录：未授权，上报关', () {

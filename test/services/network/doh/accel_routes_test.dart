@@ -86,12 +86,18 @@ void main() {
 
     test('最长 key 优先', () {
       final store = AccelNodeStore();
-      store.loadPayloadJson(jsonEncode({
-        'hosts': {
-          '1molchuan.top': {'v4': ['198.51.100.1']},
-          'wq.1molchuan.top': {'v4': ['198.51.100.2']},
-        },
-      }));
+      store.loadPayloadJson(
+        jsonEncode({
+          'hosts': {
+            '1molchuan.top': {
+              'v4': ['198.51.100.1'],
+            },
+            'wq.1molchuan.top': {
+              'v4': ['198.51.100.2'],
+            },
+          },
+        }),
+      );
       expect(store.ipsFor('a.wq.1molchuan.top'), ['198.51.100.2']);
       expect(store.ipsFor('edge.1molchuan.top'), ['198.51.100.1']);
     });
@@ -128,10 +134,11 @@ void main() {
   group('mergeAccelBootstrapIps', () {
     test('已下发在前、种子在后，去重并保持顺序', () {
       expect(
-        mergeAccelBootstrapIps(
-          ['198.51.100.2', '156.239.232.8', '198.51.100.2'],
-          accelDohBootstrapIps,
-        ),
+        mergeAccelBootstrapIps([
+          '198.51.100.2',
+          '156.239.232.8',
+          '198.51.100.2',
+        ], accelDohBootstrapIps),
         [
           '198.51.100.2',
           '156.239.232.8',
@@ -143,8 +150,10 @@ void main() {
     });
 
     test('没有下发时只剩种子', () {
-      expect(mergeAccelBootstrapIps(const [], accelDohBootstrapIps),
-          accelDohBootstrapIps);
+      expect(
+        mergeAccelBootstrapIps(const [], accelDohBootstrapIps),
+        accelDohBootstrapIps,
+      );
     });
   });
 }

@@ -22,8 +22,9 @@ void main() {
     late Uint8List query;
 
     setUp(() {
-      query = BootstrapDohClient(serverUrl: 'https://example.invalid/dns-query')
-          .buildDnsQuery('linux.do');
+      query = BootstrapDohClient(
+        serverUrl: 'https://example.invalid/dns-query',
+      ).buildDnsQuery('linux.do');
     });
 
     test('DNS 报文是标准 A 查询，并用 EDNS Padding 填到 128 的整倍数', () {
@@ -47,7 +48,9 @@ void main() {
     });
 
     test('不同长度的域名都填到 128 的整倍数', () {
-      final client = BootstrapDohClient(serverUrl: 'https://example.invalid/dns-query');
+      final client = BootstrapDohClient(
+        serverUrl: 'https://example.invalid/dns-query',
+      );
       for (final host in [
         'a.b',
         'linux.do',
@@ -55,7 +58,11 @@ void main() {
         'very-long-subdomain-name-for-padding-check.example.linux.do',
       ]) {
         final bytes = client.buildDnsQuery(host);
-        expect(bytes.length % BootstrapDohClient.dnsQueryPadBlock, 0, reason: host);
+        expect(
+          bytes.length % BootstrapDohClient.dnsQueryPadBlock,
+          0,
+          reason: host,
+        );
       }
     });
 

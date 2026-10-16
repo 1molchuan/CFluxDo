@@ -1,9 +1,12 @@
+import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fluxdo/services/network/doh/network_settings_service.dart';
 import 'package:fluxdo/services/network/doh_proxy/doh_proxy_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+import 'fake_app_dirs.dart';
 
 void main() {
   group('cfluxdo 加速服务器', () {
@@ -46,6 +49,9 @@ void main() {
 
   group('NetworkSettingsService 默认值', () {
     TestWidgetsFlutterBinding.ensureInitialized();
+    late Directory appDirs;
+
+    setUpAll(() => appDirs = useTempAppDirs());
 
     test('首次启动：默认开启 DoH、选中加速服务器；代理起不来时改为直连', () async {
       SharedPreferences.setMockInitialValues({'doh_proxy_port': 45678});
@@ -77,6 +83,9 @@ void main() {
     });
 
     // 代理能起来时要关掉，不然测试结束后进程会留下
-    tearDownAll(() => DohProxyService.instance.stop());
+    tearDownAll(() async {
+      await DohProxyService.instance.stop();
+      appDirs.deleteSync(recursive: true);
+    });
   });
 }

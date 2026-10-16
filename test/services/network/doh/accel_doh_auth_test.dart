@@ -11,6 +11,7 @@ import 'package:fluxdo/services/network/doh_proxy/doh_proxy_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'connect_token_fakes.dart';
+import 'fake_app_dirs.dart';
 
 /// 假的加速服务端：换码默认发 connect-token（7 天），续期一律 500
 class _FakeServer extends FakeTokenServer {
@@ -55,11 +56,13 @@ void main() {
     final sleeps = <Duration>[];
 
     late DohServer accelServer;
+    late Directory appDirs;
 
     String activeUrl() => service.latencyTestTarget(accelServer).url;
     String? activeToken() => service.latencyTestTarget(accelServer).authToken;
 
     setUpAll(() async {
+      appDirs = useTempAppDirs();
       final now = DateTime.now();
       SharedPreferences.setMockInitialValues({
         'doh_accel_token': jsonEncode({
@@ -98,6 +101,7 @@ void main() {
         await Future<void>.delayed(const Duration(milliseconds: 100));
       }
       await DohProxyService.instance.stop();
+      appDirs.deleteSync(recursive: true);
     });
 
     test('冷启动读回已存的令牌，直接走专属加速', () async {
