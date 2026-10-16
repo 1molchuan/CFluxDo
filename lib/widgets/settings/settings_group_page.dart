@@ -143,7 +143,8 @@ class _SettingsGroupPageState extends ConsumerState<SettingsGroupPage> {
   }
 
   bool _hasVisibleItems(SettingsGroup group) {
-    return group.items.any((item) => item.isVisible(ref));
+    return group.isVisible(ref) &&
+        group.items.any((item) => item.isVisible(ref));
   }
 
   Widget _buildSectionHeader(ThemeData theme, String title, IconData icon) {

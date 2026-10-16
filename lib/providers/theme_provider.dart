@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../theme/accent_colors.dart';
 import '../theme/app_background.dart';
 import '../theme/app_palettes.dart';
+import '../theme/mojian_theme.dart';
 
 /// 内置字体选项
 enum AppFontFamily {
@@ -73,6 +74,13 @@ class ThemeState {
   /// 透明模式的背景配置
   final AppBackground background;
 
+  /// 界面风格。墨笺为默认；经典保留原来的全部外观选项
+  /// （调色板、中性、纯黑、透明背景、M3E），墨笺下这些选项不生效
+  final UiStyle uiStyle;
+
+  /// 墨笺的强调色
+  final MojianAccent mojianAccent;
+
   const ThemeState({
     required this.mode,
     this.neutralEnabled = false,
@@ -87,11 +95,16 @@ class ThemeState {
     this.fontFamily = AppFontFamily.system,
     this.m3eEnabled = true,
     this.background = const AppBackground(),
+    this.uiStyle = UiStyle.mojian,
+    this.mojianAccent = MojianAccent.cinnabar,
   });
 
+  bool get isMojian => uiStyle == UiStyle.mojian;
+
   /// 透明模式当前是否真正生效（开了开关且有背景图才生效；
-  /// 无图时回退普通表面，避免裸透明造成的可读性事故）
-  bool get isTransparentActive => transparentEnabled && background.hasImage;
+  /// 无图时回退普通表面，避免裸透明造成的可读性事故；墨笺风格下不生效）
+  bool get isTransparentActive =>
+      !isMojian && transparentEnabled && background.hasImage;
 
   /// 当前生效的种子色（色卡预览、主题合成、预热等场景使用）
   Color get effectiveSeedColor => switch (accentSource) {
@@ -124,6 +137,8 @@ class ThemeState {
     AppFontFamily? fontFamily,
     bool? m3eEnabled,
     AppBackground? background,
+    UiStyle? uiStyle,
+    MojianAccent? mojianAccent,
   }) {
     return ThemeState(
       mode: mode ?? this.mode,
@@ -139,6 +154,8 @@ class ThemeState {
       fontFamily: fontFamily ?? this.fontFamily,
       m3eEnabled: m3eEnabled ?? this.m3eEnabled,
       background: background ?? this.background,
+      uiStyle: uiStyle ?? this.uiStyle,
+      mojianAccent: mojianAccent ?? this.mojianAccent,
     );
   }
 }
@@ -160,13 +177,36 @@ class ThemeNotifier extends StateNotifier<ThemeState> {
   static const String _bgScrimLightKey = 'bg_scrim_light';
   static const String _bgScrimDarkKey = 'bg_scrim_dark';
   static const String _bgBlurKey = 'bg_blur';
+  static const String _uiStyleKey = 'ui_style';
+  static const String _mojianAccentKey = 'mojian_accent';
+  static const String _onboardingCompletedKey = 'onboarding_completed';
 
   // 旧版键：只读迁移，不再写入
   static const String _legacyDynamicColorKey = 'use_dynamic_color';
 
   final SharedPreferences _prefs;
 
-  ThemeNotifier(this._prefs) : super(_loadTheme(_prefs));
+  /// 老用户升级后第一次启动：界面风格从未设置过（墨笺之前的版本），且已经
+  /// 走完引导。用来提示一次「已换成墨笺，可改回经典」。
+  bool _mojianIntroPending;
+
+  ThemeNotifier(this._prefs)
+    : _mojianIntroPending =
+          _prefs.getString(_uiStyleKey) == null &&
+          (_prefs.getBool(_onboardingCompletedKey) ?? false),
+      super(_loadTheme(_prefs)) {
+    // 把默认风格落盘：之后的启动都不再算「刚升级」，新装用户也不会被提示
+    if (_prefs.getString(_uiStyleKey) == null) {
+      _prefs.setString(_uiStyleKey, state.uiStyle.name);
+    }
+  }
+
+  /// 取走「刚升级到墨笺」的提示机会（只返回一次 true）。
+  bool consumeMojianIntro() {
+    final pending = _mojianIntroPending && state.isMojian;
+    _mojianIntroPending = false;
+    return pending;
+  }
 
   static ThemeState _loadTheme(SharedPreferences prefs) {
     // ── 主题模式 ──
@@ -254,6 +294,12 @@ class ThemeNotifier extends StateNotifier<ThemeState> {
       fontFamily: fontFamily,
       m3eEnabled: prefs.getBool(_m3eEnabledKey) ?? true,
       background: background,
+      uiStyle:
+          UiStyle.values.asNameMap()[prefs.getString(_uiStyleKey)] ??
+          UiStyle.mojian,
+      mojianAccent:
+          MojianAccent.values.asNameMap()[prefs.getString(_mojianAccentKey)] ??
+          MojianAccent.cinnabar,
     );
   }
 
@@ -369,6 +415,16 @@ class ThemeNotifier extends StateNotifier<ThemeState> {
       _customColorsKey,
       colors.map((c) => c.toARGB32().toString()).toList(),
     );
+  }
+
+  Future<void> setUiStyle(UiStyle style) async {
+    state = state.copyWith(uiStyle: style);
+    await _prefs.setString(_uiStyleKey, style.name);
+  }
+
+  Future<void> setMojianAccent(MojianAccent accent) async {
+    state = state.copyWith(mojianAccent: accent);
+    await _prefs.setString(_mojianAccentKey, accent.name);
   }
 
   Future<void> setFontFamily(AppFontFamily fontFamily) async {

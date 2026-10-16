@@ -150,5 +150,16 @@
   "topicCardStyle_previewExcerpt": "這裡是話題摘要,展示話題的部分內容,幫助你預覽卡片效果。",
   "topicCardStyle_previewUserName": "預覽使用者",
   "topicCardStyle_previewCategory": "開發調校",
-  "topicCardStyle_previewTag": "精華文"
+  "topicCardStyle_previewTag": "精華文",
+  "appearance_uiStyle": "介面風格",
+  "appearance_styleMojian": "墨箋",
+  "appearance_styleMojianDesc": "紙色底、宋體標題、細線分隔",
+  "appearance_styleClassic": "經典",
+  "appearance_styleClassicDesc": "原來的外觀，可選主題色與背景",
+  "appearance_mojianAccent": "強調色",
+  "appearance_accentCinnabar": "朱砂",
+  "appearance_accentIndigo": "黛青",
+  "appearance_accentPine": "松煙",
+  "appearance_accentOchre": "赭石",
+  "appearance_mojianSwitched": "介面已換成新的「墨箋」風格，可在「外觀 → 介面風格」改回「經典」"
 }

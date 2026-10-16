@@ -39,7 +39,7 @@ class AppearanceWarmup {
   }) {
     final variant = themeState.schemeVariant;
     final signature = (
-      themeState.accentSource.index,
+      themeState.isMojian ? -1 : themeState.accentSource.index,
       themeState.effectiveSeedColor.toARGB32(),
       variant.index,
       brightness.index,
@@ -52,6 +52,8 @@ class AppearanceWarmup {
         scheduler.scheduleTask(task, Priority.idle);
 
     queue(_warmUpMiSansTypeface);
+    // 墨笺风格下外观页不显示色卡、配色风格卡，主题模式卡用固定配色，无需预热种子配色
+    if (themeState.isMojian) return;
 
     // 色卡网格：动态色卡 + 内置调色板（跟随当前配色风格）
     for (final seed in <Color>{

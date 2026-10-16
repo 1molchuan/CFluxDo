@@ -11,6 +11,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:native_animated_image/native_animated_image.dart'
     show NativeAnimatedImageProvider;
+import 'pages/appearance_page.dart';
 import 'pages/topics_page.dart';
 import 'pages/data_management_page.dart';
 import 'providers/discourse_providers.dart';
@@ -88,6 +89,7 @@ import 'utils/hashtag_handlers.dart';
 import 'utils/image_decode_gate.dart';
 import 'widgets/post/post_item/render_parse_cache.dart';
 import 'utils/scroll_busy_signal.dart';
+import 'theme/mojian_theme.dart';
 import 'theme/theme_resolver.dart';
 import 'widgets/common/app_background_layer.dart';
 import 'utils/time_utils.dart';
@@ -585,6 +587,36 @@ ButtonStyle _m3eIconButtonShapeStyle() => ButtonStyle(
   }),
 );
 
+/// 按界面风格装配 ThemeData:墨笺走 [MojianTheme.build],经典走原来的
+/// [_buildAppTheme]。页面转场与图标主题两种风格共用。墨笺不启用 M3E
+/// (按压形变等表现与墨笺的安静气质不合),但仍挂上 M3eFlags 保持明暗对称。
+ThemeData _buildThemeForStyle(
+  ColorScheme scheme,
+  ThemeState themeState, {
+  required bool fullscreenSwipeBack,
+  required bool transparent,
+}) {
+  if (!themeState.isMojian) {
+    return _buildAppTheme(
+      scheme,
+      themeState,
+      fullscreenSwipeBack: fullscreenSwipeBack,
+      transparent: transparent,
+    );
+  }
+  return MojianTheme.build(
+    scheme: scheme,
+    accent: themeState.mojianAccent,
+    fontFamily: themeState.fontFamilyName,
+    pageTransitionsTheme: fullscreenSwipeBack
+        ? _fullscreenSwipePageTransitionsTheme
+        : _pageTransitionsTheme,
+    iconTheme: _appIconTheme(scheme.onSurface),
+    primaryIconTheme: _appIconTheme(scheme.onPrimary),
+    extensions: const [M3eFlags(enabled: false)],
+  );
+}
+
 /// light/dark 共用的 ThemeData 装配(两侧必须对称,尤其 M3eFlags ——
 /// ThemeData.lerp 对单边缺失的 extension 不插值而是瞬时并入)。
 ThemeData _buildAppTheme(
@@ -670,14 +702,16 @@ class MainApp extends ConsumerWidget {
         // 默认走完整 fromSeed 方案（表面带种子色相）；中性/纯黑/透明
         // 开关由 ThemeResolver 切换到"强调色 × 中性层"的合成路径。
         // 动态色路径只取系统动态色 primary 当种子，不用 OEM 原始 scheme。
-        final resolvedTheme = ThemeResolver.resolve(
-          mode: themeState.mode,
-          neutral: themeState.neutralEnabled,
-          black: themeState.blackEnabled,
-          transparent: themeState.isTransparentActive,
-          seed: themeState.effectiveSeedColor,
-          variant: themeState.schemeVariant,
-        );
+        final resolvedTheme = themeState.isMojian
+            ? MojianTheme.resolve(themeState.mode, themeState.mojianAccent)
+            : ThemeResolver.resolve(
+                mode: themeState.mode,
+                neutral: themeState.neutralEnabled,
+                black: themeState.blackEnabled,
+                transparent: themeState.isTransparentActive,
+                seed: themeState.effectiveSeedColor,
+                variant: themeState.schemeVariant,
+              );
         final lightScheme = resolvedTheme.light;
         final darkScheme = resolvedTheme.dark;
 
@@ -707,7 +741,7 @@ class MainApp extends ConsumerWidget {
               // 系统字体（chinese_font_library 自带的 ThemeData.useSystemChineseFont
               // 会强制改为 Roboto，导致字体显得比之前粗）。
               theme: _withChineseFallback(
-                _buildAppTheme(
+                _buildThemeForStyle(
                   lightScheme,
                   themeState,
                   fullscreenSwipeBack: fullscreenSwipeBack,
@@ -715,7 +749,7 @@ class MainApp extends ConsumerWidget {
                 ),
               ),
               darkTheme: _withChineseFallback(
-                _buildAppTheme(
+                _buildThemeForStyle(
                   darkScheme,
                   themeState,
                   fullscreenSwipeBack: fullscreenSwipeBack,
@@ -1011,6 +1045,24 @@ class _MainPageState extends ConsumerState<MainPage>
     }
 
     await _checkClipboardTopicLink();
+    if (!mounted) return;
+
+    _maybeShowMojianIntro();
+  }
+
+  /// 老用户升级后第一次启动提示一次：界面已换成墨笺，可在外观里改回经典。
+  void _maybeShowMojianIntro() {
+    if (!ref.read(themeProvider.notifier).consumeMojianIntro()) return;
+    ToastService.show(
+      S.current.appearance_mojianSwitched,
+      duration: const Duration(seconds: 8),
+      actionLabel: S.current.appearance_title,
+      onAction: () => navigatorKey.currentState?.push(
+        MaterialPageRoute<void>(
+          builder: (_) => const AppearancePage(highlightId: 'uiStyle'),
+        ),
+      ),
+    );
   }
 
   /// 1.1 起本地优选成为一等连接方式：大小版本号变化后的首次启动弹一次

@@ -11,12 +11,18 @@ class SettingsGroup {
   /// 对于自定义布局的 section（如主题色网格、图标选择器），设为 false。
   final bool wrapInCard;
 
+  /// 整组的可见性（如只在经典风格下才有意义的外观选项）。null = 恒可见。
+  final bool Function(WidgetRef ref)? visibleWhen;
+
   const SettingsGroup({
     required this.title,
     required this.icon,
     required this.items,
     this.wrapInCard = true,
+    this.visibleWhen,
   });
+
+  bool isVisible(WidgetRef ref) => visibleWhen?.call(ref) ?? true;
 }
 
 /// 设置项基类（sealed）

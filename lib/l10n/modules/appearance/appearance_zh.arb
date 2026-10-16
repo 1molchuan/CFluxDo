@@ -150,5 +150,16 @@
   "topicCardStyle_previewExcerpt": "这里是话题摘要,展示话题的部分内容,帮助你预览卡片效果。",
   "topicCardStyle_previewUserName": "预览用户",
   "topicCardStyle_previewCategory": "开发调优",
-  "topicCardStyle_previewTag": "精华帖"
+  "topicCardStyle_previewTag": "精华帖",
+  "appearance_uiStyle": "界面风格",
+  "appearance_styleMojian": "墨笺",
+  "appearance_styleMojianDesc": "纸色底、宋体标题、细线分隔",
+  "appearance_styleClassic": "经典",
+  "appearance_styleClassicDesc": "原来的外观，可选主题色与背景",
+  "appearance_mojianAccent": "强调色",
+  "appearance_accentCinnabar": "朱砂",
+  "appearance_accentIndigo": "黛青",
+  "appearance_accentPine": "松烟",
+  "appearance_accentOchre": "赭石",
+  "appearance_mojianSwitched": "界面已换成新的「墨笺」风格，可在「外观 → 界面风格」改回「经典」"
 }

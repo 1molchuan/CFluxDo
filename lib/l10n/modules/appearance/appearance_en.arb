@@ -150,5 +150,16 @@
   "topicCardStyle_previewExcerpt": "This is the topic excerpt, showing part of the content to help you preview the card.",
   "topicCardStyle_previewUserName": "Preview User",
   "topicCardStyle_previewCategory": "Dev Tuning",
-  "topicCardStyle_previewTag": "featured"
+  "topicCardStyle_previewTag": "featured",
+  "appearance_uiStyle": "UI style",
+  "appearance_styleMojian": "Ink & Paper",
+  "appearance_styleMojianDesc": "Paper tones, serif headings, hairline dividers",
+  "appearance_styleClassic": "Classic",
+  "appearance_styleClassicDesc": "The original look, with theme colors and backgrounds",
+  "appearance_mojianAccent": "Accent",
+  "appearance_accentCinnabar": "Cinnabar",
+  "appearance_accentIndigo": "Indigo",
+  "appearance_accentPine": "Pine soot",
+  "appearance_accentOchre": "Ochre",
+  "appearance_mojianSwitched": "The app now uses the new \"Ink & Paper\" style. You can switch back to \"Classic\" in Appearance → UI style."
 }

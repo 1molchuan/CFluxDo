@@ -21,12 +21,17 @@ import '../../services/app_background_service.dart';
 import '../../services/toast_service.dart';
 import '../../theme/app_background.dart';
 import '../../theme/app_palettes.dart';
+import '../../theme/mojian_theme.dart';
 import '../../theme/theme_resolver.dart';
 import '../../utils/dialog_utils.dart';
 import '../../widgets/common/app_bottom_sheet.dart';
 import '../../utils/platform_utils.dart';
 import '../../utils/seed_color_scheme.dart';
 import '../settings_model.dart';
+
+/// 只在经典风格下有意义的分组（墨笺有自己固定的纸色与强调色）
+bool _classicOnly(WidgetRef ref) =>
+    !ref.watch(themeProvider.select((s) => s.isMojian));
 
 /// 外观设置数据声明
 List<SettingsGroup> buildAppearanceGroups(BuildContext context) {
@@ -57,6 +62,22 @@ List<SettingsGroup> buildAppearanceGroups(BuildContext context) {
       ],
     ),
 
+    // ── 界面风格 ───────────────────────────────────────────────────
+    SettingsGroup(
+      title: l10n.appearance_uiStyle,
+      icon: Symbols.style_rounded,
+      wrapInCard: false,
+      items: [
+        CustomModel(
+          id: 'uiStyle',
+          title: l10n.appearance_uiStyle,
+          subtitle:
+              '${l10n.appearance_styleMojian} ${l10n.appearance_styleClassic}',
+          builder: (context, ref) => const _UiStyleSection(),
+        ),
+      ],
+    ),
+
     // ── 主题模式 ───────────────────────────────────────────────────
     SettingsGroup(
       title: l10n.appearance_themeMode,
@@ -73,14 +94,16 @@ List<SettingsGroup> buildAppearanceGroups(BuildContext context) {
             final l10n = context.l10n;
 
             // 卡片预览实时反映中性/纯黑开关（透明不影响卡片预览）
-            final preview = ThemeResolver.resolve(
-              mode: currentMode,
-              neutral: themeState.neutralEnabled,
-              black: themeState.blackEnabled,
-              transparent: false,
-              seed: themeState.effectiveSeedColor,
-              variant: themeState.schemeVariant,
-            );
+            final preview = themeState.isMojian
+                ? MojianTheme.resolve(currentMode, themeState.mojianAccent)
+                : ThemeResolver.resolve(
+                    mode: currentMode,
+                    neutral: themeState.neutralEnabled,
+                    black: themeState.blackEnabled,
+                    transparent: false,
+                    seed: themeState.effectiveSeedColor,
+                    variant: themeState.schemeVariant,
+                  );
             final lightScheme = preview.light;
             final darkScheme = preview.dark;
 
@@ -142,6 +165,7 @@ List<SettingsGroup> buildAppearanceGroups(BuildContext context) {
     SettingsGroup(
       title: l10n.appearance_surfaceStyle,
       icon: Symbols.contrast_rounded,
+      visibleWhen: _classicOnly,
       items: [
         SwitchModel(
           id: 'neutral',
@@ -169,6 +193,7 @@ List<SettingsGroup> buildAppearanceGroups(BuildContext context) {
       title: l10n.appearance_customBackground,
       icon: Symbols.wallpaper_rounded,
       wrapInCard: false,
+      visibleWhen: _classicOnly,
       items: [
         CustomModel(
           id: 'customBackground',
@@ -183,6 +208,7 @@ List<SettingsGroup> buildAppearanceGroups(BuildContext context) {
       title: l10n.appearance_themeColor,
       icon: Symbols.color_lens_rounded,
       wrapInCard: false,
+      visibleWhen: _classicOnly,
       items: [
         CustomModel(
           id: 'themeColor',
@@ -357,6 +383,7 @@ List<SettingsGroup> buildAppearanceGroups(BuildContext context) {
     // ── M3E 风格 ─────────────────────────────────────────────────
     SettingsGroup(
       title: l10n.appearance_m3eStyle,
+      visibleWhen: _classicOnly,
       icon: Symbols.animation_rounded,
       items: [
         SwitchModel(
@@ -2236,5 +2263,388 @@ class _TransparentTrackShape extends RoundedRectSliderTrackShape {
     double additionalActiveTrackHeight = 0,
   }) {
     // 不绘制，让背景渐变可见
+  }
+}
+
+/// 界面风格：墨笺 / 经典两张卡；墨笺下再给出强调色。
+class _UiStyleSection extends ConsumerWidget {
+  const _UiStyleSection();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final s = ref.watch(themeProvider);
+    final notifier = ref.read(themeProvider.notifier);
+    final l10n = context.l10n;
+    final theme = Theme.of(context);
+    final brightness = theme.brightness;
+    final classic = ThemeResolver.resolve(
+      mode: s.mode,
+      neutral: s.neutralEnabled,
+      black: s.blackEnabled,
+      transparent: false,
+      seed: s.effectiveSeedColor,
+      variant: s.schemeVariant,
+    );
+    final classicScheme = brightness == Brightness.light
+        ? classic.light
+        : classic.dark;
+    String accentName(MojianAccent a) => switch (a) {
+      MojianAccent.cinnabar => l10n.appearance_accentCinnabar,
+      MojianAccent.indigo => l10n.appearance_accentIndigo,
+      MojianAccent.pine => l10n.appearance_accentPine,
+      MojianAccent.ochre => l10n.appearance_accentOchre,
+    };
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 420),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: _StyleCard(
+                  selected: s.isMojian,
+                  title: l10n.appearance_styleMojian,
+                  description: l10n.appearance_styleMojianDesc,
+                  preview: _MojianMiniPreview(
+                    tokens: MojianTokens.of(brightness, s.mojianAccent),
+                  ),
+                  onTap: () => notifier.setUiStyle(UiStyle.mojian),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _StyleCard(
+                  selected: !s.isMojian,
+                  title: l10n.appearance_styleClassic,
+                  description: l10n.appearance_styleClassicDesc,
+                  preview: _ClassicMiniPreview(scheme: classicScheme),
+                  onTap: () => notifier.setUiStyle(UiStyle.classic),
+                ),
+              ),
+            ],
+          ),
+        ),
+        if (s.isMojian) ...[
+          const SizedBox(height: 18),
+          Text(
+            l10n.appearance_mojianAccent,
+            style: theme.textTheme.labelLarge?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 20,
+            runSpacing: 12,
+            children: [
+              for (final a in MojianAccent.values)
+                _AccentChoice(
+                  color: a.of(brightness),
+                  label: accentName(a),
+                  selected: s.mojianAccent == a,
+                  onTap: () => notifier.setMojianAccent(a),
+                ),
+            ],
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _StyleCard extends StatelessWidget {
+  const _StyleCard({
+    required this.selected,
+    required this.title,
+    required this.description,
+    required this.preview,
+    required this.onTap,
+  });
+
+  final bool selected;
+  final String title;
+  final String description;
+  final Widget preview;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    return Semantics(
+      button: true,
+      selected: selected,
+      child: GestureDetector(
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 250),
+          curve: Curves.easeOutCubic,
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: cs.surfaceContainerLow,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: selected ? cs.onSurface : cs.outlineVariant,
+              width: selected ? 1.6 : 1,
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: SizedBox(
+                  height: 92,
+                  width: double.infinity,
+                  child: preview,
+                ),
+              ),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      title,
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  if (selected)
+                    Icon(
+                      Symbols.check_circle_rounded,
+                      size: 18,
+                      fill: 1,
+                      color: cs.onSurface,
+                    ),
+                ],
+              ),
+              const SizedBox(height: 2),
+              Text(
+                description,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: cs.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 墨笺的迷你预览：报头双线 + 两行宋体标题，细线分隔，强调色只出现在未读点上。
+class _MojianMiniPreview extends StatelessWidget {
+  const _MojianMiniPreview({required this.tokens});
+
+  final MojianTokens tokens;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = tokens;
+    TextStyle serif(double size) => TextStyle(
+      fontFamily: MojianTokens.serifFamily,
+      fontWeight: FontWeight.w600,
+      fontSize: size,
+      height: 1.2,
+      color: t.ink,
+    );
+    Widget bar(double w) => FractionallySizedBox(
+      widthFactor: w,
+      child: Container(height: 3, color: t.ink4.withValues(alpha: 0.5)),
+    );
+    return Container(
+      color: t.paper,
+      padding: const EdgeInsets.fromLTRB(9, 8, 9, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 8,
+                height: 8,
+                decoration: BoxDecoration(
+                  color: t.accent,
+                  borderRadius: BorderRadius.circular(1.5),
+                ),
+              ),
+              const SizedBox(width: 4),
+              Text(
+                'cfluxdo',
+                style: serif(9).copyWith(fontWeight: FontWeight.w700),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Container(height: 1, color: t.ink),
+          const SizedBox(height: 1.5),
+          Container(height: 0.6, color: t.ruleStrong),
+          const SizedBox(height: 7),
+          Row(
+            children: [
+              Container(
+                width: 4,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: t.accent,
+                  shape: BoxShape.circle,
+                ),
+              ),
+              const SizedBox(width: 3),
+              Expanded(
+                child: Text(
+                  '择一而读，慢慢读',
+                  maxLines: 1,
+                  overflow: TextOverflow.clip,
+                  style: serif(8.5),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          bar(0.7),
+          const SizedBox(height: 7),
+          Container(height: 0.6, color: t.rule),
+          const SizedBox(height: 7),
+          Text(
+            '细线代替卡片',
+            maxLines: 1,
+            overflow: TextOverflow.clip,
+            style: serif(8.5),
+          ),
+          const SizedBox(height: 4),
+          bar(0.45),
+        ],
+      ),
+    );
+  }
+}
+
+/// 经典风格的迷你预览：顶栏色块 + 圆角卡片 + 主题色按钮。
+class _ClassicMiniPreview extends StatelessWidget {
+  const _ClassicMiniPreview({required this.scheme});
+
+  final ColorScheme scheme;
+
+  @override
+  Widget build(BuildContext context) {
+    Widget card(double w) => Container(
+      height: 20,
+      padding: const EdgeInsets.symmetric(horizontal: 6),
+      alignment: Alignment.centerLeft,
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHigh,
+        borderRadius: BorderRadius.circular(5),
+      ),
+      child: FractionallySizedBox(
+        widthFactor: w,
+        child: Container(
+          height: 4,
+          decoration: BoxDecoration(
+            color: scheme.onSurface.withValues(alpha: 0.35),
+            borderRadius: BorderRadius.circular(2),
+          ),
+        ),
+      ),
+    );
+    return Container(
+      color: scheme.surface,
+      padding: const EdgeInsets.all(7),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            height: 12,
+            decoration: BoxDecoration(
+              color: scheme.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(4),
+            ),
+          ),
+          const SizedBox(height: 6),
+          card(0.75),
+          const SizedBox(height: 5),
+          card(0.5),
+          const Spacer(),
+          Align(
+            alignment: Alignment.centerRight,
+            child: Container(
+              width: 22,
+              height: 10,
+              decoration: BoxDecoration(
+                color: scheme.primary,
+                borderRadius: BorderRadius.circular(5),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AccentChoice extends StatelessWidget {
+  const _AccentChoice({
+    required this.color,
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final Color color;
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: label,
+      child: GestureDetector(
+        onTap: onTap,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              width: 34,
+              height: 34,
+              padding: const EdgeInsets.all(3),
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: selected ? cs.onSurface : Colors.transparent,
+                  width: 1.6,
+                ),
+              ),
+              child: DecoratedBox(
+                decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+                child: selected
+                    ? Icon(Symbols.check_rounded, size: 16, color: cs.surface)
+                    : null,
+              ),
+            ),
+            const SizedBox(height: 5),
+            Text(
+              label,
+              style: theme.textTheme.labelMedium?.copyWith(
+                color: selected ? cs.onSurface : cs.onSurfaceVariant,
+                fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
