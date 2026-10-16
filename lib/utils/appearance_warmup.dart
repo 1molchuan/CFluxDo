@@ -15,7 +15,9 @@ import 'seed_color_scheme.dart';
 ///    读取并解析 asset 字体发生在首次匹配该 family 时。字体分组里那行
 ///    `TextStyle(fontFamily: 'MiSans')` 是用户未选 MiSans 时全 App 唯一的
 ///    MiSans 用点，于是 19MB 可变字体的读取与 typeface 创建全落在这一帧，
-///    实测约 35ms。
+///    实测约 35ms。用户自选字体同根：字体分组第三行用它的 family 渲染预览，
+///    未选中该字体时全 App 只有这一处用它。系统已安装字体（同样在字体分组里
+///    用自身 family 渲染预览）同理，只是加载走平台字体管理器。
 /// 2. **色卡网格的种子配色计算** — 原因见 [SeedColorScheme]。
 ///
 /// 预热挂在进入设置页时：此时界面静止，且用户还要再点一次才进外观页，
@@ -51,7 +53,16 @@ class AppearanceWarmup {
     void queue(void Function() task) =>
         scheduler.scheduleTask(task, Priority.idle);
 
-    queue(_warmUpMiSansTypeface);
+    queue(() => _warmUpTypeface('MiSans'));
+    final customFamily = themeState.customFontFamilyName;
+    if (customFamily != null) {
+      queue(() => _warmUpTypeface(customFamily));
+    }
+    // 系统已安装字体：字体分组那行同样会用它自己的 family 渲染预览
+    final installedFamily = themeState.installedFontFamily;
+    if (installedFamily != null) {
+      queue(() => _warmUpTypeface(installedFamily));
+    }
     // 墨笺风格下外观页不显示色卡与配色风格卡，主题模式卡用墨笺固定配色；
     // 只有「经典」风格卡的预览要用当前种子算亮/暗两套
     if (themeState.isMojian) {
@@ -115,12 +126,12 @@ class AppearanceWarmup {
     }
   }
 
-  /// 排版一次 MiSans 文本，触发字体 asset 的读取与 typeface 创建。
-  static void _warmUpMiSansTypeface() {
+  /// 排版一次该 family 的文本，触发字体读取与 typeface 创建。
+  static void _warmUpTypeface(String family) {
     TextPainter(
-        text: const TextSpan(
-          text: 'MiSans',
-          style: TextStyle(fontFamily: 'MiSans'),
+        text: TextSpan(
+          text: family,
+          style: TextStyle(fontFamily: family),
         ),
         textDirection: TextDirection.ltr,
       )

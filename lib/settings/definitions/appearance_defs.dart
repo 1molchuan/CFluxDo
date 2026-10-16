@@ -19,6 +19,8 @@ import '../../providers/locale_provider.dart';
 import '../../providers/preferences_provider.dart';
 import '../../providers/theme_provider.dart';
 import '../../services/app_background_service.dart';
+import '../../services/custom_font_service.dart';
+import '../../services/fonts/system_font_service.dart';
 import '../../services/toast_service.dart';
 import '../../theme/app_background.dart';
 import '../../theme/app_palettes.dart';
@@ -305,39 +307,7 @@ List<SettingsGroup> buildAppearanceGroups(BuildContext context) {
         CustomModel(
           id: 'font',
           title: l10n.appearance_font,
-          builder: (context, ref) {
-            final fontFamily = ref.watch(
-              themeProvider.select((s) => s.fontFamily),
-            );
-            final l10n = context.l10n;
-            final options = <(String, AppFontFamily)>[
-              (l10n.appearance_fontSystem, AppFontFamily.system),
-              ('MiSans', AppFontFamily.miSans),
-            ];
-
-            return RadioGroup<AppFontFamily>(
-              groupValue: fontFamily,
-              onChanged: (value) {
-                if (value != null) {
-                  ref.read(themeProvider.notifier).setFontFamily(value);
-                }
-              },
-              child: Column(
-                children: [
-                  for (final (label, ff) in options)
-                    RadioListTile<AppFontFamily>(
-                      title: Text(
-                        label,
-                        style: ff == AppFontFamily.miSans
-                            ? const TextStyle(fontFamily: 'MiSans')
-                            : null,
-                      ),
-                      value: ff,
-                    ),
-                ],
-              ),
-            );
-          },
+          builder: (context, ref) => const _FontSection(),
         ),
       ],
     ),
@@ -1262,6 +1232,364 @@ class _SplitThemePreviewPainter extends CustomPainter {
   bool shouldRepaint(covariant _SplitThemePreviewPainter oldDelegate) {
     return oldDelegate.lightScheme != lightScheme ||
         oldDelegate.darkScheme != darkScheme;
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════
+// 字体：系统默认 / 内置 MiSans / 用户自选字体文件
+// ══════════════════════════════════════════════════════════════════
+
+/// 字体选择。自选字体依赖一份本地字体文件（ttf/otf）：选中该项而尚未导入
+/// 文件时先拉起文件选择器，取消则保持原选择；导入的字体无法被引擎接受时
+/// 删掉刚拷进来的文件并提示，不改当前字体。
+class _FontSection extends ConsumerWidget {
+  const _FontSection();
+
+  /// 导入 → 注册进引擎 → 落状态。任一步失败都不改变当前选择。
+  Future<void> _pickCustomFont(BuildContext context, WidgetRef ref) async {
+    final l10n = context.l10n;
+    final imported = await CustomFontService.pickAndImport();
+    if (imported == null) return; // 用户取消
+
+    final loaded = await CustomFontService.load(imported.path);
+    if (!loaded) {
+      await CustomFontService.delete(imported.path);
+      if (context.mounted) {
+        ToastService.showError(l10n.appearance_fontCustomLoadFailed);
+      }
+      return;
+    }
+
+    final notifier = ref.read(themeProvider.notifier);
+    final oldPath = ref.read(themeProvider).customFontPath;
+    await notifier.setCustomFont(path: imported.path, name: imported.name);
+    // 旧文件异步清理，失败也无碍
+    unawaited(CustomFontService.delete(oldPath));
+  }
+
+  /// 打开系统字体选择面板（列表来自系统已安装字体）。用户取消则不改选择。
+  Future<void> _pickInstalledFont(BuildContext context, WidgetRef ref) async {
+    final l10n = context.l10n;
+    // 中文界面优先展示本地化名（微软雅黑），其它语言用引擎匹配名
+    final localized = Localizations.localeOf(context).languageCode == 'zh';
+    final notifier = ref.read(themeProvider.notifier);
+    final picked = await AppBottomSheet.showDraggable<SystemFont>(
+      context: context,
+      title: l10n.appearance_fontInstalledPick,
+      bodyBuilder: (context, scrollController) => _SystemFontPickerSheet(
+        scrollController: scrollController,
+        selected: ref.read(themeProvider).installedFontFamily,
+      ),
+    );
+    if (picked == null) return;
+    await notifier.setInstalledFont(
+      family: picked.family,
+      name: picked.label(localized: localized),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    final l10n = context.l10n;
+    final state = ref.watch(themeProvider);
+    final customPath = state.customFontPath;
+    final customExists = customPath != null && File(customPath).existsSync();
+    final installedFamily = state.installedFontFamily;
+    final hintStyle = theme.textTheme.bodySmall?.copyWith(
+      color: cs.onSurfaceVariant,
+    );
+
+    // 每项的标签都用该字体自身的 family 渲染（未选中也生效，先看到效果）
+    final customFamily = state.customFontFamilyName;
+    final options = <(String, AppFontFamily, String?)>[
+      (l10n.appearance_fontSystem, AppFontFamily.system, null),
+      ('MiSans', AppFontFamily.miSans, 'MiSans'),
+      (l10n.appearance_fontInstalled, AppFontFamily.installed, installedFamily),
+      (l10n.appearance_fontCustom, AppFontFamily.custom, customFamily),
+    ];
+
+    return RadioGroup<AppFontFamily>(
+      groupValue: state.fontFamily,
+      onChanged: (value) {
+        if (value == null) return;
+        // 还没选过字体就把选择入口先拉起来，取消则保持原选择
+        if (value == AppFontFamily.custom && !customExists) {
+          unawaited(_pickCustomFont(context, ref));
+          return;
+        }
+        if (value == AppFontFamily.installed && installedFamily == null) {
+          unawaited(_pickInstalledFont(context, ref));
+          return;
+        }
+        ref.read(themeProvider.notifier).setFontFamily(value);
+      },
+      child: Column(
+        children: [
+          for (final (label, family, previewFamily) in options)
+            RadioListTile<AppFontFamily>(
+              title: Text(
+                label,
+                style: previewFamily == null
+                    ? null
+                    : TextStyle(fontFamily: previewFamily),
+              ),
+              subtitle: switch (family) {
+                AppFontFamily.custom when customPath == null => Text(
+                  l10n.appearance_fontCustomHint,
+                  style: hintStyle,
+                ),
+                AppFontFamily.installed when installedFamily == null => Text(
+                  l10n.appearance_fontInstalledHint,
+                  style: hintStyle,
+                ),
+                _ => null,
+              },
+              value: family,
+            ),
+          if (installedFamily != null) ...[
+            const SizedBox(height: 4),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: Row(
+                children: [
+                  Icon(
+                    Symbols.text_fields_rounded,
+                    size: 20,
+                    color: cs.primary,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      state.installedFontName ?? installedFamily,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        fontFamily: installedFamily,
+                      ),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: () => _pickInstalledFont(context, ref),
+                    child: Text(l10n.appearance_fontInstalledChange),
+                  ),
+                ],
+              ),
+            ),
+          ],
+          if (customPath != null) ...[
+            const SizedBox(height: 4),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: Row(
+                children: [
+                  Icon(
+                    Symbols.font_download_rounded,
+                    size: 20,
+                    color: customExists ? cs.primary : cs.error,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      customExists
+                          ? state.customFontName ?? l10n.appearance_fontCustom
+                          : l10n.appearance_fontCustomMissing,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: customExists ? cs.onSurface : cs.error,
+                      ),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: () => _pickCustomFont(context, ref),
+                    child: Text(l10n.appearance_fontCustomChange),
+                  ),
+                  TextButton(
+                    onPressed: () =>
+                        ref.read(themeProvider.notifier).removeCustomFont(),
+                    child: Text(l10n.appearance_fontCustomRemove),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════
+// 系统字体选择面板
+// ══════════════════════════════════════════════════════════════════
+
+/// 系统已安装字体的选择面板：搜索框 + 列表，每行用该字体自身的 family 渲染
+/// 标签做预览（滚动时才 build 到的那几行才会触发系统字体加载）。
+///
+/// 外壳走 [AppBottomSheet.showDraggable]：面板带搜索框，高度必须交给
+/// DraggableScrollableSheet 托管（与 sticker_market_sheet 同款理由），键盘
+/// 内边距由列表自己加。
+class _SystemFontPickerSheet extends StatefulWidget {
+  const _SystemFontPickerSheet({
+    required this.scrollController,
+    required this.selected,
+  });
+
+  /// 由 DraggableScrollableSheet 提供，必须交给列表才能联动拖拽缩放。
+  final ScrollController scrollController;
+
+  /// 当前生效的 family，用于打勾。
+  final String? selected;
+
+  @override
+  State<_SystemFontPickerSheet> createState() => _SystemFontPickerSheetState();
+}
+
+class _SystemFontPickerSheetState extends State<_SystemFontPickerSheet> {
+  /// 首次进入面板时枚举（后台 isolate，第二次起走内存缓存）
+  late final Future<List<SystemFont>> _fonts = SystemFontService.list();
+
+  final TextEditingController _searchController = TextEditingController();
+  String _query = '';
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  List<SystemFont> _filtered(List<SystemFont> fonts) {
+    final query = _query.trim().toLowerCase();
+    if (query.isEmpty) return fonts;
+    // 中英文名都参与匹配：搜「微软」和搜「yahei」都能命中
+    return [
+      for (final font in fonts)
+        if (font.family.toLowerCase().contains(query) ||
+            (font.localizedFamily?.toLowerCase().contains(query) ?? false))
+          font,
+    ];
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final l10n = context.l10n;
+    final localized = Localizations.localeOf(context).languageCode == 'zh';
+
+    return FutureBuilder<List<SystemFont>>(
+      future: _fonts,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const Center(child: LoadingSpinner());
+        }
+        final fonts = snapshot.data ?? const <SystemFont>[];
+        if (fonts.isEmpty) {
+          return Center(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Text(
+                l10n.appearance_fontInstalledEmpty,
+                textAlign: TextAlign.center,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+          );
+        }
+
+        final filtered = _filtered(fonts);
+        return Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+              child: TextField(
+                controller: _searchController,
+                textInputAction: TextInputAction.search,
+                onChanged: (value) => setState(() => _query = value),
+                style: const TextStyle(fontSize: 14),
+                decoration: InputDecoration(
+                  isDense: true,
+                  hintText: l10n.appearance_fontInstalledSearch,
+                  hintStyle: TextStyle(
+                    color: theme.colorScheme.onSurfaceVariant,
+                    fontSize: 14,
+                  ),
+                  prefixIcon: const Icon(Symbols.search_rounded, size: 18),
+                  suffixIcon: _query.isEmpty
+                      ? null
+                      : IconButton(
+                          visualDensity: VisualDensity.compact,
+                          icon: const Icon(Symbols.close_rounded, size: 16),
+                          onPressed: () {
+                            _searchController.clear();
+                            setState(() => _query = '');
+                          },
+                        ),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: BorderSide(
+                      color: theme.colorScheme.outlineVariant,
+                    ),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: BorderSide(
+                      color: theme.colorScheme.outlineVariant,
+                    ),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: BorderSide(color: theme.colorScheme.primary),
+                  ),
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
+                  ),
+                ),
+              ),
+            ),
+            Expanded(
+              child: filtered.isEmpty
+                  ? Center(
+                      child: Text(
+                        l10n.appearance_fontInstalledSearchEmpty,
+                        style: TextStyle(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    )
+                  : ListView.builder(
+                      controller: widget.scrollController,
+                      // 外壳不叠加键盘内边距，键盘弹出时底部由列表自己让位
+                      padding: EdgeInsets.only(
+                        top: 4,
+                        bottom: 8 + MediaQuery.viewInsetsOf(context).bottom,
+                      ),
+                      itemCount: filtered.length,
+                      itemBuilder: (context, index) {
+                        final font = filtered[index];
+                        final isSelected = font.family == widget.selected;
+                        return ListTile(
+                          title: Text(
+                            font.label(localized: localized),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(fontFamily: font.family),
+                          ),
+                          trailing: isSelected
+                              ? Icon(
+                                  Symbols.check_rounded,
+                                  color: theme.colorScheme.primary,
+                                )
+                              : null,
+                          onTap: () => Navigator.of(context).pop(font),
+                        );
+                      },
+                    ),
+            ),
+          ],
+        );
+      },
+    );
   }
 }
 

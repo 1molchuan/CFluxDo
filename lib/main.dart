@@ -37,6 +37,7 @@ import 'services/network/cookie/cookie_devtools_extension.dart';
 import 'services/network/cookie/cookie_jar_service.dart';
 import 'services/network/cookie/cookie_store_observer.dart';
 import 'services/local_notification_service.dart';
+import 'services/custom_font_service.dart';
 import 'services/data_management/cache_size_service.dart';
 import 'services/discourse_cache_manager.dart';
 import 'services/linux_webview_render_service.dart';
@@ -319,6 +320,10 @@ Future<void> main(List<String> args) async {
   AppStartup.instance.storesReady();
   await AuthIssueNoticeService.instance.initialize(prefs);
 
+  // 自选字体（用户导入的 ttf/otf）必须在首帧前注册进引擎，否则首帧按默认字体
+  // 排版、字体切换可见。读盘与注册跟下面那批初始化并行跑，await 放到 runApp 之前。
+  final customFontLoad = CustomFontService.loadSaved(prefs);
+
   // release 下按设置开关启用性能监控(debug/profile 已在上方无条件启用)
   if (kReleaseMode && (prefs.getBool(FrameJankMonitor.prefKey) ?? false)) {
     FrameJankMonitor.start();
@@ -538,6 +543,8 @@ Future<void> main(List<String> args) async {
         AppLogger.info(message, tag: tag);
     }
   };
+
+  await customFontLoad;
 
   Catcher2(
     navigatorKey: navigatorKey,

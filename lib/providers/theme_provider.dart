@@ -9,6 +9,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../services/custom_font_service.dart';
+import '../services/fonts/system_font_service.dart';
 import '../theme/accent_colors.dart';
 import '../theme/app_background.dart';
 import '../theme/app_palettes.dart';
@@ -21,6 +23,12 @@ enum AppFontFamily {
 
   /// 内置 MiSans 字体
   miSans,
+
+  /// 系统已安装的具体字体（见 SystemFontService）
+  installed,
+
+  /// 用户自选的字体文件（见 CustomFontService）
+  custom,
 }
 
 /// 强调色来源。
@@ -73,6 +81,21 @@ class ThemeState {
 
   final AppFontFamily fontFamily;
 
+  /// 自选字体文件路径（fontFamily == custom 时生效；文件在应用私有目录内）
+  final String? customFontPath;
+
+  /// 自选字体的原始文件名，仅用于界面展示
+  final String? customFontName;
+
+  /// 选中的系统字体 family（fontFamily == installed 时生效）
+  ///
+  /// 该名字由 [SystemFontService] 从系统字体里枚举出来，直接交给引擎按名
+  /// 匹配；字体被卸载后引擎静默回落默认字体。
+  final String? installedFontFamily;
+
+  /// 选中的系统字体展示名（中文界面为本地化名，可能等于 family）
+  final String? installedFontName;
+
   /// M3E 组件风格总开关（加载动画/进度条/滑块/按钮形变/下拉刷新）
   final bool m3eEnabled;
 
@@ -101,6 +124,10 @@ class ThemeState {
     this.customColors = const [],
     this.dynamicPrimary,
     this.fontFamily = AppFontFamily.system,
+    this.customFontPath,
+    this.customFontName,
+    this.installedFontFamily,
+    this.installedFontName,
     this.m3eEnabled = true,
     this.background = const AppBackground(),
     this.uiStyle = UiStyle.mojian,
@@ -128,11 +155,23 @@ class ThemeState {
     AccentSource.custom => seedColor,
   };
 
+  /// 自选字体的 family 名（由文件路径推出）；未选文件时为 null。
+  ///
+  /// 该 family 由 CustomFontService 在启动或导入时注册进引擎；文件丢失导致
+  /// 注册失败时无人认领，渲染回落到默认字体。
+  String? get customFontFamilyName => customFontPath == null
+      ? null
+      : CustomFontService.familyNameFor(customFontPath!);
+
   /// 获取实际用于 ThemeData 的 fontFamily 字符串
   String? get fontFamilyName {
     switch (fontFamily) {
       case AppFontFamily.miSans:
         return 'MiSans';
+      case AppFontFamily.installed:
+        return installedFontFamily;
+      case AppFontFamily.custom:
+        return customFontFamilyName;
       case AppFontFamily.system:
         return null;
     }
@@ -150,6 +189,13 @@ class ThemeState {
     List<Color>? customColors,
     Color? dynamicPrimary,
     AppFontFamily? fontFamily,
+    String? customFontPath,
+    String? customFontName,
+    String? installedFontFamily,
+    String? installedFontName,
+
+    // 显式清空自选字体（copyWith 的 null 表示「不改」）
+    bool clearCustomFont = false,
     bool? m3eEnabled,
     AppBackground? background,
     UiStyle? uiStyle,
@@ -168,6 +214,14 @@ class ThemeState {
       customColors: customColors ?? this.customColors,
       dynamicPrimary: dynamicPrimary ?? this.dynamicPrimary,
       fontFamily: fontFamily ?? this.fontFamily,
+      customFontPath: clearCustomFont
+          ? null
+          : customFontPath ?? this.customFontPath,
+      customFontName: clearCustomFont
+          ? null
+          : customFontName ?? this.customFontName,
+      installedFontFamily: installedFontFamily ?? this.installedFontFamily,
+      installedFontName: installedFontName ?? this.installedFontName,
       m3eEnabled: m3eEnabled ?? this.m3eEnabled,
       background: background ?? this.background,
       uiStyle: uiStyle ?? this.uiStyle,
@@ -302,10 +356,20 @@ class ThemeNotifier extends StateNotifier<ThemeState> {
 
     // Load Font Family
     final savedFontFamily = prefs.getString(_fontFamilyKey);
+    final installedFontFamily = prefs.getString(SystemFontService.familyPrefKey);
+    final installedFontName = prefs.getString(SystemFontService.namePrefKey);
     AppFontFamily fontFamily = AppFontFamily.system;
     if (savedFontFamily == 'miSans') {
       fontFamily = AppFontFamily.miSans;
+    } else if (savedFontFamily == 'custom') {
+      fontFamily = AppFontFamily.custom;
+    } else if (savedFontFamily == 'installed' && installedFontFamily != null) {
+      // family 记录缺失（旧备份/手改 prefs）时回落系统默认，
+      // 否则选中项与生效字体对不上：界面显示「已选某某」而实际是默认字体
+      fontFamily = AppFontFamily.installed;
     }
+    final customFontPath = prefs.getString(CustomFontService.pathPrefKey);
+    final customFontName = prefs.getString(CustomFontService.namePrefKey);
 
     // ── 透明模式与背景配置 ──
     final background = AppBackground(
@@ -328,6 +392,10 @@ class ThemeNotifier extends StateNotifier<ThemeState> {
       schemeVariant: schemeVariant,
       customColors: customColors,
       fontFamily: fontFamily,
+      customFontPath: customFontPath,
+      customFontName: customFontName,
+      installedFontFamily: installedFontFamily,
+      installedFontName: installedFontName,
       m3eEnabled: prefs.getBool(_m3eEnabledKey) ?? true,
       background: background,
       uiStyle:
@@ -482,9 +550,59 @@ class ThemeNotifier extends StateNotifier<ThemeState> {
     switch (fontFamily) {
       case AppFontFamily.miSans:
         await _prefs.setString(_fontFamilyKey, 'miSans');
+      case AppFontFamily.installed:
+        await _prefs.setString(_fontFamilyKey, 'installed');
+      case AppFontFamily.custom:
+        await _prefs.setString(_fontFamilyKey, 'custom');
       case AppFontFamily.system:
         await _prefs.setString(_fontFamilyKey, 'system');
     }
+  }
+
+  /// 应用选中的系统字体（family 由 [SystemFontService] 枚举得到）。
+  Future<void> setInstalledFont({
+    required String family,
+    required String name,
+  }) async {
+    state = state.copyWith(
+      fontFamily: AppFontFamily.installed,
+      installedFontFamily: family,
+      installedFontName: name,
+    );
+    await _prefs.setString(_fontFamilyKey, 'installed');
+    await _prefs.setString(SystemFontService.familyPrefKey, family);
+    await _prefs.setString(SystemFontService.namePrefKey, name);
+  }
+
+  /// 应用用户自选的字体文件（调用前须已由 CustomFontService 导入并注册）。
+  Future<void> setCustomFont({
+    required String path,
+    required String name,
+  }) async {
+    state = state.copyWith(
+      fontFamily: AppFontFamily.custom,
+      customFontPath: path,
+      customFontName: name,
+    );
+    await _prefs.setString(_fontFamilyKey, 'custom');
+    await _prefs.setString(CustomFontService.pathPrefKey, path);
+    await _prefs.setString(CustomFontService.namePrefKey, name);
+  }
+
+  /// 移除自选字体：删掉字体文件与记录；当前用的就是它时回退系统默认。
+  Future<void> removeCustomFont() async {
+    final oldPath = state.customFontPath;
+    final wasActive = state.fontFamily == AppFontFamily.custom;
+    state = state.copyWith(
+      fontFamily: wasActive ? AppFontFamily.system : state.fontFamily,
+      clearCustomFont: true,
+    );
+    if (wasActive) {
+      await _prefs.setString(_fontFamilyKey, 'system');
+    }
+    await _prefs.remove(CustomFontService.pathPrefKey);
+    await _prefs.remove(CustomFontService.namePrefKey);
+    await CustomFontService.delete(oldPath);
   }
 }
 
