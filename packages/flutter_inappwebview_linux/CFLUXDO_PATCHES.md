@@ -13,4 +13,11 @@
    CF 签发的 `cf_clearance`，而 App 只让 `cf_clearance` 从 WebView 流向本地 jar，结果每次冷启动
    都要重新过人机验证。
 
+4. `InAppWebView::OnWpePlatformBufferRendered`（WPEPlatform 路径）：原版不管走哪条渲染路径，都把
+   当前 `WPEBuffer` 的裸指针（不加引用）留到下一帧才 `wpe_view_buffer_released`。软件渲染（SHM）下
+   WebKit 重建交换链会先销毁旧缓冲区，下一帧 `WPE_IS_BUFFER(previous_buffer)` 读到野指针，Flatpak
+   （GNOME 48 + WPE 2.48.7 带 WPEPlatform）启动一两秒内稳定 SIGSEGV。改成：SHM / 通用像素导入已经
+   拷走像素，当帧就还；只有 EGL 零拷贝路径留到下一帧，并且持有一个引用。上游 fluxdo 450c00ef 也做了
+   同样的「只有 EGL 路径保留」。
+
 升级插件版本时逐条核对上面的改动是否还需要。

@@ -464,7 +464,8 @@ InAppWebView::~InAppWebView() {
     if (current_buffer_ != nullptr && wpe_view_ != nullptr) {
       wpe_view_buffer_released(wpe_view_, current_buffer_);
     }
-    current_buffer_ = nullptr;
+    // cfluxdo: 留到下一帧的缓冲区持有一个引用（见 OnWpePlatformBufferRendered）
+    g_clear_object(&current_buffer_);
     current_buffer_width_ = 0;
     current_buffer_height_ = 0;
   }
@@ -1251,7 +1252,11 @@ void InAppWebView::OnWpePlatformBufferRendered(WPEBuffer* buffer) {
   
   WPEBuffer* previous_buffer = nullptr;
   bool buffer_handled = false;
-  
+  // cfluxdo: 只有 EGL 零拷贝路径要把缓冲区留到下一帧；SHM / 通用像素导入已经把像素拷走了。
+  // 原版无论哪条路径都存一个不加引用的裸指针到下一帧再释放，软件渲染下 WebKit 重建交换链
+  // （比如尺寸变化）会先把旧 WPEBuffer 销毁，下一帧再碰它就是 use-after-free（Flatpak 里稳定崩）。
+  bool keep_buffer_until_next_frame = false;
+
   // Track EGL import failures to avoid repeated attempts
   // Static because if EGL fails once, it will likely keep failing (e.g., no GPU)
   static bool egl_import_failed_permanently = false;
@@ -1293,6 +1298,7 @@ void InAppWebView::OnWpePlatformBufferRendered(WPEBuffer* buffer) {
         current_buffer_width_ = buf_width;
         current_buffer_height_ = buf_height;
         buffer_handled = true;
+        keep_buffer_until_next_frame = true;
       } else {
         // Mark EGL as permanently failed so we don't keep trying
         // This is common in VMs or software-only environments
@@ -1406,16 +1412,25 @@ void InAppWebView::OnWpePlatformBufferRendered(WPEBuffer* buffer) {
     
     // Store reference to current buffer - we keep it until the NEXT frame arrives
     // This ensures the EGL image's backing DMA-BUF memory stays valid
-    current_buffer_ = buffer;
+    current_buffer_ = keep_buffer_until_next_frame
+        ? static_cast<WPEBuffer*>(g_object_ref(buffer)) : nullptr;
   }
-  
+
+  // cfluxdo: 像素已拷走（或没法显示）的缓冲区当帧就还给 WPE
+  if (!keep_buffer_until_next_frame && wpe_view_ != nullptr) {
+    wpe_view_buffer_released(wpe_view_, buffer);
+  }
+
   // Release the PREVIOUS buffer now that we have a new one
   // The previous EGL image has been destroyed and we have a new frame,
   // so it's safe to let WPE reuse the old buffer's memory
-  if (previous_buffer != nullptr && wpe_view_ != nullptr && WPE_IS_BUFFER(previous_buffer)) {
-    wpe_view_buffer_released(wpe_view_, previous_buffer);
+  if (previous_buffer != nullptr) {
+    if (wpe_view_ != nullptr) {
+      wpe_view_buffer_released(wpe_view_, previous_buffer);
+    }
+    g_object_unref(previous_buffer);
   }
-  
+
   if (buffer_handled && on_frame_available_) {
     on_frame_available_();
   }
