@@ -1,6 +1,6 @@
 # cfluxdo Linux 桌面端设计（草案，2026-10-15 夜）
 
-> 状态：设计 + 可行性验证。代码都在本地分支 `desktop/linux`（主仓库 7 个提交，含本文；子模块 `core/doh_proxy` 本地分支 `desktop/linux` 1 个提交），**没有推送、没有发布**，`cfluxdo` / `main` 分支没动。
+> 状态：设计 + 可行性验证。代码都在本地分支 `desktop/linux`（主仓库 9 个提交，含本文；子模块 `core/doh_proxy` 本地分支 `desktop/linux` 1 个提交），**没有推送、没有发布**，`cfluxdo` / `main` 分支没动。
 > 下面每条决定都写了理由和「什么情况下推翻」，不同意的直接划掉。
 
 ## 0. 结论
@@ -25,6 +25,23 @@
 - **启动卡死。** 没有系统 D-Bus 时，`connectivity_plus` 把错误抛在内部订阅里，`checkConnectivity()` 永远不返回，`main()` 卡在 `runApp` 之前，窗口一直是黑的。
 - **数据目录不对。** `getApplicationDocumentsDirectory()` 在 Linux 上是用户的「文档」文件夹，没配 XDG 用户目录时还会直接抛异常，结果 Cookie 罐、数据库和日志都起不来。
 - **窗口不显示。** 上游的 runner 要等 `window_manager` 在 Dart 侧显示窗口，cfluxdo 已经去掉了这个依赖，窗口就永远不出来。
+
+### 1.1 2026-10-16 登录实测（出口走用户 Mac，`loc=CN`，直连 linux.do 会被掐断）
+
+环境：App 以独立用户运行，TCP 经 redsocks 转到用户 Mac 的网络出口；画面经 VNC 映射到 Mac，有 gnome-keyring。
+
+| 项目 | 结果 |
+|---|---|
+| 国内出口连 linux.do | ECH Accepted，本地优选正常 |
+| 登录页（内置浏览器）| CF 验证、hCaptcha 拼图都能正常显示和操作；用邮箱一次性代码登录成功 |
+| 登录完成检测 | ❌→已修：验证码登录成功后 Discourse 只在页面内切换路由，WPE 不上报，页面停在网页上，手动刷新才能检测到。改为 Linux 上每 2 秒检查一次（未用新登录复测） |
+| 冷启动 | ❌→已修：WPE 默认不把 Cookie 写盘，重启后 WebView 里没有 `cf_clearance`（App 只让它从 WebView 流向 jar），每次冷启动都弹人机验证。插件补丁 3 让 WebView Cookie 持久化，修后连续冷启动 2 次都不弹验证，登录保持 |
+| `_t` 轮换 | 挂机 17 分钟没有请求就不轮换；第一次请求就轮换，jar 与 WebView 磁盘上的值一致；轮换后冷启动登录保持 |
+| 登录后页面 | 通知、个人页、书签、内置浏览器（已登录态）都正常 |
+| 密钥环 | gnome-keyring 解锁时不再出现 `KeyringLocked`（空口令建不出 login 密钥环，测试用非空口令） |
+| 加速授权 | 冷启动弹出「开启 cfluxdo 加速」，选了「暂不」（授权会占用设备名额） |
+
+新发现、未处理：书签列表里个别用户名显示成方框（字体缺字，Flatpak 里要核对字体回退）；WebView 里 CF 会悄悄换发新的 `cf_clearance`，jar 里还是旧的（旧的仍有效）。
 
 ## 2. 总体结构
 
