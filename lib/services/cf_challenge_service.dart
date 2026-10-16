@@ -953,6 +953,12 @@ class _CfChallengePageState extends State<CfChallengePage> {
   Timer? _noChallengeCheckTimer;
   Timer? _loadStopFallbackTimer;
   Timer? _pageReadyFallbackTimer;
+
+  /// 后台验证的「正在自动验证」胶囊是否已露出。多数非交互挑战一两秒就过，
+  /// 这时不打扰用户；过了 [_backgroundPillDelay] 还在验证才显示。
+  bool _pillVisible = false;
+  Timer? _pillDelayTimer;
+  static const _backgroundPillDelay = Duration(seconds: 2);
   static const _backgroundMaxCheckCount = 10;
   static const _foregroundMaxCheckCount = 60;
   static const _noChallengeCheckDelay = Duration(milliseconds: 1200);
@@ -974,6 +980,16 @@ class _CfChallengePageState extends State<CfChallengePage> {
   void initState() {
     super.initState();
     _isBackground = widget.startInBackground;
+    if (_isBackground) {
+      _pillDelayTimer = Timer(_backgroundPillDelay, () {
+        if (!mounted || !_isBackground || _handedOff) return;
+        CfChallengeLogger.log(
+          '[VERIFY] Background verify still running after '
+          '${_backgroundPillDelay.inSeconds}s, showing pill',
+        );
+        setState(() => _pillVisible = true);
+      });
+    }
     _needsManualAttention = false;
     _snapshotInitialClearance();
     widget.signals.attachReader(_readFreshClearance);
@@ -1019,6 +1035,7 @@ class _CfChallengePageState extends State<CfChallengePage> {
   @override
   void dispose() {
     widget.signals.attachReader(null);
+    _pillDelayTimer?.cancel();
     _timeoutTimer?.cancel();
     _noChallengeCheckTimer?.cancel();
     _loadStopFallbackTimer?.cancel();
@@ -2762,7 +2779,7 @@ class _CfChallengePageState extends State<CfChallengePage> {
           ),
 
         // 悬浮验证胶囊：默认收起，点击展开，再次点击进入前台
-        if (_isBackground)
+        if (_isBackground && _pillVisible)
           DraggableFloatingPill(
             initialTop: 100,
             onTap: _promoteToForeground,
