@@ -162,6 +162,14 @@ Future<void> main() async {
   // 见 image_decode_gate.dart)。
   FluxdoWidgetsBinding.ensureInitialized();
 
+  // 墨笺标题宋体（Noto Serif SC 子集）的 OFL 许可，进「开源许可」页
+  LicenseRegistry.addLicense(() async* {
+    final text = await rootBundle.loadString(
+      'assets/fonts/MojianSerif-OFL.txt',
+    );
+    yield LicenseEntryWithLineBreaks(const ['MojianSerif (Noto Serif SC)'], text);
+  });
+
   // Rust 动图管线的首帧(挂载瞬态的裸 RGBA 上传,不经 binding)注入
   // 同一个闸门,与标准路径统一错峰;播放中的后续帧不过闸。
   NativeAnimatedImageProvider.firstFrameGate = ImageDecodeGate.run;
