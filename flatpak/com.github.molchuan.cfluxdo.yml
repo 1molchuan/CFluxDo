@@ -1,0 +1,71 @@
+# cfluxdo Flatpak 清单（由 tool/flatpak_build.sh 填好占位符后交给 flatpak-builder）
+# - 运行时 GNOME 48；WPE WebKit 用上游发布的预编译层（flatpak-wpe-layer-gnome48-v2，
+#   WPE 2.48.7 + WPEPlatform，构建时关了 bubblewrap 沙箱），解压后整体拷进 /app
+# - 应用本体在沙箱里用宿主挂进来的 Flutter / Rust 工具链编译（构建期允许联网），
+#   链接的是 SDK 里的库，产物能跑在运行时上
+app-id: com.github.molchuan.cfluxdo
+runtime: org.gnome.Platform
+runtime-version: '48'
+sdk: org.gnome.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.llvm20
+command: cfluxdo
+separate-locales: false
+# Debian 12 的 flatpak-builder 1.2 还会调 appstream-compose，GNOME 48 SDK 里已经没有这个工具；
+# 只影响软件中心里的应用介绍，安装和运行不受影响
+appstream-compose: false
+finish-args:
+  - --share=network
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --socket=pulseaudio
+  - --device=dri
+  - --talk-name=org.freedesktop.secrets
+  - --talk-name=org.freedesktop.Notifications
+  # 只要 NetworkManager（判断换网），不开整条系统总线
+  - --system-talk-name=org.freedesktop.NetworkManager
+  - --filesystem=xdg-download
+modules:
+  - name: wpe-layer
+    buildsystem: simple
+    build-commands:
+      - |
+        set -eu
+        for dir in bin include lib libexec share; do
+          if [ -e "${dir}" ]; then cp -a "${dir}" /app/; fi
+        done
+    sources:
+      - type: dir
+        path: @WPE_LAYER_DIR@
+
+  - name: cfluxdo
+    buildsystem: simple
+    build-options:
+      append-path: /usr/lib/sdk/llvm20/bin
+      prepend-ld-library-path: /usr/lib/sdk/llvm20/lib
+      build-args:
+        - --share=network
+        - --filesystem=@FLUTTER_ROOT@
+        - --filesystem=@PUB_CACHE@
+        - --filesystem=@CARGO_HOME@
+        - --filesystem=@RUSTUP_HOME@
+      env:
+        FLUTTER_ROOT: '@FLUTTER_ROOT@'
+        PUB_CACHE: '@PUB_CACHE@'
+        CARGO_HOME: '@CARGO_HOME@'
+        RUSTUP_HOME: '@RUSTUP_HOME@'
+        BUILD_NAME: '@BUILD_NAME@'
+        BUILD_NUMBER: '@BUILD_NUMBER@'
+    build-commands:
+      - bash flatpak/build_in_sandbox.sh
+      - install -Dm755 flatpak/cfluxdo-wrapper.sh /app/bin/cfluxdo
+      - install -Dm644 linux/runner/com.github.molchuan.cfluxdo.desktop /app/share/applications/com.github.molchuan.cfluxdo.desktop
+      - install -Dm644 flatpak/com.github.molchuan.cfluxdo.metainfo.xml /app/share/metainfo/com.github.molchuan.cfluxdo.metainfo.xml
+      - install -Dm644 assets/images/icon_default_preview.png /app/share/icons/hicolor/256x256/apps/com.github.molchuan.cfluxdo.png
+      # WPE 层的开发文件和构建工具不进成品
+      - rm -rf /app/include /app/lib/pkgconfig /app/share/pkgconfig /app/share/aclocal
+      - rm -f /app/bin/unifdef /app/bin/woff2_compress /app/bin/woff2_decompress
+    sources:
+      - type: dir
+        path: @SOURCE_TREE@
