@@ -2,16 +2,18 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fluxdo/providers/theme_provider.dart';
 import 'package:fluxdo/theme/app_palettes.dart';
+import 'package:fluxdo/theme/mojian_theme.dart';
 import 'package:fluxdo/utils/appearance_warmup.dart';
 import 'package:fluxdo/utils/seed_color_scheme.dart';
 
 void main() {
-  testWidgets('预热覆盖外观页首帧用到的全部配色组合', (tester) async {
+  testWidgets('经典风格：预热覆盖外观页首帧用到的全部配色组合', (tester) async {
     SeedColorScheme.resetCache();
 
     const customColor = Color(0xFF123456);
     const themeState = ThemeState(
       mode: ThemeMode.system,
+      uiStyle: UiStyle.classic,
       seedColor: Colors.blue,
       schemeVariant: DynamicSchemeVariant.tonalSpot,
       customColors: [customColor],
@@ -57,12 +59,13 @@ void main() {
     );
   });
 
-  testWidgets('配色风格对任意来源生效，预热组合跟随 variant', (tester) async {
+  testWidgets('经典风格：配色风格对任意来源生效，预热组合跟随 variant', (tester) async {
     SeedColorScheme.resetCache();
 
     // 自定义来源 + 非默认配色风格：调色板色卡也应按 vibrant 预热
     const themeState = ThemeState(
       mode: ThemeMode.system,
+      uiStyle: UiStyle.classic,
       accentSource: AccentSource.custom,
       seedColor: Color(0xFF123456),
       schemeVariant: DynamicSchemeVariant.vibrant,
@@ -106,5 +109,36 @@ void main() {
       countAfterWarmup,
       reason: '非默认配色风格下首帧不应再产生未命中的配色计算',
     );
+  });
+
+  testWidgets('墨笺风格：只预热「经典」风格卡预览的亮/暗两套', (tester) async {
+    SeedColorScheme.resetCache();
+
+    const themeState = ThemeState(
+      mode: ThemeMode.system,
+      accentSource: AccentSource.custom,
+      seedColor: Colors.teal,
+      schemeVariant: DynamicSchemeVariant.tonalSpot,
+    );
+    expect(themeState.isMojian, isTrue);
+
+    AppearanceWarmup.schedule(
+      themeState: themeState,
+      brightness: Brightness.dark,
+    );
+
+    await tester.idle();
+    await tester.pump();
+
+    // 不再预热色卡网格与配色风格卡
+    expect(SeedColorScheme.cachedCount, 2);
+    // 「经典」卡预览用到的两套都已命中
+    for (final b in Brightness.values) {
+      SeedColorScheme.from(
+        seedColor: themeState.effectiveSeedColor,
+        brightness: b,
+      );
+    }
+    expect(SeedColorScheme.cachedCount, 2);
   });
 }
