@@ -118,6 +118,7 @@ void flutter_inappwebview_linux_plugin_register_with_registrar(FlPluginRegistrar
   plugin->webview_environment = std::make_unique<flutter_inappwebview_plugin::WebViewEnvironment>(pluginInstance);
   pluginInstance->webViewEnvironment = plugin->webview_environment.get();
 
+  cfluxdo_enable_persistent_cookies();
   cfluxdo_tls_channel_register(registrar);
 
   // Note: We don't unref the plugin here as it needs to stay alive

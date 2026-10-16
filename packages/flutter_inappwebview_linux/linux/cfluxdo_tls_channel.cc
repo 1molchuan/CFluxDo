@@ -55,6 +55,20 @@ void HandleMethodCall(FlMethodChannel* channel, FlMethodCall* call, gpointer use
 
 }  // namespace
 
+void cfluxdo_enable_persistent_cookies() {
+  // WPE 的默认网络会话不落盘 Cookie（重启即空）。Android WebView 会保留 CF 签发的
+  // cf_clearance，App 也按「cf_clearance 只从 WebView 流向 jar」设计，所以 Linux 上
+  // 必须让 WebView 自己持久化，否则每次冷启动都要重新过人机验证。
+  // 放在默认会话的数据目录里（Flatpak 下自动落到 ~/.var/app/<id>/data/<id>）
+  WebKitNetworkSession* session = webkit_network_session_get_default();
+  WebKitCookieManager* cookies = webkit_network_session_get_cookie_manager(session);
+  g_autofree gchar* dir = g_build_filename(g_get_user_data_dir(), g_get_prgname(), nullptr);
+  g_mkdir_with_parents(dir, 0700);
+  g_autofree gchar* path = g_build_filename(dir, "cookies.sqlite", nullptr);
+  webkit_cookie_manager_set_persistent_storage(cookies, path,
+                                               WEBKIT_COOKIE_PERSISTENT_STORAGE_SQLITE);
+}
+
 void cfluxdo_tls_channel_register(FlPluginRegistrar* registrar) {
   g_autoptr(FlStandardMethodCodec) codec = fl_standard_method_codec_new();
   // 通道随进程存活，不释放

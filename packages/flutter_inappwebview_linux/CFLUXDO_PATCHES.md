@@ -8,4 +8,9 @@
    `allowTlsCertificateForHost({host, pem})`，把本地代理为该主机签发的叶子证书放进默认网络
    会话的允许表。用来替代「证书出错就 PROCEED」的盲放行。
 
+3. `cfluxdo_enable_persistent_cookies()`（同文件，插件注册时调用）：默认网络会话的 Cookie
+   持久化到 `<XDG 数据目录>/<程序名>/cookies.sqlite`。WPE 默认不落盘，重启后 WebView 里没有
+   CF 签发的 `cf_clearance`，而 App 只让 `cf_clearance` 从 WebView 流向本地 jar，结果每次冷启动
+   都要重新过人机验证。
+
 升级插件版本时逐条核对上面的改动是否还需要。

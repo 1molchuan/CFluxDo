@@ -66,6 +66,11 @@ class _WebViewLoginPageState extends ConsumerState<WebViewLoginPage> {
   /// hybrid composition 实时回读造成的卡顿。
   Uint8List? _webViewSnapshot;
 
+  /// Linux（WPE）兜底轮询：WPE 不上报页面内的 pushState/replaceState，
+  /// 邮箱验证码等登录方式成功后 Discourse 只切路由不整页跳转，
+  /// onLoadStop / onUpdateVisitedHistory 都不来，只能定时检查
+  Timer? _linuxLoginPoll;
+
   @override
   void initState() {
     super.initState();
@@ -76,6 +81,13 @@ class _WebViewLoginPageState extends ConsumerState<WebViewLoginPage> {
       generation: _flowGeneration,
     );
     _loadSavedUsername();
+    if (Platform.isLinux) {
+      _linuxLoginPoll = Timer.periodic(const Duration(seconds: 2), (_) {
+        final controller = _controller;
+        if (controller == null || _loginHandled || !mounted) return;
+        _checkLoginStatus(controller);
+      });
+    }
   }
 
   Future<void> _loadSavedUsername() async {
@@ -89,6 +101,7 @@ class _WebViewLoginPageState extends ConsumerState<WebViewLoginPage> {
 
   @override
   void dispose() {
+    _linuxLoginPoll?.cancel();
     // 登录成功的回写已在收口时做完；没登录就关页则什么都不写
     unawaited(_webViewUse.end(WebViewUseOutcome.aborted));
     _controller?.dispose();
