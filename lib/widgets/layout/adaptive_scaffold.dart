@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:app_icons/app_icons.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -14,6 +13,7 @@ import 'adaptive_navigation.dart';
 import 'category_shortcuts.dart';
 import '../topic/category_tab_manager_sheet.dart';
 import '../topic/category_drawer.dart';
+import '../../utils/platform_utils.dart';
 
 /// 自适应 Scaffold
 ///
@@ -67,7 +67,7 @@ class AdaptiveScaffold extends ConsumerWidget {
         ? -1
         : selectedIndex;
 
-    final hasAcrylic = Platform.isMacOS || Platform.isWindows;
+    final hasAcrylic = PlatformUtils.hasWindowAcrylic;
     final useAcrylicRail = showRail && hasAcrylic;
     final railWidth = extendedRail ? 180.0 : 72.0;
     // 双栏判定的「Rail 应占宽」记账(判定轴与分配轴同轴,见

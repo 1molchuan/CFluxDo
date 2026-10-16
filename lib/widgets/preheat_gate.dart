@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:app_icons/app_icons.dart';
@@ -21,6 +20,7 @@ import '../widgets/common/ambient_background.dart';
 import '../widgets/common/error_view.dart';
 import 'package:m3e_ui/m3e_ui.dart';
 import 'preheat_logo.dart';
+import '../utils/platform_utils.dart';
 
 class PreheatGate extends StatefulWidget {
   final Widget child;
@@ -196,7 +196,7 @@ class _PreheatLoadingState extends State<_PreheatLoading> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-    final hasAcrylic = Platform.isMacOS || Platform.isWindows;
+    final hasAcrylic = PlatformUtils.hasWindowAcrylic;
 
     return Scaffold(
       backgroundColor: hasAcrylic ? Colors.transparent : colorScheme.surface,
@@ -469,7 +469,7 @@ class _PreheatFailed extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    final hasAcrylic = Platform.isMacOS || Platform.isWindows;
+    final hasAcrylic = PlatformUtils.hasWindowAcrylic;
 
     return Scaffold(
       backgroundColor: hasAcrylic ? Colors.transparent : colorScheme.surface,
