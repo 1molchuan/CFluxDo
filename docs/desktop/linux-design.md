@@ -142,6 +142,13 @@ Android 侧行为不变。所有新分支都用 `Platform.isLinux` 或「MITM �
 
 构建要点：VS 2022 生成工具需加 ATL 组件；需要 `nuget.exe`；编译期 CA 用 Git 自带 openssl 生成（不要把 Git 的 `usr\bin` 加进 PATH，里面的 `link.exe` 会顶掉 MSVC 链接器）。
 
+## 3c. Flatpak（2026-10-16，随 1.1.1-beta.4 发布）
+
+- 清单 `flatpak/com.github.molchuan.cfluxdo.yml`，构建 `tool/flatpak_build.sh <输出>`：只打已提交的代码（git archive，含子模块），GNOME 48 运行时 + llvm20 扩展，WPE 用上游预编译层（WPE 2.48.7，带 WPEPlatform）。构建期借用宿主的 Flutter / pub 缓存 / Cargo / rustup（`--filesystem` + `--share=network`），所以只能在开发机上打，还不是可复现的离线构建。
+- **和 chroot 的区别**：chroot 里的 WPE 没有 WPEPlatform，插件走 FDO；Flatpak 里走 WPEPlatform，渲染路径不同。WPEPlatform 路径有一个插件 bug：软件渲染下缓冲区留裸指针到下一帧，WebKit 重建交换链后变野指针，启动一两秒稳定 SIGSEGV。已修，见插件补丁 4（`packages/flutter_inappwebview_linux/CFLUXDO_PATCHES.md`）。
+- 启动脚本在没有 `/dev/dri/renderD*` 时设 `LIBGL_ALWAYS_SOFTWARE=1`，否则无显卡环境窗口全黑。
+- 实测（Xvfb + 软件渲染，VPS 直连出口）：游客列表、话题详情、Turnstile 勾选（`xdotool` 第二次点才过，和 chroot 一样）、冷启动不再弹盾（Cookie 落盘生效）、WebView 登录页正常显示。没有在 Flatpak 里重新登录。
+
 ## 4. 与架构体检 #3 / #4 的关系
 
 - **#3（Dart↔Rust 单一通道）应该先做。** Linux 已经把问题放大了：启动配置 30 多个参数，要穿过 `NetworkSettingsService` → `DohProxyService`（3 个调用点）→ `DohProxyFfi.start` 逐个透传。今晚为了不改这条链，`mitm_hosts` 是在 FFI 层按平台补的默认值，这是权宜之计。合进主线前，应该把「平台网络档案」（MITM 范围、要不要优选、WebView 怎么设代理）收成 #3 里的一个对象，Android 和 Linux 各一份。
