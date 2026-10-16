@@ -1,10 +1,10 @@
 Windows Registry Editor Version 5.00
 
-; FluxDO URL Scheme Registration
+; cfluxdo URL Scheme Registration
 ; 双击此文件或在安装程序中导入以注册 fluxdo:// URL scheme
 
 [HKEY_CURRENT_USER\Software\Classes\fluxdo]
-@="URL:FluxDO Protocol"
+@="URL:cfluxdo Protocol"
 "URL Protocol"=""
 
 [HKEY_CURRENT_USER\Software\Classes\fluxdo\shell]
@@ -12,4 +12,4 @@ Windows Registry Editor Version 5.00
 [HKEY_CURRENT_USER\Software\Classes\fluxdo\shell\open]
 
 [HKEY_CURRENT_USER\Software\Classes\fluxdo\shell\open\command]
-@="\"C:\\Program Files\\FluxDO\\fluxdo.exe\" \"%1\""
+@="\"C:\\Program Files\\cfluxdo\\cfluxdo.exe\" \"%1\""

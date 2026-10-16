@@ -30,7 +30,7 @@ import 'cfhub_api.dart';
 import 'cfhub_probe_auth_service.dart';
 import 'doh_resolver.dart';
 import 'webview_mitm_policy.dart';
-import '../doh_proxy/wpe_tls_trust.dart';
+import '../doh_proxy/proxy_leaf_trust.dart';
 
 /// 本地动态优选的模式（只在 Android 网关模式下生效）
 enum CfSelectMode {
@@ -354,10 +354,10 @@ class NetworkSettingsService {
       current.gatewayEnabled &&
       _rustProxyService.isRunning;
 
-  /// 本地动态优选只在 Android / Linux 网关模式下跑：DoH 开着、没有上游代理、网关开关开着
+  /// 本地动态优选只在 Android / Linux / Windows 网关模式下跑：DoH 开着、没有上游代理、网关开关开着
   /// （网关/上游的判断和 [_applyProxyState] 里启动代理时用的一致）
   bool get selectorEligible =>
-      (Platform.isAndroid || Platform.isLinux) &&
+      (Platform.isAndroid || Platform.isLinux || Platform.isWindows) &&
       current.dohEnabled &&
       !_proxyService.current.isValid &&
       WebViewMitmPolicy.useGatewayMode(
@@ -943,7 +943,7 @@ class NetworkSettingsService {
         dohRoutesUrl: dohRoutesUrl,
         dohRouteTableJson: dohRouteTableJson,
         dohNodeListJson: dohNodeListJson,
-        // 本地动态优选：只在 Android / Linux 网关模式下开；上次的赢家状态回灌给 Rust
+        // 本地动态优选：只在 Android / Linux / Windows 网关模式下开；上次的赢家状态回灌给 Rust
         selectMode: selectorEligible ? current.selectMode.wire : 'off',
         selectStateJson: prefsForSeed?.getString(_selectStateKey),
         shareMeasurements:
@@ -1151,7 +1151,7 @@ class NetworkSettingsService {
       _webViewProxySet = true;
       debugPrint('[DOH] WebView 代理已设置 -> 127.0.0.1:$port');
       // Linux：代理每次启动叶子证书都会换，设代理的同时重新放行
-      await WpeTlsTrust.preallowProxyLeaves();
+      await ProxyLeafTrust.preallowProxyLeaves();
     } catch (e) {
       debugPrint('[DOH] WebView 代理设置失败: $e');
     }

@@ -7,9 +7,13 @@ import 'package:flutter/services.dart';
 import '../../network_logger.dart';
 import 'doh_proxy_ffi.dart';
 
-/// Linux（WPE WebKit）WebView 对本地代理证书的信任。
+/// 桌面端 WebView 对本地代理证书的信任（不对任何证书错误盲放行）。
 ///
-/// WebView 经本地 MITM 代理连 linux.do 时，代理用设备 CA 现签叶子证书。WPE 没有
+/// Windows（WebView2）在创建环境时用 `--ignore-certificate-errors-spki-list`
+/// 只信任设备 CA（见 WindowsWebViewEnvironmentService），正常不会触发证书错误；
+/// 万一触发，也和 Linux 一样只认代理签发的那张叶子。
+///
+/// Linux（WPE WebKit）：WebView 经本地 MITM 代理连 linux.do 时，代理用设备 CA 现签叶子证书。WPE 没有
 /// 「额外信任某个 CA」的接口，所以不信任 CA，而是逐主机放行代理签发的**那一张**
 /// 叶子证书（WebKit 按证书内容精确比对）：
 /// - 已知主机在代理启动后预先放行（子资源证书出错时 WebKit 不回调，只能预放）；
@@ -17,8 +21,8 @@ import 'doh_proxy_ffi.dart';
 ///   一致才放行，否则按证书错误处理。
 ///
 /// 代理只对 [mitmHosts] 范围做 MITM，范围外的主机走隧道、由系统证书库端到端校验。
-class WpeTlsTrust {
-  WpeTlsTrust._();
+class ProxyLeafTrust {
+  ProxyLeafTrust._();
 
   static const _channel = MethodChannel('cfluxdo/wpe_tls');
 
@@ -39,11 +43,15 @@ class WpeTlsTrust {
     'linuxdo-uploads.s3.linux.do',
   ];
 
-  static bool get isApplicable => Platform.isLinux;
+  /// 证书出错时按「是否代理签发的那张叶子」裁定（Linux / Windows）
+  static bool get isApplicable => Platform.isLinux || Platform.isWindows;
+
+  /// 预先放行只有 WPE 需要（插件补丁里的通道）
+  static bool get _needsPreallow => Platform.isLinux;
 
   /// 代理（重新）启动后调用：代理每次启动叶子都会换，要整批重新放行
   static Future<void> preallowProxyLeaves() async {
-    if (!isApplicable) return;
+    if (!_needsPreallow) return;
     var ok = 0;
     for (final host in _preallowHosts) {
       final pem = DohProxyFfi.instance.mitmLeafPem(host);
@@ -55,10 +63,10 @@ class WpeTlsTrust {
         });
         ok++;
       } catch (e) {
-        debugPrint('[WpeTlsTrust] 放行 $host 失败: $e');
+        debugPrint('[ProxyLeafTrust] 放行 $host 失败: $e');
       }
     }
-    NetworkLogger.log('[WpeTlsTrust] 已预先放行 $ok/${_preallowHosts.length} 个主机的代理叶子证书');
+    NetworkLogger.log('[ProxyLeafTrust] 已预先放行 $ok/${_preallowHosts.length} 个主机的代理叶子证书');
   }
 
   /// 主文档证书出错时的判定：[der] 与代理为 [host] 签发的叶子完全相同才返回 true
@@ -68,7 +76,7 @@ class WpeTlsTrust {
     if (pem == null) return false;
     final expected = pemToDer(pem);
     final same = expected != null && listEquals(expected, der);
-    NetworkLogger.log('[WpeTlsTrust] $host 主文档证书出错，与代理叶子${same ? '一致，放行' : '不一致，拒绝'}');
+    NetworkLogger.log('[ProxyLeafTrust] $host 主文档证书出错，与代理叶子${same ? '一致，放行' : '不一致，拒绝'}');
     return same;
   }
 

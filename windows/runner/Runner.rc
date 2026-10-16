@@ -89,13 +89,13 @@ BEGIN
     BEGIN
         BLOCK "040904e4"
         BEGIN
-            VALUE "CompanyName", "com.example" "\0"
-            VALUE "FileDescription", "FluxDO" "\0"
+            VALUE "CompanyName", "com.github.molchuan" "\0"
+            VALUE "FileDescription", "cfluxdo" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
-            VALUE "InternalName", "FluxDO" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2026 com.example. All rights reserved." "\0"
-            VALUE "OriginalFilename", "fluxdo.exe" "\0"
-            VALUE "ProductName", "FluxDO" "\0"
+            VALUE "InternalName", "cfluxdo" "\0"
+            VALUE "LegalCopyright", "Copyright (C) 2026 cfluxdo contributors." "\0"
+            VALUE "OriginalFilename", "cfluxdo.exe" "\0"
+            VALUE "ProductName", "cfluxdo" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

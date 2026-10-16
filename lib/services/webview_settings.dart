@@ -11,7 +11,7 @@ import '../constants.dart';
 import 'eruda_settings_service.dart';
 import 'log/log_writer.dart';
 import 'network/doh/network_settings_service.dart';
-import 'network/doh_proxy/wpe_tls_trust.dart';
+import 'network/doh_proxy/proxy_leaf_trust.dart';
 
 /// WebView 配置工具类
 /// 区分 Headless（后台同步）和 Visible（用户可见页面）两种场景
@@ -94,13 +94,14 @@ class WebViewSettings {
   static Future<ServerTrustAuthResponse?> handleServerTrustAuthRequest(
     URLAuthenticationChallenge challenge,
   ) async {
-    // Linux（WPE）：只放行代理为该主机签发的那张叶子证书，其余证书错误照常拒绝
-    if (WpeTlsTrust.isApplicable) {
+    // 桌面（Linux WPE / Windows WebView2）：只放行代理为该主机签发的那张叶子证书，
+    // 其余证书错误照常拒绝（Windows 正常已由 spki-list 信任设备 CA，走到这里是例外）
+    if (ProxyLeafTrust.isApplicable) {
       final host = challenge.protectionSpace.host;
       final der =
           challenge.protectionSpace.sslCertificate?.x509Certificate?.encoded;
       final trusted = NetworkSettingsService.instance.isGatewayMode &&
-          WpeTlsTrust.isProxyLeaf(host, der);
+          ProxyLeafTrust.isProxyLeaf(host, der);
       return ServerTrustAuthResponse(
         action: trusted
             ? ServerTrustAuthResponseAction.PROCEED

@@ -496,19 +496,14 @@ Future<void> _prepareWindowsNative(_BuildMode mode) async {
       if (mode == _BuildMode.release) '--release',
       '--features',
       'ech',
-      '--bin',
-      'doh_proxy_bin',
       '--lib',
     ],
     workingDirectory: 'core/doh_proxy',
   );
 
+  // Windows 只走进程内 FFI，不再产出 doh_proxy_bin.exe（进程模式）
   final cargoDir = mode == _BuildMode.release ? 'release' : 'debug';
   _stageFile('core/doh_proxy/target/$cargoDir/doh_proxy.dll', stagedOutputs[0]);
-  _stageFile(
-    'core/doh_proxy/target/$cargoDir/doh_proxy_bin.exe',
-    stagedOutputs[1],
-  );
   _writeNativeStageStamp('windows', mode);
 }
 
@@ -1256,7 +1251,6 @@ const _flutterTestOptionsWithValue = <String>{
 
 const _windowsStagedOutputs = <String>[
   'windows/runner/native/doh_proxy.dll',
-  'windows/runner/native/doh_proxy_bin.exe',
 ];
 
 const _macOsStagedOutputs = <String>[

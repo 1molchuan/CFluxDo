@@ -20,14 +20,14 @@ void main() {
       );
     });
 
-    test('Windows 启用 DoH 即要求 CA,与网络引擎选择无关', () {
+    test('Windows 启用 DoH 也不再要求把 CA 装进系统信任库(WebView2 用 spki-list 只信设备 CA)', () {
       expect(
         WebViewMitmPolicy.requiresTrustedCa(
           isWindows: true,
           dohEnabled: true,
           webViewAdapterEnabled: false,
         ),
-        isTrue,
+        isFalse,
       );
       expect(
         WebViewMitmPolicy.requiresTrustedCa(
@@ -35,7 +35,7 @@ void main() {
           dohEnabled: true,
           webViewAdapterEnabled: true,
         ),
-        isTrue,
+        isFalse,
       );
     });
 

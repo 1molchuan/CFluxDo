@@ -4,7 +4,7 @@ import 'dart:io';
 
 import 'package:ffi/ffi.dart';
 import 'package:flutter/foundation.dart';
-import 'wpe_tls_trust.dart';
+import 'proxy_leaf_trust.dart';
 
 class DohHostLookupResult {
   const DohHostLookupResult({
@@ -806,11 +806,11 @@ class DohProxyFfi {
       'mitm_connect': mitmConnect,
       'h2_mitm': h2Mitm,
       // 空 = 除 CF 验证域名外全部 MITM；Linux 的 WPE 只能逐主机放行叶子证书，
-      // 只 MITM 必须走 ECH 的主机（见 WpeTlsTrust）
+      // 只 MITM 必须走 ECH 的主机（见 ProxyLeafTrust）
       if (mitmHosts.isNotEmpty)
         'mitm_hosts': mitmHosts
-      else if (Platform.isLinux)
-        'mitm_hosts': WpeTlsTrust.mitmHosts,
+      else if (Platform.isLinux || Platform.isWindows)
+        'mitm_hosts': ProxyLeafTrust.mitmHosts,
       'doh_server': dohServer ?? 'cloudflare',
       'prefer_ipv6': preferIpv6,
       'timeout_secs': 30,

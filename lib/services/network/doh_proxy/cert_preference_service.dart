@@ -12,13 +12,17 @@ class CertPreferenceService {
 
   static const _usePerDeviceKey = 'cert_use_per_device';
 
-  /// iOS/macOS/Windows 必须使用 per-device CA
+  /// iOS/macOS/Windows/Linux 必须使用 per-device CA
   /// macOS: WKWebView CONNECT 代理需要系统钥匙串信任，per-device CA 避免每次更新都要重新信任
-  /// Windows: 网关 CA 需进入用户根信任库(系统级信任,作用于所有应用)。
+  /// Windows: WebView2 用 `--ignore-certificate-errors-spki-list` 只信任这把 CA 的公钥
+  /// （不进系统根信任库）；Linux: WPE 逐主机放行它签发的叶子。
   /// 内置 CA 私钥嵌在随包分发的 doh_proxy 二进制里可被提取,同构建用户共享
-  /// 同一把——绝不能进系统信任库;强制本机现生成、私钥不出本机的设备证书。
+  /// 同一把——不能当作信任依据;强制本机现生成、私钥不出本机的设备证书。
   static bool get isPerDeviceRequired =>
-      Platform.isIOS || Platform.isMacOS || Platform.isWindows;
+      Platform.isIOS ||
+      Platform.isMacOS ||
+      Platform.isWindows ||
+      Platform.isLinux;
 
   /// 其余平台 per-device 为可选项
   static bool get isPerDeviceOptional => !isPerDeviceRequired;

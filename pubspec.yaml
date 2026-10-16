@@ -168,6 +168,10 @@ dependency_overrides:
   # 并兼容旧版 WPE 的编译（见 packages/flutter_inappwebview_linux/CFLUXDO_PATCHES.md）
   flutter_inappwebview_linux:
     path: packages/flutter_inappwebview_linux
+  # Windows WebView（WebView2）插件内置一份：上游带的 aliveGuard 修复，
+  # 避免 CF 验证 WebView 销毁时悬垂 this 回调导致闪退
+  flutter_inappwebview_windows:
+    path: packages/flutter_inappwebview_windows
 dev_dependencies:
   flutter_test:
     sdk: flutter

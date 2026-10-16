@@ -6,6 +6,8 @@ import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'network/doh_proxy/cert_spki.dart';
+import 'network/doh_proxy/per_device_cert_service.dart';
 
 /// 统一管理 Windows 平台的 WebView2 Environment。
 ///
@@ -177,6 +179,12 @@ class WindowsWebViewEnvironmentService {
       final browserArguments = <String>['--renderer-process-limit=6'];
       if (_desiredProxyUrl != null) {
         browserArguments.add('--proxy-server=$_desiredProxyUrl');
+        // 只信任本机设备 CA 的公钥（作用范围仅限本 App 的 WebView2，不进系统根信任库），
+        // 本地代理 MITM 签发的证书靠它通过校验；别的证书错误照常拦截
+        final spki = await _deviceCaSpki();
+        if (spki != null) {
+          browserArguments.add('--ignore-certificate-errors-spki-list=$spki');
+        }
       }
       final additionalBrowserArguments = browserArguments.join(' ');
 
@@ -208,5 +216,16 @@ class WindowsWebViewEnvironmentService {
       _syncProxyRestartRequired();
       _initializeFuture = null;
     }
+  }
+
+  /// 设备 CA 的 SPKI 摘要；代理要用设备 CA（桌面强制），这里确保已生成并加载
+  Future<String?> _deviceCaSpki() async {
+    final certService = PerDeviceCertService.instance;
+    if (!certService.isLoaded && !await certService.ensureCaCert()) {
+      debugPrint('[WebViewEnv] 设备 CA 不可用，WebView2 不加 spki-list');
+      return null;
+    }
+    final pem = certService.certPem;
+    return pem == null ? null : spkiSha256Base64(pem);
   }
 }

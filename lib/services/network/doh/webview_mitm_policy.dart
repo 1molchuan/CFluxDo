@@ -18,9 +18,12 @@ class WebViewMitmPolicy {
     required bool webViewAdapterEnabled,
   }) => dohEnabled && gatewayEnabled;
 
+  /// 是否要先把 CA 装进系统信任库才能启动网关。上游 Windows 要求装进用户根信任库
+  /// （作用于所有应用）；cfluxdo 改为 WebView2 启动参数只信任设备 CA 的公钥，
+  /// 不再需要系统级信任，所以恒为 false
   static bool requiresTrustedCa({
     required bool isWindows,
     required bool dohEnabled,
     required bool webViewAdapterEnabled,
-  }) => isWindows && dohEnabled;
+  }) => false;
 }

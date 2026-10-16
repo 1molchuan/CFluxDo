@@ -1,10 +1,10 @@
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:fluxdo/services/network/doh_proxy/wpe_tls_trust.dart';
+import 'package:fluxdo/services/network/doh_proxy/proxy_leaf_trust.dart';
 
 void main() {
-  group('WpeTlsTrust.pemToDer', () {
+  group('ProxyLeafTrust.pemToDer', () {
     test('去掉 PEM 头尾与换行后按 base64 解码', () {
       final der = List<int>.generate(300, (i) => i % 256);
       final b64 = base64.encode(der);
@@ -14,18 +14,18 @@ void main() {
       }
       final pem =
           '-----BEGIN CERTIFICATE-----\r\n${lines.join('\r\n')}\r\n-----END CERTIFICATE-----\r\n';
-      expect(WpeTlsTrust.pemToDer(pem), der);
+      expect(ProxyLeafTrust.pemToDer(pem), der);
     });
 
     test('不是 base64 时返回 null', () {
       expect(
-        WpeTlsTrust.pemToDer('-----BEGIN CERTIFICATE-----\n@@@\n-----END CERTIFICATE-----'),
+        ProxyLeafTrust.pemToDer('-----BEGIN CERTIFICATE-----\n@@@\n-----END CERTIFICATE-----'),
         isNull,
       );
     });
   });
 
   test('MITM 范围只含必须走 ECH 的 linux.do', () {
-    expect(WpeTlsTrust.mitmHosts, ['linux.do']);
+    expect(ProxyLeafTrust.mitmHosts, ['linux.do']);
   });
 }
