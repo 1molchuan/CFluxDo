@@ -118,6 +118,30 @@ Android 侧行为不变。所有新分支都用 `Platform.isLinux` 或「MITM �
 ### D14 Linux 上隐藏的功能
 - 应用图标切换、渲染后端切换（Skia/GLES）、HyperOS 适配、预测性返回、扫码登录（没有摄像头插件）、passkey、保存到相册、`open_filex`（改用 `xdg-open`）。这些都已有平台判断或按审计清单补判断。
 
+## 3b. Windows（2026-10-16 起，分支 `desktop/windows`，基于 `desktop/linux`）
+
+开发环境：VPS 上的 Windows 11 企业评估版 KVM 虚拟机（脚本在 `tool/windows_vm/`），出口可切到用户 Mac（国内网络）。
+
+- **W1 恢复上游 Windows 代码**：`windows/` runner 与内置 `flutter_inappwebview_windows`（带 WebView2 销毁 UAF 修复）原样恢复后再改：改名 cfluxdo、数据目录 `%APPDATA%\com.github.molchuan\cfluxdo`、去掉构建期下载 ffmpeg、首帧后显示窗口。
+- **W2 证书：WebView2 只信设备 CA，不进系统信任库**。上游把 CA 用 `certutil` 装进用户根信任库（对所有程序生效，还会弹系统确认框）。改为创建 WebView2 环境时加 `--ignore-certificate-errors-spki-list=<设备 CA 的 SPKI 摘要>`，只对 App 自己的 WebView2 生效；`requiresTrustedCa` 恒为 false。证书出错时仍按 Linux 的规则只认代理叶子（`ProxyLeafTrust`），不盲放行。
+- **W3 桌面强制设备 CA**：内置 CA 的私钥随包分发、可被提取，不能当信任依据；Linux 一并改为强制。
+- **W4 连接层**：与 Linux 相同，进程内 FFI、MITM 只限 `linux.do`、本地优选开启。
+- **W5 毛玻璃**：上游 macOS/Windows 依赖 flutter_acrylic 把背景设透明，插件已删，透明处露出黑底；`PlatformUtils.hasWindowAcrylic` 统一关掉。
+
+实测（国内出口）：
+- **登录前**：游客列表正常；新出口 IP 下 CF 由后台 WebView2 自动通过。
+- **证书**：WebView2 参数里的 SPKI 摘要与设备 CA 一致（openssl 核对）；经代理连 linux.do 收到的是设备 CA 签发的证书，github.com 收到的是真实证书；自签名坏证书被拒。
+- **登录**：邮箱一次性代码登录，hCaptcha 由用户完成，登录后自动回到 App。
+- **冷启动**：WebView2 自带 Cookie 持久化，不重过人机验证，登录保持。
+- **`_t` 轮换**：轮换后 jar 更新，冷启动登录保持，没有出现两边不一致的告警。
+
+已知：
+- 冷启动核对 WebView2 Cookie 时报 `cf_clearance` / `_cfuvid` 缺失，实际存在，判断是 Windows 上核对通道的误报。
+- 窗口大小和位置不记忆。
+- 微软拼音默认中文模式。
+
+构建要点：VS 2022 生成工具需加 ATL 组件；需要 `nuget.exe`；编译期 CA 用 Git 自带 openssl 生成（不要把 Git 的 `usr\bin` 加进 PATH，里面的 `link.exe` 会顶掉 MSVC 链接器）。
+
 ## 4. 与架构体检 #3 / #4 的关系
 
 - **#3（Dart↔Rust 单一通道）应该先做。** Linux 已经把问题放大了：启动配置 30 多个参数，要穿过 `NetworkSettingsService` → `DohProxyService`（3 个调用点）→ `DohProxyFfi.start` 逐个透传。今晚为了不改这条链，`mitm_hosts` 是在 FFI 层按平台补的默认值，这是权宜之计。合进主线前，应该把「平台网络档案」（MITM 范围、要不要优选、WebView 怎么设代理）收成 #3 里的一个对象，Android 和 Linux 各一份。
