@@ -413,10 +413,12 @@ class MasterDetailEmptyState extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 18),
+            // 从 textTheme 派生(inherit: false):有的宿主槽位上方没有
+            // Material,裸 TextStyle 会继承兜底样式的黄色双下划线
             Text(
               message,
               textAlign: TextAlign.center,
-              style: TextStyle(
+              style: theme.textTheme.bodyLarge?.copyWith(
                 fontFamily: MojianTokens.serifFamily,
                 fontWeight: FontWeight.w600,
                 fontSize: 17,

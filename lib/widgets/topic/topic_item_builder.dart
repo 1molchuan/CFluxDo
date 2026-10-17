@@ -50,7 +50,8 @@ TopicCardLayout obtainTopicItemLayout({
     emojiUrlOf: topicCardEmojiUrlResolver,
     statsAvailableWidth: statsAvailableWidth ?? (cardWidth - 64),
     messageStyle: messageStyle,
-    newRepliesLabel: context.l10n.topic_cardNewReplies,
+    // 惰性取文案:只有墨笺行且有新回复时才用到,经典卡与无新回复的行不碰 l10n
+    newRepliesLabel: (count) => context.l10n.topic_cardNewReplies(count),
   );
 }
 
