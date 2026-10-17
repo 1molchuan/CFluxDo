@@ -4,4 +4,5 @@
 	branch = cfluxdo
 [submodule "packages/fluxdo_render"]
 	path = packages/fluxdo_render
-	url = https://github.com/Lingyan000/fluxdo_render.git
+	url = https://github.com/1molchuan/fluxdo_render.git
+	branch = cfluxdo
