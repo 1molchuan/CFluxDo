@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../theme/mojian_theme.dart';
 import '../../utils/responsive.dart';
 import '../common/grain_gradient_background.dart';
 import '../common/skeleton.dart';
@@ -47,11 +48,16 @@ class UserProfileSkeleton extends StatelessWidget {
                         width: double.infinity,
                         child: Stack(
                           fit: StackFit.expand,
+                          // 墨笺:与正式页无头图时同款素纸横幅
                           children: [
-                            const GrainGradientBackground(animated: false),
-                            Container(
-                              color: Colors.black.withValues(alpha: 0.2),
-                            ),
+                            if (theme.extension<MojianTokens>() case final mj?)
+                              ColoredBox(color: mj.paper3)
+                            else ...[
+                              const GrainGradientBackground(animated: false),
+                              Container(
+                                color: Colors.black.withValues(alpha: 0.2),
+                              ),
+                            ],
                           ],
                         ),
                       ),
@@ -173,7 +179,11 @@ class UserProfileSkeleton extends StatelessWidget {
               scrolledUnderElevation: 0,
               backgroundColor: Colors.transparent,
               surfaceTintColor: Colors.transparent,
-              iconTheme: const IconThemeData(color: Colors.white),
+              iconTheme: IconThemeData(
+                color:
+                    Theme.of(context).extension<MojianTokens>()?.ink ??
+                    Colors.white,
+              ),
               bottom: PreferredSize(
                 preferredSize: const Size.fromHeight(36),
                 child: Container(
@@ -233,14 +243,20 @@ class UserProfileSkeleton extends StatelessWidget {
     BuildContext context, {
     bool compact = false,
   }) {
+    final mj = Theme.of(context).extension<MojianTokens>();
     return Stack(
       fit: StackFit.expand,
       children: [
-        // 背景 - 使用 GrainGradient，与正式页面同款
-        // 骨架屏只需保持视觉一致，无需在加载期间持续提交 shader 帧。
-        const GrainGradientBackground(animated: false),
-        // 压暗遮罩（与正式页面展开时一致）
-        Container(color: Colors.black.withValues(alpha: 0.6)),
+        // 墨笺:正式页头部是纸底墨字,骨架同样纸底,加载完不会由深变浅
+        if (mj != null)
+          ColoredBox(color: mj.paper)
+        else ...[
+          // 背景 - 使用 GrainGradient，与正式页面同款
+          // 骨架屏只需保持视觉一致，无需在加载期间持续提交 shader 帧。
+          const GrainGradientBackground(animated: false),
+          // 压暗遮罩（与正式页面展开时一致）
+          Container(color: Colors.black.withValues(alpha: 0.6)),
+        ],
         // 内容
         Positioned(
           left: 20 + MediaQuery.of(context).padding.left,
@@ -258,7 +274,10 @@ class UserProfileSkeleton extends StatelessWidget {
                   Container(
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      border: Border.all(color: Colors.white, width: 2),
+                      border: Border.all(
+                        color: mj?.rule ?? Colors.white,
+                        width: 2,
+                      ),
                     ),
                     child: const _SkeletonCircleWhite(size: 72),
                   ),
@@ -302,7 +321,7 @@ class UserProfileSkeleton extends StatelessWidget {
                 Container(
                   height: 54,
                   decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.1),
+                    color: _onHeader(context, 0.1),
                     borderRadius: BorderRadius.circular(8),
                   ),
                 ),
@@ -338,12 +357,9 @@ class UserActionItemSkeleton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final mj = theme.extension<MojianTokens>();
 
-    return Card(
-      margin: const EdgeInsets.only(bottom: 12),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      clipBehavior: Clip.antiAlias,
-      child: Padding(
+    final content = Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -379,7 +395,21 @@ class UserActionItemSkeleton extends StatelessWidget {
             SkeletonBox(width: 120, height: 14, borderRadius: 4),
           ],
         ),
-      ),
+      );
+    // 墨笺:正式列表是平铺行 + 细线,骨架同款,不套圆角卡
+    if (mj != null) {
+      return DecoratedBox(
+        decoration: BoxDecoration(
+          border: Border(bottom: BorderSide(color: mj.rule)),
+        ),
+        child: content,
+      );
+    }
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      clipBehavior: Clip.antiAlias,
+      child: content,
     );
   }
 }
@@ -420,7 +450,7 @@ class _SkeletonBoxWhite extends StatelessWidget {
       width: width,
       height: height,
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.18),
+        color: _onHeader(context, 0.18),
         borderRadius: BorderRadius.circular(borderRadius),
       ),
     );
@@ -439,9 +469,16 @@ class _SkeletonCircleWhite extends StatelessWidget {
       width: size,
       height: size,
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.18),
+        color: _onHeader(context, 0.18),
         shape: BoxShape.circle,
       ),
     );
   }
+}
+
+/// 头部骨架块的底色:经典压在深色头图上用白色半透明;墨笺纸底用淡墨
+Color _onHeader(BuildContext context, double alpha) {
+  final mj = Theme.of(context).extension<MojianTokens>();
+  if (mj != null) return mj.ink.withValues(alpha: alpha * 0.5);
+  return Colors.white.withValues(alpha: alpha);
 }

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../common/skeleton.dart';
 import '../../../../../l10n/s.dart';
+import '../../theme/mojian_theme.dart';
 
 /// 我的徽章页骨架屏
 class MyBadgesSkeleton extends StatelessWidget {
@@ -21,7 +22,10 @@ class MyBadgesSkeleton extends StatelessWidget {
             expandedHeight: 200,
             flexibleSpace: FlexibleSpaceBar(
               background: Container(
-                decoration: BoxDecoration(
+                // 墨笺:与正式页一致,纸底不要渐变
+                decoration: Theme.of(context).extension<MojianTokens>() != null
+                    ? BoxDecoration(color: Theme.of(context).colorScheme.surface)
+                    : BoxDecoration(
                   gradient: LinearGradient(
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,

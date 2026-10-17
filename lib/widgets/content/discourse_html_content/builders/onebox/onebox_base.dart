@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:app_icons/app_icons.dart';
 import '../../../../../models/topic.dart';
 import '../../../../../services/discourse_cache_manager.dart';
+import '../../../../../theme/mojian_theme.dart';
 
 export '../../../../../models/topic.dart' show LinkCount;
 
@@ -25,13 +26,17 @@ class OneboxContainer extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    // 墨笺:链接卡是纸笺(浅一层纸色 + 发丝线框),不铺灰底
+    final mj = theme.extension<MojianTokens>();
     return Container(
       margin: margin,
       decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+        color:
+            mj?.paper3 ??
+            theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
         borderRadius: BorderRadius.circular(borderRadius),
         border: Border.all(
-          color: theme.colorScheme.outlineVariant,
+          color: mj?.rule ?? theme.colorScheme.outlineVariant,
           width: 1,
         ),
       ),
@@ -67,12 +72,15 @@ class OneboxContainerWithHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final borderColor = theme.colorScheme.outlineVariant;
+    final mj = theme.extension<MojianTokens>();
+    final borderColor = mj?.rule ?? theme.colorScheme.outlineVariant;
 
     return Container(
       margin: margin,
       decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+        color:
+            mj?.paper3 ??
+            theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
         borderRadius: BorderRadius.circular(borderRadius),
         border: Border.all(color: borderColor, width: 1),
       ),

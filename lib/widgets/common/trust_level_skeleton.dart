@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:app_icons/app_icons.dart';
 import '../common/skeleton.dart';
+import '../../theme/mojian_theme.dart';
 
 /// 信任级别要求页骨架屏
 class TrustLevelSkeleton extends StatelessWidget {
@@ -21,7 +22,10 @@ class TrustLevelSkeleton extends StatelessWidget {
             expandedHeight: 200,
             flexibleSpace: FlexibleSpaceBar(
               background: Container(
-                decoration: BoxDecoration(
+                // 墨笺:与正式页一致,纸底不要渐变
+                decoration: Theme.of(context).extension<MojianTokens>() != null
+                    ? BoxDecoration(color: Theme.of(context).colorScheme.surface)
+                    : BoxDecoration(
                   gradient: LinearGradient(
                     colors: [
                       colorScheme.surface,
