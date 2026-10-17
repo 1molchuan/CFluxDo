@@ -9,6 +9,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:super_clipboard/super_clipboard.dart';
 import 'package:m3e_ui/m3e_ui.dart';
 import '../../providers/preferences_provider.dart';
+import '../../providers/theme_provider.dart';
 import '../../services/discourse/discourse_service.dart';
 import '../../l10n/s.dart';
 import '../../services/toast_service.dart';
@@ -104,7 +105,10 @@ class _AiShareImagePreviewState extends ConsumerState<AiShareImagePreview> {
   void initState() {
     super.initState();
     final savedIndex = ref.read(preferencesProvider).shareImageThemeIndex;
-    _selectedTheme = ShareImageTheme.fromIndex(savedIndex);
+    _selectedTheme = ShareImageTheme.initial(
+      savedIndex,
+      mojianUi: ref.read(themeProvider).isMojian,
+    );
   }
 
   void _selectTheme(ShareImageTheme theme) {
@@ -112,18 +116,12 @@ class _AiShareImagePreviewState extends ConsumerState<AiShareImagePreview> {
     ref.read(preferencesProvider.notifier).setShareImageThemeIndex(theme.index);
   }
 
-  ThemeData _buildThemeData(ThemeData currentTheme) {
-    final brightness =
-        _selectedTheme.isDark ? Brightness.dark : Brightness.light;
-    return ThemeData(
-      useMaterial3: true,
-      brightness: brightness,
-      colorScheme: ColorScheme.fromSeed(
-        seedColor: currentTheme.colorScheme.primary,
-        brightness: brightness,
-      ),
-    );
-  }
+  ThemeData _buildThemeData(ThemeData currentTheme) =>
+      buildShareImageThemeData(
+        _selectedTheme,
+        currentTheme,
+        ref.read(themeProvider),
+      );
 
   Future<Uint8List?> _captureImage() async {
     await Future.delayed(const Duration(milliseconds: 50));

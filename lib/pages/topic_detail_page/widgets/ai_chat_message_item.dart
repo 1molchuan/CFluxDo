@@ -11,6 +11,7 @@ import 'package:m3e_ui/m3e_ui.dart';
 import '../../../l10n/s.dart';
 import '../../../pages/image_viewer_page.dart';
 import '../../../services/toast_service.dart';
+import '../../../theme/mojian_theme.dart';
 import '../../../utils/image_save_utils.dart';
 
 import '../../../widgets/markdown_editor/markdown_renderer.dart';
@@ -88,6 +89,7 @@ class AiChatMessageItem extends StatelessWidget {
 
   Widget _buildUserMessage(BuildContext context, {bool inSelectionMode = false}) {
     final theme = Theme.of(context);
+    final mj = theme.extension<MojianTokens>();
     final attachments = message.attachments ?? const [];
 
     return Align(
@@ -102,15 +104,21 @@ class AiChatMessageItem extends StatelessWidget {
             ? const EdgeInsets.only(top: 4, bottom: 4)
             : const EdgeInsets.only(left: 48, right: 16, top: 4, bottom: 4),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        decoration: BoxDecoration(
-          color: theme.colorScheme.primaryContainer,
-          borderRadius: const BorderRadius.only(
-            topLeft: Radius.circular(16),
-            topRight: Radius.circular(16),
-            bottomLeft: Radius.circular(16),
-            bottomRight: Radius.circular(4),
-          ),
-        ),
+        // 墨笺:提问是一张深一档的纸笺(方角小圆角),不用彩色气泡
+        decoration: mj != null
+            ? BoxDecoration(
+                color: mj.paper2,
+                borderRadius: BorderRadius.circular(8),
+              )
+            : BoxDecoration(
+                color: theme.colorScheme.primaryContainer,
+                borderRadius: const BorderRadius.only(
+                  topLeft: Radius.circular(16),
+                  topRight: Radius.circular(16),
+                  bottomLeft: Radius.circular(16),
+                  bottomRight: Radius.circular(4),
+                ),
+              ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.end,
           mainAxisSize: MainAxisSize.min,
@@ -123,7 +131,7 @@ class AiChatMessageItem extends StatelessWidget {
               SelectableText(
                 message.content,
                 style: theme.textTheme.bodyMedium?.copyWith(
-                  color: theme.colorScheme.onPrimaryContainer,
+                  color: mj?.ink ?? theme.colorScheme.onPrimaryContainer,
                 ),
               ),
           ],
@@ -134,6 +142,7 @@ class AiChatMessageItem extends StatelessWidget {
 
   Widget _buildAssistantMessage(BuildContext context, {bool inSelectionMode = false}) {
     final theme = Theme.of(context);
+    final mj = theme.extension<MojianTokens>();
     final isStreaming = message.status == MessageStatus.streaming;
     final isError = message.status == MessageStatus.error;
     final isCompleted = message.status == MessageStatus.completed;
@@ -151,19 +160,31 @@ class AiChatMessageItem extends StatelessWidget {
               ? double.infinity
               : MediaQuery.of(context).size.width * 0.85,
         ),
+        // 墨笺:回答直接排在纸上(不套气泡),左侧一道细墨线,宽度放开
         margin: inSelectionMode
             ? const EdgeInsets.only(top: 4, bottom: 4)
-            : const EdgeInsets.only(left: 16, right: 48, top: 4, bottom: 4),
+            : EdgeInsets.only(
+                left: 16,
+                right: mj != null ? 16 : 48,
+                top: 4,
+                bottom: 4,
+              ),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        decoration: BoxDecoration(
-          color: theme.colorScheme.surfaceContainerLow,
-          borderRadius: const BorderRadius.only(
-            topLeft: Radius.circular(16),
-            topRight: Radius.circular(16),
-            bottomLeft: Radius.circular(4),
-            bottomRight: Radius.circular(16),
-          ),
-        ),
+        decoration: mj != null
+            ? BoxDecoration(
+                border: Border(
+                  left: BorderSide(color: mj.ruleStrong, width: 2),
+                ),
+              )
+            : BoxDecoration(
+                color: theme.colorScheme.surfaceContainerLow,
+                borderRadius: const BorderRadius.only(
+                  topLeft: Radius.circular(16),
+                  topRight: Radius.circular(16),
+                  bottomLeft: Radius.circular(4),
+                  bottomRight: Radius.circular(16),
+                ),
+              ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
@@ -605,13 +626,18 @@ class _OptimizedPromptBlockState extends State<_OptimizedPromptBlock> {
     final theme = Theme.of(context);
     final color = theme.colorScheme.onSurfaceVariant;
 
+    final mj = theme.extension<MojianTokens>();
     return Container(
+      // 墨笺:细线框、无灰底
       decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+        color: mj != null
+            ? Colors.transparent
+            : theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
         borderRadius: BorderRadius.circular(8),
         border: Border.all(
-          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.5),
-          width: 0.5,
+          color: mj?.rule ??
+              theme.colorScheme.outlineVariant.withValues(alpha: 0.5),
+          width: mj != null ? 1 : 0.5,
         ),
       ),
       child: Column(
@@ -887,13 +913,18 @@ class _ThinkingBlockState extends State<_ThinkingBlock> {
     final theme = Theme.of(context);
     final color = theme.colorScheme.onSurfaceVariant;
 
+    final mj = theme.extension<MojianTokens>();
     return Container(
+      // 墨笺:细线框、无灰底
       decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+        color: mj != null
+            ? Colors.transparent
+            : theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
         borderRadius: BorderRadius.circular(8),
         border: Border.all(
-          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.5),
-          width: 0.5,
+          color: mj?.rule ??
+              theme.colorScheme.outlineVariant.withValues(alpha: 0.5),
+          width: mj != null ? 1 : 0.5,
         ),
       ),
       child: Column(

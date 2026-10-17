@@ -279,6 +279,26 @@ class MainActivity : FlutterActivity() {
                         result.error("ICON_CHANGE_FAILED", e.message, null)
                     }
                 }
+                // 系统启动画面跟随界面风格:墨笺用纸色底,经典恢复默认。
+                // setSplashScreenTheme 由系统持久化,下次冷启动生效;仅 Android 13+,
+                // 12 及以下保持默认(白/黑)。
+                "setSplashStyle" -> {
+                    val mojian = call.argument<Boolean>("mojian") ?: false
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        try {
+                            splashScreen.setSplashScreenTheme(
+                                if (mojian) R.style.LaunchThemeMojian
+                                else android.content.res.Resources.ID_NULL
+                            )
+                            result.success(true)
+                        } catch (e: Exception) {
+                            Log.w("AppIcon", "设置启动画面主题失败: ${e.message}")
+                            result.success(false)
+                        }
+                    } else {
+                        result.success(false)
+                    }
+                }
                 else -> result.notImplemented()
             }
         }

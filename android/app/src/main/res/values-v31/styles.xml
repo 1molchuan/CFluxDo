@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 墨笺:系统启动画面底色用纸色(与 MojianTokens.paper 浅色一致),
+         进 Flutter 后不再先闪一下白 -->
+    <style name="LaunchThemeMojian" parent="LaunchTheme">
+        <item name="android:windowSplashScreenBackground">#F6F2EA</item>
+        <item name="android:windowBackground">@color/mojian_paper</item>
+    </style>
+</resources>

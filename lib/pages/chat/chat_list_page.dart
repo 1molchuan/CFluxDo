@@ -23,6 +23,8 @@ import 'chat_browse_channels_page.dart';
 import 'chat_search_page.dart';
 import 'channel/chat_channel_page.dart';
 import 'new_chat_sheet.dart';
+import '../../theme/mojian_theme.dart';
+import '../../widgets/topic/topic_card.dart' show mojianCardDecoration;
 
 /// 桌面双栏下当前选中的会话(仅聊天页内部,不进平行视界栈体系——
 /// 聊天窗是常驻会话流,不是"层"语义)
@@ -413,8 +415,12 @@ class _ChatChannelTile extends StatelessWidget {
     final silentUnread = !muted && urgent == 0 && tracking.unreadCount > 0;
     final hasAnyUnread = urgent > 0 || silentUnread;
 
-    return Material(
-      color: selected
+    // 墨笺:平铺行 + 行底细线,选中 = 浅一层纸色 + 左侧强调色竖条;会话名宋体
+    final mojianRow = mojianCardDecoration(theme, isSelected: selected);
+    final tile = Material(
+      color: mojianRow != null
+          ? Colors.transparent
+          : selected
           ? theme.colorScheme.surfaceContainerHighest
           : Colors.transparent,
       child: InkWell(
@@ -444,6 +450,10 @@ class _ChatChannelTile extends StatelessWidget {
                                   overflow: TextOverflow.ellipsis,
                                   style: theme.textTheme.titleSmall?.copyWith(
                                     fontWeight: FontWeight.w600,
+                                    fontFamily: mojianRow != null
+                                        ? MojianTokens.serifFamily
+                                        : null,
+                                    fontSize: mojianRow != null ? 15.5 : null,
                                   ),
                                 ),
                               ),
@@ -518,6 +528,9 @@ class _ChatChannelTile extends StatelessWidget {
         ),
       ),
     );
+    return mojianRow == null
+        ? tile
+        : DecoratedBox(decoration: mojianRow, child: tile);
   }
 }
 

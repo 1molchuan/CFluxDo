@@ -5,6 +5,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:m3e_ui/m3e_ui.dart';
 import '../../models/topic.dart';
 import '../../providers/preferences_provider.dart';
+import '../../providers/theme_provider.dart';
+import '../../theme/mojian_theme.dart';
 import '../../services/discourse/discourse_service.dart';
 import '../../l10n/s.dart';
 import '../../services/toast_service.dart';
@@ -56,6 +58,15 @@ enum ShareImageTheme {
     bgColor: Color(0xFFE8F5E9),
     cardColor: Colors.white,
     isDark: false,
+  ),
+
+  /// 墨笺：纸色底、宋体标题、细线分隔、正文直接排在纸上（不套卡片）。
+  /// 追加在末尾：偏好里存的是序号，前面各项的序号不能变
+  mojian(
+    nameKey: 'share_themeMojian',
+    bgColor: Color(0xFFF6F2EA),
+    cardColor: Color(0xFFFBF8F2),
+    isDark: false,
   );
 
   const ShareImageTheme({
@@ -76,6 +87,7 @@ enum ShareImageTheme {
       case 'share_themeBlack': return l10n.share_themeBlack;
       case 'share_themeBlue': return l10n.share_themeBlue;
       case 'share_themeGreen': return l10n.share_themeGreen;
+      case 'share_themeMojian': return l10n.share_themeMojian;
       default: return nameKey;
     }
   }
@@ -90,6 +102,46 @@ enum ShareImageTheme {
     }
     return classic;
   }
+
+  /// 打开预览时的初始主题：用户选过就用选过的；从没选过（序号 < 0）时
+  /// 墨笺界面默认墨笺版式，经典界面仍是经典米黄
+  static ShareImageTheme initial(int savedIndex, {required bool mojianUi}) {
+    if (savedIndex < 0 && mojianUi) return mojian;
+    return fromIndex(savedIndex);
+  }
+}
+
+/// 分享图离屏渲染用的主题：墨笺版式用墨笺浅色主题（正文引用块、标题字体
+/// 跟详情页一致，强调色跟随当前设置）；其余版式沿用当前主色、只改亮暗。
+ThemeData buildShareImageThemeData(
+  ShareImageTheme shareTheme,
+  ThemeData currentTheme,
+  ThemeState themeState,
+) {
+  if (shareTheme == ShareImageTheme.mojian) {
+    return MojianTheme.build(
+      scheme: MojianTheme.colorScheme(
+        Brightness.light,
+        themeState.mojianAccent,
+        accentColor: themeState.mojianAccentPair?.$1,
+      ),
+      accent: themeState.mojianAccent,
+      fontFamily: currentTheme.textTheme.bodyMedium?.fontFamily,
+      pageTransitionsTheme: currentTheme.pageTransitionsTheme,
+      iconTheme: const IconThemeData(),
+      primaryIconTheme: const IconThemeData(),
+    );
+  }
+  final brightness = shareTheme.isDark ? Brightness.dark : Brightness.light;
+  // 使用当前主题的 seedColor 创建对应亮度的 ColorScheme
+  return ThemeData(
+    useMaterial3: true,
+    brightness: brightness,
+    colorScheme: ColorScheme.fromSeed(
+      seedColor: currentTheme.colorScheme.primary,
+      brightness: brightness,
+    ),
+  );
 }
 
 /// 分享图片预览页
@@ -140,7 +192,10 @@ class _ShareImagePreviewState extends ConsumerState<ShareImagePreview> {
     super.initState();
     // 从偏好设置中读取上次选择的主题
     final savedIndex = ref.read(preferencesProvider).shareImageThemeIndex;
-    _selectedTheme = ShareImageTheme.fromIndex(savedIndex);
+    _selectedTheme = ShareImageTheme.initial(
+      savedIndex,
+      mojianUi: ref.read(themeProvider).isMojian,
+    );
 
     // 初始化帖子数据
     _initPost();
@@ -213,20 +268,13 @@ class _ShareImagePreviewState extends ConsumerState<ShareImagePreview> {
     ref.read(preferencesProvider.notifier).setShareImageThemeIndex(theme.index);
   }
 
-  /// 基于当前主题创建新的 ThemeData，只改变亮度
-  ThemeData _buildThemeData(ThemeData currentTheme) {
-    final brightness = _selectedTheme.isDark ? Brightness.dark : Brightness.light;
-
-    // 使用当前主题的 seedColor 创建对应亮度的 ColorScheme
-    return ThemeData(
-      useMaterial3: true,
-      brightness: brightness,
-      colorScheme: ColorScheme.fromSeed(
-        seedColor: currentTheme.colorScheme.primary,
-        brightness: brightness,
-      ),
-    );
-  }
+  /// 基于当前主题创建新的 ThemeData（墨笺版式见 [buildShareImageThemeData]）
+  ThemeData _buildThemeData(ThemeData currentTheme) =>
+      buildShareImageThemeData(
+        _selectedTheme,
+        currentTheme,
+        ref.read(themeProvider),
+      );
 
   /// 构建预览内容
   Widget _buildPreviewContent(ThemeData theme) {

@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../providers/app_icon_provider.dart';
+import '../theme/mojian_theme.dart';
 
 /// 启动页"绘制 logo"动画组件
 ///
@@ -33,6 +34,9 @@ class _PreheatLogoState extends State<PreheatLogo>
   List<_LogoShape> _shapes = const [];
   Brightness? _brightness;
 
+  /// 墨笺:浅色块换成纸色、深色块换成墨色,和纸底融在一起
+  MojianTokens? _mojian;
+
   @override
   void initState() {
     super.initState();
@@ -49,9 +53,12 @@ class _PreheatLogoState extends State<PreheatLogo>
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    final brightness = Theme.of(context).brightness;
-    if (_brightness != brightness) {
+    final theme = Theme.of(context);
+    final brightness = theme.brightness;
+    final mojian = theme.extension<MojianTokens>();
+    if (_brightness != brightness || _mojian?.paper != mojian?.paper) {
       _brightness = brightness;
+      _mojian = mojian;
       _rebuildShapes();
     }
   }
@@ -66,8 +73,8 @@ class _PreheatLogoState extends State<PreheatLogo>
 
   void _rebuildShapes() {
     _shapes = widget.style == AppIconStyle.modern
-        ? _buildModernShapes(_brightness ?? Brightness.light)
-        : _buildClassicShapes();
+        ? _buildModernShapes(_brightness ?? Brightness.light, _mojian)
+        : _buildClassicShapes(_mojian);
   }
 
   @override
@@ -88,7 +95,10 @@ class _PreheatLogoState extends State<PreheatLogo>
         // 光晕随填充出现而渐亮,之后跟随 _glow 缓慢呼吸
         final glowIn = _segment(_entry.value, 0.45, 1.0, Curves.easeIn);
         final breathe = Curves.easeInOutSine.transform(_glow.value);
-        final glowAlpha = glowIn * (0.12 + 0.10 * breathe);
+        // 墨笺不要强调色光晕(与登录页一致),只留描线
+        final glowAlpha = _mojian != null
+            ? 0.0
+            : glowIn * (0.12 + 0.10 * breathe);
         final glowBlur = 36.0 + 16.0 * breathe;
 
         return Container(
@@ -225,7 +235,9 @@ class _LogoPainter extends CustomPainter {
 }
 
 /// 经典 logo(assets/logo.svg):底圆 + 内圆裁剪的三条色带,viewBox 1024
-List<_LogoShape> _buildClassicShapes() {
+List<_LogoShape> _buildClassicShapes(MojianTokens? mj) {
+  final light = mj?.paper2 ?? const Color(0xFFF0F0F0);
+  final dark = mj?.ink ?? const Color(0xFF1C1C1E);
   const center = Offset(512, 512);
   const innerRadius = 421.0;
 
@@ -249,7 +261,7 @@ List<_LogoShape> _buildClassicShapes() {
   return [
     _LogoShape(
       fillPath: outerCircle,
-      fill: const Color(0xFFF0F0F0),
+      fill: light,
       strokePath: outerCircle,
       strokeStart: 0.0,
       strokeEnd: 0.45,
@@ -258,7 +270,7 @@ List<_LogoShape> _buildClassicShapes() {
     ),
     _LogoShape(
       fillPath: band(91, 233),
-      fill: const Color(0xFF1C1C1E),
+      fill: dark,
       clip: innerClip,
       strokePath: chord(324),
       strokeStart: 0.20,
@@ -268,7 +280,7 @@ List<_LogoShape> _buildClassicShapes() {
     ),
     _LogoShape(
       fillPath: band(324, 376),
-      fill: const Color(0xFFF0F0F0),
+      fill: light,
       clip: innerClip,
       strokePath: chord(700),
       strokeStart: 0.30,
@@ -288,11 +300,15 @@ List<_LogoShape> _buildClassicShapes() {
 
 /// modern logo(assets/logo_modern*.svg):圆 + 旗形 + 底条 + 黄色块,
 /// viewBox -158 -158 1890 1890,构建后整体平移到正坐标系
-List<_LogoShape> _buildModernShapes(Brightness brightness) {
+List<_LogoShape> _buildModernShapes(Brightness brightness, MojianTokens? mj) {
   const offset = Offset(158, 158);
   final dark = brightness == Brightness.dark;
-  final circleColor = dark ? const Color(0xFF1C1C1E) : const Color(0xFFF0F0F3);
-  final flagColor = dark ? const Color(0xFFF0F0F3) : const Color(0xFF1C1C1E);
+  // 墨笺:圆是比纸深一档的纸色,旗形与底条用墨色(深色下墨色本身就是浅的)
+  final circleColor = mj != null
+      ? (dark ? mj.paper3 : mj.paper2)
+      : (dark ? const Color(0xFF1C1C1E) : const Color(0xFFF0F0F3));
+  final flagColor = mj?.ink ??
+      (dark ? const Color(0xFFF0F0F3) : const Color(0xFF1C1C1E));
 
   final circle = Path()
     ..addOval(Rect.fromCircle(center: const Offset(787, 787), radius: 787));

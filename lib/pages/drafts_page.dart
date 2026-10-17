@@ -17,6 +17,8 @@ import '../l10n/s.dart';
 import '../utils/dialog_utils.dart';
 import '../services/drafts_signal.dart';
 import '../providers/selected_topic_provider.dart';
+import '../theme/mojian_theme.dart';
+import '../widgets/topic/topic_card.dart' show mojianCardDecoration;
 import 'create_topic_page.dart';
 import 'topic_detail_page/topic_detail_page.dart';
 
@@ -155,6 +157,13 @@ class _DraftsPageState extends ConsumerState<DraftsPage> {
         onRefresh: _onRefresh,
         child: draftsAsync.when(
           data: (drafts) {
+            final mojian = Theme.of(context).extension<MojianTokens>() != null;
+            if (drafts.isEmpty && mojian) {
+              return MasterDetailEmptyState(
+                icon: Symbols.drafts_rounded,
+                message: context.l10n.drafts_empty,
+              );
+            }
             if (drafts.isEmpty) {
               return Center(
                 child: Column(
@@ -178,10 +187,11 @@ class _DraftsPageState extends ConsumerState<DraftsPage> {
             return ListView.builder(
               controller: _scrollController,
               // 底部让出 extendBody 注入的底栏高度
+              // 墨笺:平铺行贴边,行间细线由行自己画
               padding: EdgeInsets.fromLTRB(
-                12,
-                12,
-                12,
+                mojian ? 0 : 12,
+                mojian ? 4 : 12,
+                mojian ? 0 : 12,
                 12 + MediaQuery.paddingOf(context).bottom,
               ),
               itemCount: drafts.length,
@@ -402,6 +412,11 @@ class _DraftCard extends StatelessWidget {
     final title = draft.displayTitle;
     final content = data.reply;
 
+    final mj = theme.extension<MojianTokens>();
+    if (mj != null) {
+      return _buildMojian(context, theme, mj, typeLabel, typeIcon, title);
+    }
+
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
       clipBehavior: Clip.antiAlias,
@@ -492,6 +507,101 @@ class _DraftCard extends StatelessWidget {
                 ),
               ],
             ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+extension on _DraftCard {
+  /// 墨笺:平铺行——类型与时间一行小字在上,宋体标题,正文摘两行,
+  /// 删除是行尾淡墨图标(不用红色);选中 = 浅一层纸色 + 左侧强调色竖条
+  Widget _buildMojian(
+    BuildContext context,
+    ThemeData theme,
+    MojianTokens mj,
+    String typeLabel,
+    IconData typeIcon,
+    String title,
+  ) {
+    final content = draft.data.reply;
+    final small = theme.textTheme.labelSmall?.copyWith(
+      color: mj.ink3,
+      fontSize: 12,
+    );
+    return DecoratedBox(
+      decoration: mojianCardDecoration(theme, isSelected: selected)!,
+      child: Material(
+        type: MaterialType.transparency,
+        child: InkWell(
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 10, 6, 14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(typeIcon, size: 14, color: mj.ink3),
+                    const SizedBox(width: 5),
+                    Text(
+                      typeLabel,
+                      style: small?.copyWith(
+                        color: mj.ink2,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    if (draft.updatedAt != null) ...[
+                      Text('  ·  ', style: small?.copyWith(color: mj.ink4)),
+                      RelativeTimeText(dateTime: draft.updatedAt, style: small),
+                    ],
+                    const Spacer(),
+                    IconButton(
+                      icon: Icon(
+                        Symbols.delete_rounded,
+                        size: 19,
+                        color: mj.ink3,
+                      ),
+                      onPressed: onDelete,
+                      visualDensity: VisualDensity.compact,
+                      tooltip: context.l10n.drafts_deleteDraft,
+                    ),
+                  ],
+                ),
+                Padding(
+                  padding: const EdgeInsets.only(right: 10),
+                  child: Text(
+                    title,
+                    style: TextStyle(
+                      fontFamily: MojianTokens.serifFamily,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                      height: 1.45,
+                      color: mj.ink,
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                if (content != null && content.isNotEmpty) ...[
+                  const SizedBox(height: 5),
+                  Padding(
+                    padding: const EdgeInsets.only(right: 10),
+                    child: Text(
+                      content,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: mj.ink3,
+                        fontSize: 13,
+                        height: 1.6,
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ],
+            ),
           ),
         ),
       ),

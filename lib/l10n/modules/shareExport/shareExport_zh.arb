@@ -145,5 +145,6 @@
   "share_themeGreen": "绿野",
   "share_themeWhite": "纯白",
   "share_uploadFailed": "上传失败，请重试",
-  "share_uploading": "正在上传..."
+  "share_uploading": "正在上传...",
+  "share_themeMojian": "墨笺"
 }

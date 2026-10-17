@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 墨笺深色:深墨蓝纸(与 MojianTokens.paper 深色一致) -->
+    <style name="LaunchThemeMojian" parent="LaunchTheme">
+        <item name="android:windowSplashScreenBackground">#12161C</item>
+        <item name="android:windowBackground">@color/mojian_paper</item>
+    </style>
+</resources>

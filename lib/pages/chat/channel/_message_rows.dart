@@ -15,9 +15,15 @@ class _ThreadEntryCard extends StatelessWidget {
     final theme = Theme.of(context);
     final lastUser = thread.lastReplyUser;
     final participants = thread.participants.take(3).toList();
+    final mj = theme.extension<MojianTokens>();
     return Material(
-      color: theme.colorScheme.surfaceContainerHigh.withValues(alpha: 0.5),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      // 墨笺:不要灰底圆角卡,改左侧一道细竖线(同正文引用块)
+      color: mj != null
+          ? Colors.transparent
+          : theme.colorScheme.surfaceContainerHigh.withValues(alpha: 0.5),
+      shape: mj != null
+          ? Border(left: BorderSide(color: mj.ruleStrong, width: 2))
+          : RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: onTap,
@@ -154,19 +160,29 @@ class _ReactionChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final mj = theme.extension<MojianTokens>();
     final url = EmojiHandler().getEmojiUrl(reaction.emoji);
     final chip = Material(
-      color: reaction.reacted
+      // 墨笺:细线胶囊,自己点过的描强调色、底色极淡
+      color: mj != null
+          ? (reaction.reacted ? mj.accentSoft : Colors.transparent)
+          : reaction.reacted
           ? theme.colorScheme.primary.withValues(alpha: 0.12)
           : theme.colorScheme.surfaceContainerHigh.withValues(alpha: 0.6),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(8),
-        side: BorderSide(
-          color: reaction.reacted
-              ? theme.colorScheme.primary.withValues(alpha: 0.7)
-              : theme.colorScheme.outlineVariant.withValues(alpha: 0.3),
-        ),
-      ),
+      shape: mj != null
+          ? StadiumBorder(
+              side: BorderSide(
+                color: reaction.reacted ? mj.accent : mj.ruleStrong,
+              ),
+            )
+          : RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
+              side: BorderSide(
+                color: reaction.reacted
+                    ? theme.colorScheme.primary.withValues(alpha: 0.7)
+                    : theme.colorScheme.outlineVariant.withValues(alpha: 0.3),
+              ),
+            ),
       child: InkWell(
         onTap: onTap,
         onLongPress: onLongPress,
@@ -214,14 +230,19 @@ class _AddReactionChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final mj = theme.extension<MojianTokens>();
     return Material(
-      color: theme.colorScheme.surfaceContainerHigh.withValues(alpha: 0.6),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(8),
-        side: BorderSide(
-          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.3),
-        ),
-      ),
+      color: mj != null
+          ? Colors.transparent
+          : theme.colorScheme.surfaceContainerHigh.withValues(alpha: 0.6),
+      shape: mj != null
+          ? StadiumBorder(side: BorderSide(color: mj.ruleStrong))
+          : RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
+              side: BorderSide(
+                color: theme.colorScheme.outlineVariant.withValues(alpha: 0.3),
+              ),
+            ),
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(8),
@@ -246,7 +267,9 @@ class _DayDivider extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final line = theme.colorScheme.outlineVariant.withValues(alpha: 0.35);
+    final mj = theme.extension<MojianTokens>();
+    final line =
+        mj?.rule ?? theme.colorScheme.outlineVariant.withValues(alpha: 0.35);
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 4),
       child: Row(
@@ -254,12 +277,21 @@ class _DayDivider extends StatelessWidget {
           Expanded(child: Divider(height: 1, color: line)),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 10),
+            // 墨笺:日期用宋体、字距拉开(同通知页按天分组)
             child: Text(
               TimeUtils.formatShortDate(date),
-              style: theme.textTheme.labelSmall?.copyWith(
-                color: theme.colorScheme.outline,
-                fontWeight: FontWeight.w600,
-              ),
+              style: mj != null
+                  ? TextStyle(
+                      fontFamily: MojianTokens.serifFamily,
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 1.6,
+                      color: mj.ink3,
+                    )
+                  : theme.textTheme.labelSmall?.copyWith(
+                      color: theme.colorScheme.outline,
+                      fontWeight: FontWeight.w600,
+                    ),
             ),
           ),
           Expanded(child: Divider(height: 1, color: line)),

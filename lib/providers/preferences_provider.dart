@@ -588,7 +588,8 @@ class PreferencesNotifier extends StateNotifier<AppPreferences> {
           openExternalLinksInAppBrowser:
               _prefs.getBool(_openExternalLinksInAppBrowserKey) ?? false,
           contentFontScale: _prefs.getDouble(_contentFontScaleKey) ?? 1.0,
-          shareImageThemeIndex: _prefs.getInt(_shareImageThemeIndexKey) ?? 0,
+          // -1 = 从没选过（墨笺界面下默认墨笺版式，见 ShareImageTheme.initial）
+          shareImageThemeIndex: _prefs.getInt(_shareImageThemeIndexKey) ?? -1,
           autoFillLogin: _prefs.getBool(_autoFillLoginKey) ?? true,
           clipboardTopicLinkDetection:
               _prefs.getBool(_clipboardTopicLinkDetectionKey) ?? false,

@@ -2,6 +2,9 @@
 <resources>
     <style name="LaunchTheme" parent="@android:style/Theme.Light.NoTitleBar">
     </style>
+    <!-- 墨笺风格的系统启动画面:只在 Android 12+ 的 values-v31 里换纸色,
+         低版本与 LaunchTheme 相同(由 MainActivity.setSplashStyle 在 13+ 持久切换) -->
+    <style name="LaunchThemeMojian" parent="LaunchTheme" />
     <style name="NormalTheme" parent="@android:style/Theme.Light.NoTitleBar">
         <item name="android:windowBackground">?android:colorBackground</item>
     </style>

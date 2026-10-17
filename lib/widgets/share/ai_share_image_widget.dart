@@ -50,11 +50,19 @@ class AiShareImageWidget extends StatelessWidget {
     final bgColor = shareTheme.bgColor;
     final cardColor = shareTheme.cardColor;
 
-    final textColor = isDark ? Colors.white : Colors.black;
-    final secondaryTextColor = isDark
+    // 墨笺版式：暖墨色文字与纸色细线，不用纯黑
+    final mojian = shareTheme == ShareImageTheme.mojian;
+    final textColor = mojian
+        ? const Color(0xFF1D1B18)
+        : (isDark ? Colors.white : Colors.black);
+    final secondaryTextColor = mojian
+        ? const Color(0xFF68615A)
+        : isDark
         ? Colors.white.withValues(alpha: 0.6)
         : Colors.black.withValues(alpha: 0.6);
-    final borderColor = isDark
+    final borderColor = mojian
+        ? const Color(0xFFE3DBCD)
+        : isDark
         ? Colors.white.withValues(alpha: 0.1)
         : Colors.black.withValues(alpha: 0.1);
 

@@ -1,4 +1,9 @@
+import 'dart:async';
+import 'dart:io' show Platform;
+
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show MethodChannel;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 // ignore: depend_on_referenced_packages
 import 'package:flutter_riverpod/legacy.dart';
@@ -214,6 +219,22 @@ class ThemeNotifier extends StateNotifier<ThemeState> {
     if (_prefs.getString(_uiStyleKey) == null) {
       _prefs.setString(_uiStyleKey, state.uiStyle.name);
     }
+    _syncSplashStyle();
+  }
+
+  static const _launcherChannel = MethodChannel(
+    'com.github.lingyan000.fluxdo/app_icon',
+  );
+
+  /// 系统启动画面跟随界面风格(Android 13+ 由系统持久化,下次冷启动生效):
+  /// 墨笺是纸色底,经典恢复默认白/黑。失败不影响任何功能。
+  void _syncSplashStyle() {
+    if (kIsWeb || !Platform.isAndroid) return;
+    unawaited(
+      _launcherChannel
+          .invokeMethod<bool>('setSplashStyle', {'mojian': state.isMojian})
+          .catchError((_) => false),
+    );
   }
 
   /// 取走「刚升级到墨笺」的提示机会（只返回一次 true）。
@@ -439,6 +460,7 @@ class ThemeNotifier extends StateNotifier<ThemeState> {
 
   Future<void> setUiStyle(UiStyle style) async {
     state = state.copyWith(uiStyle: style);
+    _syncSplashStyle();
     await _prefs.setString(_uiStyleKey, style.name);
   }
 

@@ -14,6 +14,8 @@ import '../../utils/motion_springs.dart';
 import '../../utils/number_utils.dart';
 import '../../utils/tag_icon_list.dart';
 import '../../utils/url_helper.dart';
+import '../../theme/mojian_theme.dart';
+import '../common/mojian_section_label.dart';
 import '../common/predictive_back_overlay_handler.dart';
 import '../../services/discourse_cache_manager.dart';
 import '../../pages/category_topics_page.dart';
@@ -193,8 +195,11 @@ class ControlledCategoryDrawerState extends State<ControlledCategoryDrawer>
                   onHorizontalDragUpdate: (d) => dragBy(d.primaryDelta ?? 0),
                   onHorizontalDragEnd: (d) =>
                       settle(d.velocity.pixelsPerSecond.dx),
+                  // 墨笺:暖墨色遮罩、轻一些,不压成一片死黑
                   child: ColoredBox(
-                    color: Colors.black.withValues(alpha: 0.54 * v),
+                    color: Theme.of(context).extension<MojianTokens>() != null
+                        ? const Color(0xFF14110D).withValues(alpha: 0.42 * v)
+                        : Colors.black.withValues(alpha: 0.54 * v),
                   ),
                 ),
               ),
@@ -453,11 +458,15 @@ class _CategoryDrawerState extends ConsumerState<CategoryDrawer> {
       );
     }
 
+    final mj = Theme.of(context).extension<MojianTokens>();
     return Drawer(
       backgroundColor: colorScheme.surface,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.horizontal(right: Radius.circular(24)),
-      ),
+      // 墨笺:直角纸边 + 右侧一条细线,不要大圆角
+      shape: mj != null
+          ? Border(right: BorderSide(color: mj.rule))
+          : const RoundedRectangleBorder(
+              borderRadius: BorderRadius.horizontal(right: Radius.circular(24)),
+            ),
       child: SafeArea(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -664,17 +673,22 @@ class _CategoryDrawerState extends ConsumerState<CategoryDrawer> {
                   alignment: Alignment.bottomLeft,
                   child: Padding(
                     padding: const EdgeInsets.fromLTRB(8, 0, 8, 6),
-                    child: Text(
-                      group.name ?? S.current.tag_otherTags,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        letterSpacing: 0.3,
-                        color: colorScheme.onSurfaceVariant,
-                      ),
-                    ),
+                    // 墨笺:组名同分区小标题(宋体、字距拉开)
+                    child: Theme.of(context).extension<MojianTokens>() != null
+                        ? MojianSectionLabel(
+                            group.name ?? S.current.tag_otherTags,
+                          )
+                        : Text(
+                            group.name ?? S.current.tag_otherTags,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              letterSpacing: 0.3,
+                              color: colorScheme.onSurfaceVariant,
+                            ),
+                          ),
                   ),
                 ),
               ),
@@ -804,6 +818,12 @@ class _SectionLabel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    if (Theme.of(context).extension<MojianTokens>() != null) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(10, 8, 8, 6),
+        child: MojianSectionLabel(text),
+      );
+    }
     return Padding(
       padding: const EdgeInsets.fromLTRB(8, 4, 8, 6),
       child: Text(
@@ -845,69 +865,86 @@ class _CategoryRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    final categoryColor = _parseColor(category.color, colorScheme.primary);
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final mj = theme.extension<MojianTokens>();
+    // 墨笺:分类色按深浅色调整(深色掺白),行与行之间一条细线
+    final categoryColor = mj != null
+        ? MojianTheme.categoryColor(category.color, theme.brightness)
+        : _parseColor(category.color, colorScheme.primary);
     final expanded = expandState;
 
     return Padding(
-      padding: EdgeInsets.only(left: indent ? 20 : 0, bottom: 2),
+      padding: EdgeInsets.only(
+        left: indent ? 20 : 0,
+        bottom: mj != null ? 0 : 2,
+      ),
       child: Material(
         color: Colors.transparent,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(mj != null ? 0 : 14),
         clipBehavior: Clip.antiAlias,
         child: Builder(
           builder: (rowContext) => InkWell(
             onTap: onTap,
             onLongPress: () => onLongPress(rowContext),
             onSecondaryTap: () => onLongPress(rowContext),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 10),
-              child: SizedBox(
-                height: 48,
-                child: Row(
-                  children: [
-                    // 彩色图标块（🔒 受限为右下小角标）
-                    _CategoryIconBlock(
-                      category: category,
-                      color: categoryColor,
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        category.name,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 14.5,
-                          fontWeight: pinned
-                              ? FontWeight.w500
-                              : FontWeight.w400,
-                          color: colorScheme.onSurface,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                border: mj == null
+                    ? null
+                    : Border(bottom: BorderSide(color: mj.rule, width: 0)),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+                child: SizedBox(
+                  height: 48,
+                  child: Row(
+                    children: [
+                      // 彩色图标块（🔒 受限为右下小角标）
+                      _CategoryIconBlock(
+                        category: category,
+                        color: categoryColor,
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          category.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 14.5,
+                            fontWeight: pinned
+                                ? FontWeight.w500
+                                : FontWeight.w400,
+                            color: mj?.ink ?? colorScheme.onSurface,
+                          ),
                         ),
                       ),
-                    ),
-                    // 收藏态：小 ★ 状态点缀（非按钮，长按菜单里操作）
-                    if (pinned)
-                      Icon(
-                        Symbols.star_rounded,
-                        size: 16,
-                        fill: 1,
-                        color: colorScheme.primary.withValues(alpha: 0.75),
-                      ),
-                    // 展开态指示（非按钮：整行即展开/收起）
-                    if (expanded != null) ...[
-                      const SizedBox(width: 4),
-                      AnimatedRotation(
-                        turns: expanded ? 0.5 : 0,
-                        duration: const Duration(milliseconds: 180),
-                        child: Icon(
-                          Symbols.keyboard_arrow_down_rounded,
-                          size: 20,
-                          color: colorScheme.onSurfaceVariant,
+                      // 收藏态：小 ★ 状态点缀（非按钮，长按菜单里操作）
+                      if (pinned)
+                        Icon(
+                          Symbols.star_rounded,
+                          size: 16,
+                          fill: 1,
+                          color:
+                              mj?.gold ??
+                              colorScheme.primary.withValues(alpha: 0.75),
                         ),
-                      ),
+                      // 展开态指示（非按钮：整行即展开/收起）
+                      if (expanded != null) ...[
+                        const SizedBox(width: 4),
+                        AnimatedRotation(
+                          turns: expanded ? 0.5 : 0,
+                          duration: const Duration(milliseconds: 180),
+                          child: Icon(
+                            Symbols.keyboard_arrow_down_rounded,
+                            size: 20,
+                            color: mj?.ink3 ?? colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
                     ],
-                  ],
+                  ),
                 ),
               ),
             ),
@@ -930,11 +967,12 @@ class _AllTopicsRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final mj = Theme.of(context).extension<MojianTokens>();
     return Padding(
-      padding: const EdgeInsets.only(left: 20, bottom: 2),
+      padding: EdgeInsets.only(left: 20, bottom: mj != null ? 0 : 2),
       child: Material(
         color: Colors.transparent,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(mj != null ? 0 : 14),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
           onTap: onTap,
@@ -947,10 +985,12 @@ class _AllTopicsRow extends StatelessWidget {
                   Container(
                     width: 32,
                     height: 32,
-                    decoration: BoxDecoration(
-                      color: parentColor.withValues(alpha: 0.14),
-                      borderRadius: BorderRadius.circular(9),
-                    ),
+                    decoration: mj != null
+                        ? null
+                        : BoxDecoration(
+                            color: parentColor.withValues(alpha: 0.14),
+                            borderRadius: BorderRadius.circular(9),
+                          ),
                     child: Center(
                       child: Icon(
                         Symbols.clear_all_rounded,
@@ -967,7 +1007,7 @@ class _AllTopicsRow extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         fontSize: 14.5,
-                        color: colorScheme.onSurface,
+                        color: mj?.ink2 ?? colorScheme.onSurface,
                       ),
                     ),
                   ),
@@ -998,6 +1038,33 @@ class _TagGroupChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final mj = Theme.of(context).extension<MojianTokens>();
+    if (mj != null) {
+      // 墨笺:与首页分类行同一套药丸——选中墨底纸字,未选细线框
+      return Center(
+        child: Material(
+          color: selected ? mj.ink : Colors.transparent,
+          shape: StadiumBorder(
+            side: BorderSide(color: selected ? mj.ink : mj.ruleStrong),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: onTap,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 5),
+              child: Text(
+                label,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+                  color: selected ? mj.paper : mj.ink2,
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
     return Center(
       child: Material(
         color: selected
@@ -1042,14 +1109,19 @@ class _TagRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final mj = Theme.of(context).extension<MojianTokens>();
     final tagInfo = TagIconList.get(tag.name);
-    final accent = tagInfo?.color ?? colorScheme.primary;
+    final accent = tagInfo?.color ?? mj?.ink3 ?? colorScheme.primary;
+    // 墨笺:热度条用强调色,不随标签色变花
+    final heatColor = mj != null
+        ? mj.accent.withValues(alpha: 0.55)
+        : accent.withValues(alpha: 0.65);
 
     return Padding(
-      padding: const EdgeInsets.only(bottom: 2),
+      padding: EdgeInsets.only(bottom: mj != null ? 0 : 2),
       child: Material(
         color: Colors.transparent,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(mj != null ? 0 : 14),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
           onTap: onTap,
@@ -1063,10 +1135,12 @@ class _TagRow extends StatelessWidget {
                   Container(
                     width: 32,
                     height: 32,
-                    decoration: BoxDecoration(
-                      color: accent.withValues(alpha: 0.14),
-                      borderRadius: BorderRadius.circular(9),
-                    ),
+                    decoration: mj != null
+                        ? null
+                        : BoxDecoration(
+                            color: accent.withValues(alpha: 0.14),
+                            borderRadius: BorderRadius.circular(9),
+                          ),
                     child: Center(
                       child: tagInfo != null
                           ? FaIcon(tagInfo.icon, size: 15, color: accent)
@@ -1085,7 +1159,7 @@ class _TagRow extends StatelessWidget {
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
                             fontSize: 14.5,
-                            color: colorScheme.onSurface,
+                            color: mj?.ink ?? colorScheme.onSurface,
                           ),
                         ),
                         const SizedBox(height: 5),
@@ -1098,14 +1172,16 @@ class _TagRow extends StatelessWidget {
                               builder: (context, constraints) => Stack(
                                 children: [
                                   Container(
-                                    color: colorScheme.surfaceContainerHighest
-                                        .withValues(alpha: 0.6),
+                                    color:
+                                        mj?.rule ??
+                                        colorScheme.surfaceContainerHighest
+                                            .withValues(alpha: 0.6),
                                   ),
                                   Container(
                                     width:
                                         constraints.maxWidth *
                                         heat.clamp(0.02, 1.0),
-                                    color: accent.withValues(alpha: 0.65),
+                                    color: heatColor,
                                   ),
                                 ],
                               ),
@@ -1145,6 +1221,48 @@ class _DrawerTabSwitcher extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final mj = Theme.of(context).extension<MojianTokens>();
+    if (mj != null) {
+      // 墨笺:两个宋体文字页签,选中墨色 + 下方强调色短横(同相关话题页签)
+      Widget tab(String label, bool selected, VoidCallback onTap) => InkWell(
+        onTap: selected ? null : onTap,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(4, 6, 4, 4),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                label,
+                style: TextStyle(
+                  fontFamily: MojianTokens.serifFamily,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                  color: selected ? mj.ink : mj.ink3,
+                ),
+              ),
+              const SizedBox(height: 5),
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 180),
+                width: 18,
+                height: 2,
+                decoration: BoxDecoration(
+                  color: selected ? mj.accent : Colors.transparent,
+                  borderRadius: BorderRadius.circular(1),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          tab(S.current.category_categories, !showTags, () => onChanged(false)),
+          const SizedBox(width: 14),
+          tab(S.current.tag_tabTags, showTags, () => onChanged(true)),
+        ],
+      );
+    }
 
     Widget segment(String label, bool selected, VoidCallback onTap) {
       return GestureDetector(
@@ -1206,13 +1324,17 @@ class _CategoryIconBlock extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final mj = Theme.of(context).extension<MojianTokens>();
+    // 墨笺:不要彩色底块,只留分类图标本身
     final block = Container(
       width: 32,
       height: 32,
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.14),
-        borderRadius: BorderRadius.circular(9),
-      ),
+      decoration: mj != null
+          ? null
+          : BoxDecoration(
+              color: color.withValues(alpha: 0.14),
+              borderRadius: BorderRadius.circular(9),
+            ),
       child: Center(child: _buildCategoryIcon(category, color, 18)),
     );
     if (!category.readRestricted) return block;

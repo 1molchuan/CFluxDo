@@ -354,8 +354,11 @@ class _MessageBubbleState extends State<_MessageBubble> {
     // 扁平行:不分左右,自己/别人同为左对齐,靠名字配色区分。
     // 结构 = [64 左沟槽(簇首头像/簇内 hover 时间)][内容列(簇首头行+正文)]
     // 整行 hover 染色;高亮/hover 底色画在全宽行上。
+    final mj = theme.extension<MojianTokens>();
     var rowColor = widget.highlighted
-        ? theme.colorScheme.tertiaryContainer.withValues(alpha: 0.35)
+        // 墨笺:跳转落点用淡金荧光笔底(同搜索命中)
+        ? (mj?.gold.withValues(alpha: 0.16) ??
+              theme.colorScheme.tertiaryContainer.withValues(alpha: 0.35))
         : _pressing
         ? theme.colorScheme.onSurface.withValues(alpha: 0.08)
         : _rowHovered && PlatformUtils.isDesktop
@@ -473,9 +476,10 @@ class _MessageBubbleState extends State<_MessageBubble> {
                       overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.titleSmall?.copyWith(
                         fontWeight: FontWeight.w600,
+                        // 墨笺:自己强调色,别人墨色
                         color: isSelf
                             ? theme.colorScheme.primary
-                            : theme.colorScheme.secondary,
+                            : (mj?.ink ?? theme.colorScheme.secondary),
                       ),
                     ),
                   ),

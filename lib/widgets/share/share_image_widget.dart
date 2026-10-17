@@ -7,6 +7,8 @@ import 'package:jovial_svg/jovial_svg.dart';
 import '../../constants.dart';
 import '../../l10n/s.dart';
 import '../../models/topic.dart';
+import '../../providers/discourse_providers.dart';
+import '../../theme/mojian_theme.dart';
 import '../../utils/fluxdo_render_callbacks.dart';
 import '../../utils/time_utils.dart';
 import '../common/smart_avatar.dart';
@@ -57,6 +59,10 @@ class ShareImageWidget extends ConsumerWidget {
         post ??
         detail.postStream.posts.where((p) => p.postNumber == 1).firstOrNull ??
         detail.postStream.posts.firstOrNull;
+
+    if (targetPost != null && shareTheme == ShareImageTheme.mojian) {
+      return _buildMojian(context, ref, targetPost);
+    }
 
     if (targetPost == null) {
       return RepaintBoundary(
@@ -124,6 +130,173 @@ class ShareImageWidget extends ConsumerWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  /// 墨笺版式：报头双线 + 宋体小报名、分类与标签一行、宋体大标题、
+  /// 署名一行，正文直接排在纸上（与详情页同一套正文字样），细线收尾附链接
+  Widget _buildMojian(BuildContext context, WidgetRef ref, Post post) {
+    final theme = Theme.of(context);
+    final mj =
+        theme.extension<MojianTokens>() ??
+        MojianTokens.of(Brightness.light, MojianAccent.cinnabar);
+    final category = ref.watch(categoryMapProvider).value?[detail.categoryId];
+    final tags = detail.tags ?? const <Tag>[];
+    final small = TextStyle(fontSize: 12, color: mj.ink3, height: 1.4);
+    final titleStyle = TextStyle(
+      fontFamily: MojianTokens.serifFamily,
+      fontSize: 21,
+      fontWeight: FontWeight.w700,
+      height: 1.42,
+      letterSpacing: 0.3,
+      color: mj.ink,
+    );
+    final name = post.name?.isNotEmpty == true ? post.name! : post.username;
+
+    return RepaintBoundary(
+      key: repaintBoundaryKey,
+      child: Container(
+        width: 375,
+        color: mj.paper,
+        padding: const EdgeInsets.fromLTRB(22, 20, 22, 18),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // 报头：粗墨线 + 细线，下面是报名
+            Container(height: 1.5, color: mj.ink),
+            const SizedBox(height: 3),
+            Container(height: 0.6, color: mj.ruleStrong),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: ScalableImageWidget.fromSISource(
+                    si: ScalableImageSource.fromSvg(
+                      rootBundle,
+                      'assets/logo.svg',
+                      warnF: (_) {},
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  'LINUX DO',
+                  style: TextStyle(
+                    fontFamily: MojianTokens.serifFamily,
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 2.4,
+                    color: mj.ink2,
+                  ),
+                ),
+                const Spacer(),
+                Text(TimeUtils.formatShortDate(post.createdAt), style: small),
+              ],
+            ),
+            const SizedBox(height: 18),
+            if (category != null || tags.isNotEmpty) ...[
+              Text.rich(
+                TextSpan(
+                  children: [
+                    if (category != null) ...[
+                      WidgetSpan(
+                        alignment: PlaceholderAlignment.middle,
+                        child: Padding(
+                          padding: const EdgeInsets.only(right: 6),
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              color: MojianTheme.categoryColor(
+                                category.color,
+                                Brightness.light,
+                              ),
+                              borderRadius: BorderRadius.circular(1.5),
+                            ),
+                            child: const SizedBox(width: 7, height: 7),
+                          ),
+                        ),
+                      ),
+                      TextSpan(
+                        text: category.name,
+                        style: TextStyle(
+                          color: mj.ink2,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                    for (final tag in tags) ...[
+                      const TextSpan(text: '   '),
+                      TextSpan(
+                        text: '#',
+                        style: TextStyle(color: mj.ink4),
+                      ),
+                      TextSpan(text: tag.name),
+                    ],
+                  ],
+                ),
+                style: small,
+              ),
+              const SizedBox(height: 8),
+            ],
+            Text.rich(
+              TextSpan(
+                style: titleStyle,
+                children: EmojiText.buildEmojiSpans(
+                  context,
+                  detail.title,
+                  titleStyle,
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                SmartAvatar(
+                  imageUrl: post.getAvatarUrl(size: 72),
+                  radius: 10,
+                  fallbackText: post.username,
+                  backgroundColor: mj.paper2,
+                ),
+                const SizedBox(width: 8),
+                Flexible(
+                  child: Text.rich(
+                    TextSpan(
+                      children: [
+                        TextSpan(
+                          text: name,
+                          style: TextStyle(color: mj.ink2),
+                        ),
+                        TextSpan(
+                          text:
+                              ' · ${TimeUtils.formatRelativeTime(post.createdAt)}',
+                        ),
+                      ],
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: small.copyWith(fontSize: 12.5),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            Container(height: 0.6, color: mj.rule),
+            const SizedBox(height: 14),
+            _buildContent(
+              post,
+              Colors.transparent,
+              padding: EdgeInsets.zero,
+              baseTextStyle: MojianTheme.postBodyStyle(theme, 1.0),
+            ),
+            const SizedBox(height: 18),
+            Container(height: 0.6, color: mj.rule),
+            const SizedBox(height: 10),
+            _buildShareLink(post, mj.ink3),
+          ],
+        ),
       ),
     );
   }
@@ -222,7 +395,12 @@ class ShareImageWidget extends ConsumerWidget {
     );
   }
 
-  Widget _buildContent(Post post, Color cardColor) {
+  Widget _buildContent(
+    Post post,
+    Color cardColor, {
+    EdgeInsets padding = const EdgeInsets.all(12),
+    TextStyle? baseTextStyle,
+  }) {
     // 预处理 cooked(注入 mention 状态 emoji + 链接点击数),与详情页一致,
     // 保证截图里 mention/click-count 等动态内容也能渲染。
     final preprocessed = FluxdoRenderCallbacks.preprocessCookedForRender(post);
@@ -239,7 +417,7 @@ class ShareImageWidget extends ConsumerWidget {
 
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(12),
+      padding: padding,
       decoration: BoxDecoration(
         color: cardColor,
         borderRadius: BorderRadius.circular(8),
@@ -252,6 +430,7 @@ class ShareImageWidget extends ConsumerWidget {
       child: FluxdoRender(
         cookedHtml: preprocessed,
         parsedNodes: parsedNodes,
+        baseTextStyle: baseTextStyle,
         selectionEnabled: false,
         screenshotMode: true,
         linkHandler: callbacks.linkHandler,
