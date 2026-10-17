@@ -90,6 +90,7 @@ import 'utils/image_decode_gate.dart';
 import 'widgets/post/post_item/render_parse_cache.dart';
 import 'utils/scroll_busy_signal.dart';
 import 'theme/mojian_theme.dart';
+import 'utils/responsive.dart';
 import 'theme/theme_resolver.dart';
 import 'widgets/common/app_background_layer.dart';
 import 'utils/time_utils.dart';
@@ -105,6 +106,7 @@ import 'widgets/preheat_gate.dart';
 import 'widgets/onboarding_gate.dart';
 import 'widgets/layout/adaptive_scaffold.dart';
 import 'widgets/layout/adaptive_navigation.dart';
+import 'widgets/layout/mojian_brand.dart';
 import 'widgets/esc_fallback_observer.dart';
 import 'widgets/layout/master_detail_layout.dart';
 import 'widgets/layout/pane_projection_back_scope.dart';
@@ -1502,6 +1504,7 @@ class _MainPageState extends ConsumerState<MainPage>
     // 监听当前用户状态
     final currentUserAsync = ref.watch(currentUserProvider);
     final user = currentUserAsync.value;
+    final isMojian = Theme.of(context).extension<MojianTokens>() != null;
 
     // 从偏好读取底栏布局，按注册表解析为 entry 列表（含所有 kind）
     final bottomNavIds = ref.watch(
@@ -1624,6 +1627,11 @@ class _MainPageState extends ConsumerState<MainPage>
             selectedIndex: selectedBottomIndex,
             onDestinationSelected: _onDestinationSelected,
             destinations: destinations,
+            // 墨笺:电脑宽屏用带字的宽侧栏,顶部放品牌
+            extendedRail: isMojian && Responsive.isDesktop(context),
+            railLeading: isMojian
+                ? MojianBrand(extended: Responsive.isDesktop(context))
+                : null,
             railBottomLeading: (user != null && !hasNotificationEntry)
                 ? const NotificationIconButton()
                 : null,

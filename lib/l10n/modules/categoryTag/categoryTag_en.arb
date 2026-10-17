@@ -42,5 +42,7 @@
   "tag_searchWithCount": "Search tags ({count} selected)...",
   "tag_searchWithMax": "Search tags ({selected}/{max})...",
   "tag_searchWithMin": "Search tags ({selected} selected, min {min})...",
-  "tag_topicCount": "{count} topics"
+  "tag_topicCount": "{count} topics",
+  "category_sheetHint": "Tap ☆ to pin a category to the top row",
+  "category_otherCategories": "Other categories"
 }

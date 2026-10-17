@@ -117,5 +117,7 @@
   "tag_searchWithCount": "搜尋標籤 (已選 {count})...",
   "tag_searchWithMax": "搜尋標籤 (已選 {selected}/{max})...",
   "tag_searchWithMin": "搜尋標籤 (已選 {selected}, 至少 {min})...",
-  "tag_topicCount": "{count} 個話題"
+  "tag_topicCount": "{count} 個話題",
+  "category_sheetHint": "點 ☆ 收藏，收藏的分類顯示在列表頂部",
+  "category_otherCategories": "其他分類"
 }

@@ -31,6 +31,9 @@ import '../widgets/topic/topic_filter_menu.dart';
 import '../widgets/common/topic_badges.dart';
 import '../widgets/common/search_capsule.dart';
 import '../widgets/topic/category_drawer.dart';
+import '../widgets/topic/mojian_category_sheet.dart';
+import '../theme/mojian_theme.dart';
+import 'category_topics_page.dart';
 import '../widgets/topic/topic_card_prewarmer.dart';
 import '../widgets/topic/topic_item_builder.dart';
 import '../widgets/common/tag_selection_sheet.dart';
@@ -38,6 +41,7 @@ import '../widgets/common/paged_list_footer.dart';
 import '../navigation/nav_action_bus.dart';
 import '../providers/app_state_refresher.dart';
 import '../providers/preferences_provider.dart';
+import '../providers/theme_provider.dart';
 import '../utils/load_more_coordinator.dart';
 import '../utils/motion_springs.dart';
 import '../utils/topic_keyword_filter.dart';
@@ -730,6 +734,7 @@ class _TopicsPageState extends ConsumerState<TopicsPage>
       _collapsibleExtentFor(
         _visiblePinnedIds,
         ref.read(tabTagsProvider(categoryId)),
+        navRowAlways: _navRowAlways,
       ),
     );
     return _listControllers.putIfAbsent(
@@ -768,6 +773,7 @@ class _TopicsPageState extends ConsumerState<TopicsPage>
       extent: _collapsibleExtentFor(
         _visiblePinnedIds,
         ref.read(tabTagsProvider(null)),
+        navRowAlways: _navRowAlways,
       ),
       // 同步写入（通知源是滚动回调/动画 tick，不在 build 期），
       // 底栏与头部同帧联动，消除旧架构 postFrameCallback 的滞后一帧
@@ -776,11 +782,19 @@ class _TopicsPageState extends ConsumerState<TopicsPage>
     );
   }
 
+  /// 墨笺的分类行恒在(「分类」按钮是分类主入口)
+  bool get _navRowAlways => ref.read(themeProvider).isMojian;
+
   /// 可折叠量：胶囊行恒在；chips 导航行仅有收藏分类时存在（无收藏时
-  /// 只有"全部"+"＋"是空壳，不值得占一行）；标签行仅选了标签时存在
-  static double _collapsibleExtentFor(List<int> pinnedIds, List<String> tags) =>
+  /// 只有"全部"+"＋"是空壳，不值得占一行;墨笺的「分类」按钮是分类主入口,
+  /// 恒在）；标签行仅选了标签时存在
+  static double _collapsibleExtentFor(
+    List<int> pinnedIds,
+    List<String> tags, {
+    bool navRowAlways = false,
+  }) =>
       _capsuleRowHeight +
-      (pinnedIds.isEmpty ? 0.0 : _navRowHeight) +
+      (pinnedIds.isEmpty && !navRowAlways ? 0.0 : _navRowHeight) +
       (tags.isEmpty ? 0.0 : _tagsRowHeight);
 
   void _registerTabShortcuts() {
@@ -948,6 +962,27 @@ class _TopicsPageState extends ConsumerState<TopicsPage>
           ),
         ],
       ),
+    );
+  }
+
+  /// 墨笺「分类」面板:已收藏的分类切到对应 tab,其余进分类页(同分类侧栏)。
+  void _openMojianCategorySheet() {
+    showMojianCategorySheet(
+      context,
+      currentCategoryId: _currentCategoryId(),
+      onSelect: (category) {
+        if (!mounted) return;
+        final index = _visiblePinnedIds.indexOf(category.id);
+        if (index >= 0) {
+          _tabController.animateTo(index + 1);
+          return;
+        }
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => CategoryTopicsPage(category: category),
+          ),
+        );
+      },
     );
   }
 
@@ -1162,7 +1197,12 @@ class _TopicsPageState extends ConsumerState<TopicsPage>
 
     // chips 行随有无收藏、标签行随有无标签动态存在，可折叠量跟着变
     // （setter 的副作用推迟帧末，build 期调用安全）
-    _headerController.extent = _collapsibleExtentFor(pinnedIds, currentTags);
+    final isMojian = _navRowAlways;
+    _headerController.extent = _collapsibleExtentFor(
+      pinnedIds,
+      currentTags,
+      navRowAlways: isMojian,
+    );
 
     // 聚合筛选菜单（筛选/子过滤/排序/标签/忽略五合一）;折叠态标题
     // 前缀承接 chips 收起后的"你在哪"信息（「水源 · 最新」）
@@ -1237,7 +1277,7 @@ class _TopicsPageState extends ConsumerState<TopicsPage>
                     children: [
                       // 无收藏分类时不显示 chips 行（只有"全部"+"＋"
                       // 是空壳）;分类主入口在 ☰ 侧栏
-                      if (pinnedIds.isNotEmpty)
+                      if (pinnedIds.isNotEmpty || isMojian)
                         _buildNavRow(pinnedIds, categoryMap),
                       if (currentTags.isNotEmpty) _buildTagsRow(currentTags),
                     ],
@@ -1342,6 +1382,21 @@ class _TopicsPageState extends ConsumerState<TopicsPage>
   /// 与 TabBarView 仍由 _tabController 双向同步；＋ 打开分类侧栏
   /// （分类主入口，订阅设置也在侧栏分类行上）。
   Widget _buildNavRow(List<int> pinnedIds, Map<int, Category>? categoryMap) {
+    if (Theme.of(context).extension<MojianTokens>() != null) {
+      // 墨笺:一行放得下多少放多少,不横向滚动;其余收进「分类」面板
+      return SizedBox(
+        height: _navRowHeight,
+        child: _MojianCategoryRow(
+          tabController: _tabController,
+          pinnedIds: pinnedIds,
+          categoryMap: categoryMap,
+          onReselect: () => ref.read(scrollToTopProvider.notifier).trigger(),
+          onOpenSheet: _openMojianCategorySheet,
+          headerController: _headerController,
+          selectedChipKey: _selectedChipKey,
+        ),
+      );
+    }
     return SizedBox(
       height: _navRowHeight,
       child: FadingEdgeScrollView(
@@ -1646,6 +1701,7 @@ class _TopicsPageState extends ConsumerState<TopicsPage>
         _collapsibleExtentFor(
           _visiblePinnedIds,
           ref.read(tabTagsProvider(entry.key)),
+          navRowAlways: _navRowAlways,
         ),
       );
       if (anchor <= 0) continue;
@@ -1760,7 +1816,11 @@ class _TopicsPageState extends ConsumerState<TopicsPage>
         categoryId: categoryId,
         categoryMap: categoryMap,
         scrollController: _listControllerFor(categoryId),
-        topInset: _collapsibleExtentFor(_visiblePinnedIds, tags),
+        topInset: _collapsibleExtentFor(
+          _visiblePinnedIds,
+          tags,
+          navRowAlways: _navRowAlways,
+        ),
         headerController: _headerController,
         onLoginRequired: _goToLogin,
         parentActive: widget.isActive,
@@ -2466,6 +2526,235 @@ class _CategoryChip extends StatelessWidget {
       child: chip,
     );
     return tooltip == null ? sized : Tooltip(message: tooltip!, child: sized);
+  }
+}
+
+/// 墨笺的分类行:「全部」+ 收藏分类(描边药丸,前面一个分类色方点)+ 行尾
+/// 「分类」按钮。一行放得下几个就显示几个(「全部」与当前选中的必显示),
+/// 不横向滚动,放不下的都在「分类」面板里。选中 = 墨色实心。
+/// 与 [_CategoryChipsRow] 同样和 TabBarView 共用 [tabController],
+/// 选中 chip 的文字 key 交给飞行标签测位。
+class _MojianCategoryRow extends StatelessWidget {
+  const _MojianCategoryRow({
+    required this.tabController,
+    required this.pinnedIds,
+    required this.categoryMap,
+    required this.onReselect,
+    required this.onOpenSheet,
+    required this.headerController,
+    required this.selectedChipKey,
+  });
+
+  final TabController tabController;
+  final List<int> pinnedIds;
+  final Map<int, Category>? categoryMap;
+  final VoidCallback onReselect;
+  final VoidCallback onOpenSheet;
+  final _HeaderCollapseController headerController;
+  final GlobalKey selectedChipKey;
+
+  static const _hPad = 12.0;
+  static const _gap = 8.0;
+  static const _fontSize = 12.5;
+
+  /// 文字宽度缓存(按字号缩放分组);标签切换动画每帧重建,不重复排版
+  static final Map<(String, double), double> _widthCache = {};
+
+  static double _textWidth(String text, TextScaler scaler) {
+    final key = (text, scaler.scale(_fontSize));
+    final cached = _widthCache[key];
+    if (cached != null) return cached;
+    if (_widthCache.length > 256) _widthCache.clear();
+    final painter = TextPainter(
+      text: TextSpan(
+        text: text,
+        style: const TextStyle(
+          fontSize: _fontSize,
+          height: 1.0,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+      textScaler: scaler,
+      maxLines: 1,
+    )..layout();
+    final w = painter.width;
+    painter.dispose();
+    return _widthCache[key] = w;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    final scaler = MediaQuery.textScalerOf(context);
+    final labels = <String>[
+      S.current.common_all,
+      for (final id in pinnedIds) categoryMap?[id]?.name ?? '...',
+    ];
+    // 药丸宽 = 文字 + 左右内边距 12×2 + 描边;分类药丸多一个 7px 方点 + 6 间距
+    double pillWidth(int i) =>
+        _textWidth(labels[i], scaler) + 26 + (i == 0 ? 0 : 13);
+    final moreWidth = _textWidth(l10n.category_categories, scaler) + 26 + 21;
+
+    return LayoutBuilder(
+      builder: (context, constraints) => AnimatedBuilder(
+        animation: Listenable.merge([
+          tabController.animation ?? tabController,
+          headerController,
+        ]),
+        builder: (context, _) {
+          final selected = (tabController.animation?.value ?? 0)
+              .round()
+              .clamp(0, labels.length - 1);
+          final flying =
+              selected > 0 && headerController.chipFlightProgress > 0.001;
+          // 先保「全部」与选中,其余按收藏顺序能放则放
+          final avail =
+              constraints.maxWidth - _hPad * 2 - moreWidth - _gap;
+          final shown = <int>{0, selected};
+          var used = pillWidth(0) + _gap;
+          if (selected > 0) used += pillWidth(selected) + _gap;
+          for (var i = 1; i < labels.length; i++) {
+            if (i == selected) continue;
+            final w = pillWidth(i) + _gap;
+            if (used + w > avail) continue;
+            used += w;
+            shown.add(i);
+          }
+          final order = shown.toList()..sort();
+          return Padding(
+            padding: const EdgeInsets.symmetric(horizontal: _hPad),
+            child: Row(
+              children: [
+                for (final i in order)
+                  Padding(
+                    padding: const EdgeInsets.only(right: _gap),
+                    child: _MojianPill(
+                      label: labels[i],
+                      selected: i == selected,
+                      dotColor: i == 0
+                          ? null
+                          : categoryMap?[pinnedIds[i - 1]]?.color,
+                      labelKey: i == selected ? selectedChipKey : null,
+                      labelOpacity: i == selected && flying
+                          ? (1.0 - headerController.chipFlightProgress / 0.4)
+                                .clamp(0.0, 1.0)
+                          : 1.0,
+                      onTap: () {
+                        if (i == tabController.index) {
+                          onReselect();
+                        } else {
+                          tabController.animateTo(i);
+                        }
+                      },
+                    ),
+                  ),
+                const Spacer(),
+                _MojianPill(
+                  label: l10n.category_categories,
+                  selected: false,
+                  isAction: true,
+                  onTap: onOpenSheet,
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _MojianPill extends StatelessWidget {
+  const _MojianPill({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+    this.dotColor,
+    this.isAction = false,
+    this.labelKey,
+    this.labelOpacity = 1.0,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  /// 分类色(十六进制);null = 不画方点(「全部」与操作按钮)
+  final String? dotColor;
+  final bool isAction;
+  final Key? labelKey;
+  final double labelOpacity;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final mj = theme.extension<MojianTokens>()!;
+    final fg = selected ? mj.paper : mj.ink2;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 5),
+      child: SizedBox(
+        height: 30,
+        child: Material(
+        color: selected
+            ? mj.ink
+            : isAction
+            ? mj.paper2
+            : Colors.transparent,
+        shape: StadiumBorder(
+          side: BorderSide(
+            color: selected
+                ? mj.ink
+                : isAction
+                ? mj.paper2
+                : mj.rule,
+          ),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (isAction) ...[
+                  Icon(Symbols.layers_rounded, size: 15, color: fg),
+                  const SizedBox(width: 6),
+                ] else if (dotColor != null) ...[
+                  Container(
+                    width: 7,
+                    height: 7,
+                    decoration: BoxDecoration(
+                      color: MojianTheme.categoryColor(
+                        dotColor!,
+                        theme.brightness,
+                      ),
+                      borderRadius: BorderRadius.circular(1.5),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                ],
+                Opacity(
+                  opacity: labelOpacity,
+                  child: Text(
+                    label,
+                    key: labelKey,
+                    style: TextStyle(
+                      fontSize: _MojianCategoryRow._fontSize,
+                      height: 1.0,
+                      fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+                      color: fg,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        ),
+      ),
+    );
   }
 }
 

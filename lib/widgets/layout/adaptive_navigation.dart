@@ -9,6 +9,7 @@ import 'package:m3e_ui/m3e_ui.dart';
 
 import '../../navigation/nav_action_bus.dart';
 import '../../providers/preferences_provider.dart';
+import '../../theme/mojian_theme.dart';
 import '../../utils/blur_config.dart';
 
 /// 导航目标项配置
@@ -187,6 +188,8 @@ class _NavigationRailItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final mj = Theme.of(context).extension<MojianTokens>();
+    if (mj != null) return _buildMojian(context, mj);
     final backgroundColor = selected
         ? colorScheme.secondaryContainer
         : Colors.transparent;
@@ -237,6 +240,149 @@ class _NavigationRailItem extends StatelessWidget {
       ),
     );
   }
+
+  /// 墨笺:选中 = 浅纸底 + 左缘一段强调色竖条,墨色图标;未选中次要墨色
+  Widget _buildMojian(BuildContext context, MojianTokens mj) {
+    final color = selected ? mj.ink : mj.ink3;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Material(
+            color: selected ? mj.paper2 : Colors.transparent,
+            borderRadius: BorderRadius.circular(10),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(10),
+              onTap: onTap,
+              child: SizedBox(
+                height: 46,
+                child: extended
+                    ? Row(
+                        children: [
+                          const SizedBox(width: 14),
+                          IconTheme(
+                            data: IconThemeData(color: color, size: 22),
+                            child: icon,
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              label,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: color,
+                                fontSize: 14.5,
+                                fontWeight: selected
+                                    ? FontWeight.w600
+                                    : FontWeight.w400,
+                              ),
+                            ),
+                          ),
+                        ],
+                      )
+                    : Center(
+                        child: IconTheme(
+                          data: IconThemeData(color: color, size: 22),
+                          child: icon,
+                        ),
+                      ),
+              ),
+            ),
+          ),
+          if (selected)
+            Positioned(
+              left: -12,
+              top: 12,
+              bottom: 12,
+              child: Container(
+                width: 2,
+                decoration: BoxDecoration(
+                  color: mj.accent,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 墨笺底栏外框:顶边一条细线,选中项上方一段强调色短横
+/// (NavigationBar 的指示器在主题里置透明,这里补上墨笺的选中记号)。
+class _MojianNavFrame extends StatelessWidget {
+  const _MojianNavFrame({
+    required this.selectedIndex,
+    required this.count,
+    required this.child,
+  });
+
+  final int selectedIndex;
+  final int count;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final mj = Theme.of(context).extension<MojianTokens>()!;
+    return CustomPaint(
+      foregroundPainter: _MojianNavFramePainter(
+        selectedIndex: selectedIndex,
+        count: count,
+        rule: mj.rule,
+        accent: mj.accent,
+        textDirection: Directionality.of(context),
+      ),
+      child: child,
+    );
+  }
+}
+
+class _MojianNavFramePainter extends CustomPainter {
+  _MojianNavFramePainter({
+    required this.selectedIndex,
+    required this.count,
+    required this.rule,
+    required this.accent,
+    required this.textDirection,
+  });
+
+  final int selectedIndex;
+  final int count;
+  final Color rule;
+  final Color accent;
+  final TextDirection textDirection;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    canvas.drawRect(
+      Rect.fromLTWH(0, 0, size.width, 1),
+      Paint()..color = rule,
+    );
+    if (count <= 0 || selectedIndex < 0 || selectedIndex >= count) return;
+    // NavigationBar 把各项等分整条宽度
+    final slot = size.width / count;
+    final i = textDirection == TextDirection.rtl
+        ? count - 1 - selectedIndex
+        : selectedIndex;
+    final cx = slot * (i + 0.5);
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromLTWH(cx - 9, 0, 18, 2),
+        const Radius.circular(2),
+      ),
+      Paint()..color = accent,
+    );
+  }
+
+  @override
+  bool shouldRepaint(_MojianNavFramePainter old) =>
+      old.selectedIndex != selectedIndex ||
+      old.count != count ||
+      old.rule != rule ||
+      old.accent != accent ||
+      old.textDirection != textDirection;
 }
 
 /// 底部导航栏组件 (手机)
@@ -383,7 +529,7 @@ class _AdaptiveBottomNavigationState
       );
     }
 
-    return NavigationBar(
+    final bar = NavigationBar(
       selectedIndex: widget.selectedIndex,
       onDestinationSelected: _handleTap,
       // 无字模式：只留图标，槽高从默认 80 收到 56
@@ -402,6 +548,12 @@ class _AdaptiveBottomNavigationState
           label: d.label,
         );
       }).toList(),
+    );
+    if (Theme.of(context).extension<MojianTokens>() == null) return bar;
+    return _MojianNavFrame(
+      selectedIndex: widget.selectedIndex,
+      count: widget.destinations.length,
+      child: bar,
     );
   }
 }

@@ -14,6 +14,7 @@ import 'category_shortcuts.dart';
 import '../topic/category_tab_manager_sheet.dart';
 import '../topic/category_drawer.dart';
 import '../../utils/platform_utils.dart';
+import '../../theme/mojian_theme.dart';
 
 /// 自适应 Scaffold
 ///
@@ -221,24 +222,27 @@ class _SidebarCategoryAddButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // 墨笺:操作入口用次要墨色,不抢强调色;行高与分类行一致
+    final mj = Theme.of(context).extension<MojianTokens>();
+    final accent = mj?.ink3 ?? Theme.of(context).colorScheme.primary;
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      padding: EdgeInsets.symmetric(horizontal: 12, vertical: mj == null ? 4 : 1),
       child: Material(
         color: Colors.transparent,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(mj == null ? 16 : 8),
         child: InkWell(
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(mj == null ? 16 : 8),
           onTap: onOpenCategoryManager,
           child: SizedBox(
-            height: 56,
+            height: mj == null ? 56 : (extended ? 36 : 46),
             child: extended
                 ? Row(
                     children: [
                       const SizedBox(width: 16),
                       Icon(
                         Symbols.add_rounded,
-                        color: Theme.of(context).colorScheme.primary,
-                        size: 22,
+                        color: accent,
+                        size: mj == null ? 22 : 18,
                       ),
                       const SizedBox(width: 12),
                       Expanded(
@@ -247,7 +251,8 @@ class _SidebarCategoryAddButton extends StatelessWidget {
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
-                            color: Theme.of(context).colorScheme.primary,
+                            color: accent,
+                            fontSize: mj == null ? null : 13.5,
                             fontWeight: FontWeight.w500,
                           ),
                         ),
@@ -256,11 +261,7 @@ class _SidebarCategoryAddButton extends StatelessWidget {
                     ],
                   )
                 : Center(
-                    child: Icon(
-                      Symbols.add_rounded,
-                      color: Theme.of(context).colorScheme.primary,
-                      size: 22,
-                    ),
+                    child: Icon(Symbols.add_rounded, color: accent, size: 22),
                   ),
           ),
         ),
