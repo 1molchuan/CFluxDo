@@ -6,6 +6,7 @@ import '../../l10n/s.dart';
 import '../../services/toast_service.dart';
 import '../../utils/dialog_utils.dart';
 import 'app_bottom_sheet.dart';
+import '../../theme/mojian_theme.dart';
 
 /// 显示外部链接确认对话框
 ///
@@ -231,20 +232,25 @@ class _ExternalLinkConfirmSheet extends StatelessWidget {
 
   _DialogConfig _getConfigForLevel(LinkRiskLevel level, ThemeData theme) {
     final l10n = S.current;
+    // 墨笺:普通外链用墨色,短链提醒用金色,危险链接用主题错误色
+    final mj = theme.extension<MojianTokens>();
+    final normal = mj?.ink ?? theme.colorScheme.primary;
+    final risky = mj?.gold ?? Colors.orange;
+    final danger = mj != null ? theme.colorScheme.error : Colors.red;
     switch (level) {
       case LinkRiskLevel.normal:
         return _DialogConfig(
           icon: Symbols.open_in_new_rounded,
-          color: theme.colorScheme.primary,
-          buttonColor: theme.colorScheme.primary,
+          color: normal,
+          buttonColor: normal,
           title: l10n.externalLink_leavingTitle,
           message: l10n.externalLink_leavingMessage,
         );
       case LinkRiskLevel.risky:
         return _DialogConfig(
           icon: Symbols.link_off_rounded,
-          color: Colors.orange,
-          buttonColor: Colors.orange,
+          color: risky,
+          buttonColor: risky,
           title: l10n.externalLink_shortLinkTitle,
           message: l10n.externalLink_shortLinkMessage,
           warning: l10n.externalLink_shortLinkWarning,
@@ -252,8 +258,8 @@ class _ExternalLinkConfirmSheet extends StatelessWidget {
       case LinkRiskLevel.dangerous:
         return _DialogConfig(
           icon: Symbols.shield_rounded,
-          color: Colors.red,
-          buttonColor: Colors.red,
+          color: danger,
+          buttonColor: danger,
           title: l10n.externalLink_securityWarningTitle,
           message: l10n.externalLink_securityWarningMessage,
           warning: l10n.externalLink_securityWarningHint,
@@ -261,8 +267,8 @@ class _ExternalLinkConfirmSheet extends StatelessWidget {
       default:
         return _DialogConfig(
           icon: Symbols.open_in_new_rounded,
-          color: theme.colorScheme.primary,
-          buttonColor: theme.colorScheme.primary,
+          color: normal,
+          buttonColor: normal,
           title: l10n.externalLink_leavingTitle,
           message: l10n.externalLink_leavingMessage,
         );

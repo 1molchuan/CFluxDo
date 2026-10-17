@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:fluxdo_render/fluxdo_render.dart' show FluxdoRenderStyle;
+import 'package:common_ui/common_ui.dart' show MenuQuickActionStyle;
 import 'package:m3e_ui/m3e_ui.dart' show SegmentedCardStyle;
 
 import 'theme_resolver.dart';
@@ -431,6 +432,15 @@ class MojianTheme {
         ),
         // 设置、我的、会话列表等分段卡片组:平铺细线列表
         SegmentedCardStyle(flat: true, dividerColor: t.rule),
+        // 菜单顶部快捷按钮:细线圆圈,选中描强调色、底色极淡
+        MenuQuickActionStyle(
+          fill: Colors.transparent,
+          activeFill: t.accentSoft,
+          iconColor: t.ink2,
+          activeIconColor: t.accent,
+          border: t.ruleStrong,
+          activeBorder: t.accent.withValues(alpha: 0.6),
+        ),
       ],
       appBarTheme: AppBarThemeData(
         backgroundColor: t.paper,

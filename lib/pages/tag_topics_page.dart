@@ -387,7 +387,7 @@ class _TagTopicsPageState extends ConsumerState<TagTopicsPage> {
     }
 
     if (_topics.isEmpty) {
-      return Center(
+      return mojianEmptyState(context, Symbols.inbox_rounded, context.l10n.tagTopics_empty) ?? Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [

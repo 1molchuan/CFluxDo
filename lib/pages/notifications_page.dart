@@ -14,6 +14,7 @@ import '../l10n/s.dart';
 import '../utils/blocked_user_filter.dart';
 import '../utils/time_utils.dart';
 import '../theme/mojian_theme.dart';
+import '../widgets/layout/master_detail_layout.dart';
 
 /// 通知历史列表页面（独立分页，不受 messageBus 干扰）
 class NotificationsPage extends ConsumerStatefulWidget {
@@ -115,29 +116,34 @@ class _NotificationsPageState extends ConsumerState<NotificationsPage> {
             }
             if (visibleNotifications.isEmpty &&
                 (notifications.isEmpty || !notifier.hasMore)) {
-              return Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(
-                      Symbols.notifications_rounded,
-                      size: 64,
-                      color: mj?.ink4 ?? Colors.grey,
+              return mojianEmptyState(
+                    context,
+                    Symbols.notifications_rounded,
+                    context.l10n.notification_empty,
+                  ) ??
+                  Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Symbols.notifications_rounded,
+                          size: 64,
+                          color: mj?.ink4 ?? Colors.grey,
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          context.l10n.notification_empty,
+                          style: mj == null
+                              ? const TextStyle(color: Colors.grey)
+                              : TextStyle(
+                                  fontFamily: MojianTokens.serifFamily,
+                                  fontSize: 16,
+                                  color: mj.ink2,
+                                ),
+                        ),
+                      ],
                     ),
-                    const SizedBox(height: 16),
-                    Text(
-                      context.l10n.notification_empty,
-                      style: mj == null
-                          ? const TextStyle(color: Colors.grey)
-                          : TextStyle(
-                              fontFamily: MojianTokens.serifFamily,
-                              fontSize: 16,
-                              color: mj.ink2,
-                            ),
-                    ),
-                  ],
-                ),
-              );
+                  );
             }
 
             return ListView.builder(

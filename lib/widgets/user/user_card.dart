@@ -26,6 +26,7 @@ import '../common/smart_avatar.dart';
 import '../../utils/fluxdo_render_callbacks.dart';
 import 'avatar_action_menu.dart';
 import 'ignore_duration_picker.dart';
+import '../../theme/mojian_theme.dart';
 
 /// 卡片与锚点之间的间隙
 const double _kGap = 10.0;
@@ -691,8 +692,23 @@ class _UserCardContentState extends ConsumerState<_UserCardContent> {
       ),
     );
 
+    final mj = theme.extension<MojianTokens>();
     final card = Container(
-      decoration: BoxDecoration(
+      // 墨笺:小圆角纸笺、发丝线框,投影收轻(只留托起感)
+      decoration: mj != null
+          ? BoxDecoration(
+              color: theme.colorScheme.overlaySurface,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: mj.ruleStrong),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.16),
+                  blurRadius: 24,
+                  offset: const Offset(0, 10),
+                ),
+              ],
+            )
+          : BoxDecoration(
         color: theme.colorScheme.overlaySurface,
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
@@ -840,14 +856,24 @@ class _UserCardContentState extends ConsumerState<_UserCardContent> {
                 const SizedBox(width: 8),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                  // 墨笺:信任等级是细线框小字,不铺强调色底
                   decoration: BoxDecoration(
-                    color: theme.colorScheme.primaryContainer,
+                    color: theme.extension<MojianTokens>() != null
+                        ? Colors.transparent
+                        : theme.colorScheme.primaryContainer,
                     borderRadius: BorderRadius.circular(4),
+                    border: theme.extension<MojianTokens>() != null
+                        ? Border.all(
+                            color: theme.extension<MojianTokens>()!.ruleStrong,
+                          )
+                        : null,
                   ),
                   child: Text(
                     user.trustLevelString,
                     style: theme.textTheme.labelSmall?.copyWith(
-                      color: theme.colorScheme.onPrimaryContainer,
+                      color:
+                          theme.extension<MojianTokens>()?.ink2 ??
+                          theme.colorScheme.onPrimaryContainer,
                       fontWeight: FontWeight.w600,
                     ),
                   ),

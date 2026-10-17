@@ -13,6 +13,8 @@ import '../utils/font_awesome_helper.dart';
 import '../widgets/badge/badge_ui_utils.dart';
 import 'badge_page.dart';
 import '../l10n/s.dart';
+import '../theme/mojian_theme.dart';
+import '../widgets/layout/master_detail_layout.dart';
 
 /// 我的徽章页面
 class MyBadgesPage extends ConsumerStatefulWidget {
@@ -105,7 +107,16 @@ class _MyBadgesPageState extends ConsumerState<MyBadgesPage> {
                   child: CustomScrollView(
                     slivers: [
                       _buildAppBar(context, totalCount),
-                      if (_groupedBadges == null || _groupedBadges!.isEmpty)
+                      if ((_groupedBadges == null ||
+                              _groupedBadges!.isEmpty) &&
+                          Theme.of(context).extension<MojianTokens>() != null)
+                        SliverFillRemaining(
+                          child: MasterDetailEmptyState(
+                            icon: Symbols.military_tech_rounded,
+                            message: context.l10n.myBadges_empty,
+                          ),
+                        )
+                      else if (_groupedBadges == null || _groupedBadges!.isEmpty)
                         SliverFillRemaining(
                           child: Center(
                             child: Column(
@@ -135,24 +146,33 @@ class _MyBadgesPageState extends ConsumerState<MyBadgesPage> {
   }
 
   Widget _buildAppBar(BuildContext context, int totalCount) {
+    final mj = Theme.of(context).extension<MojianTokens>();
     return SliverAppBar.large(
       title: Text(context.l10n.myBadges_title),
       centerTitle: false,
       expandedHeight: 200, // Taller header
       flexibleSpace: FlexibleSpaceBar(
+        // 墨笺:纸底,不要渐变与奖牌水印;总数用宋体
         background: Container(
           decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                Theme.of(context).colorScheme.surface,
-                Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
-              ],
-            ),
+            color: mj?.paper,
+            gradient: mj != null
+                ? null
+                : LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      Theme.of(context).colorScheme.surface,
+                      Theme.of(context)
+                          .colorScheme
+                          .surfaceContainerHighest
+                          .withValues(alpha: 0.5),
+                    ],
+                  ),
           ),
           child: Stack(
             children: [
+              if (mj == null)
               Positioned(
                 right: -20,
                 top: -20,
@@ -181,9 +201,10 @@ class _MyBadgesPageState extends ConsumerState<MyBadgesPage> {
                     Text(
                       '$totalCount',
                       style: TextStyle(
+                        fontFamily: mj != null ? MojianTokens.serifFamily : null,
                         fontSize: 36,
-                        fontWeight: FontWeight.w600,
-                        color: Theme.of(context).colorScheme.onSurface,
+                        fontWeight: mj != null ? FontWeight.w700 : FontWeight.w600,
+                        color: mj?.ink ?? Theme.of(context).colorScheme.onSurface,
                         height: 1.0,
                       ),
                     ),
@@ -212,6 +233,7 @@ class _MyBadgesPageState extends ConsumerState<MyBadgesPage> {
     final sectionColor = BadgeUIUtils.getSectionColor(context, type);
     final sectionTitle = BadgeUIUtils.getBadgeTypeName(type);
     final sectionIcon = BadgeUIUtils.getBadgeIcon(type);
+    final mj = Theme.of(context).extension<MojianTokens>();
 
     return SliverMainAxisGroup(
       slivers: [
@@ -222,11 +244,12 @@ class _MyBadgesPageState extends ConsumerState<MyBadgesPage> {
               children: [
                 FaIcon(sectionIcon, size: 20, color: sectionColor),
                 const SizedBox(width: 12),
+                // 墨笺:标题墨色宋体(等级色只留给图标),计数改细线框
                 Text(
                   sectionTitle,
                   style: Theme.of(context).textTheme.titleLarge?.copyWith(
                         fontWeight: FontWeight.w600,
-                        color: sectionColor,
+                        color: mj?.ink ?? sectionColor,
                         fontSize: 18,
                       ),
                 ),
@@ -235,8 +258,11 @@ class _MyBadgesPageState extends ConsumerState<MyBadgesPage> {
                   padding:
                       const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                   decoration: BoxDecoration(
-                    color: sectionColor.withValues(alpha: 0.1),
+                    color: mj != null
+                        ? Colors.transparent
+                        : sectionColor.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(20),
+                    border: mj != null ? Border.all(color: mj.ruleStrong) : null,
                   ),
                   child: Text(
                     '${badges.length}',
@@ -276,6 +302,7 @@ class _MyBadgesPageState extends ConsumerState<MyBadgesPage> {
     final badge = userBadge.badge!;
     final theme = Theme.of(context);
     final iconColor = BadgeUIUtils.getBadgeColor(context, type);
+    final mj = theme.extension<MojianTokens>();
 
     return InkWell(
       onTap: () {
@@ -292,7 +319,7 @@ class _MyBadgesPageState extends ConsumerState<MyBadgesPage> {
           );
         }
       },
-      borderRadius: BorderRadius.circular(20),
+      borderRadius: BorderRadius.circular(mj != null ? 0 : 20),
       child: Container(
         decoration: BadgeUIUtils.getCardDecoration(context, type),
         child: Stack(
@@ -307,10 +334,15 @@ class _MyBadgesPageState extends ConsumerState<MyBadgesPage> {
                   padding:
                       const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
-                    color: iconColor.withValues(alpha: 0.15),
+                    color: mj != null
+                        ? Colors.transparent
+                        : iconColor.withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(12),
                     border: Border.all(
-                        color: iconColor.withValues(alpha: 0.3), width: 1),
+                        color: iconColor.withValues(
+                          alpha: mj != null ? 0.6 : 0.3,
+                        ),
+                        width: 1),
                   ),
                   child: Text(
                     '×${userBadge.count}',
@@ -335,13 +367,16 @@ class _MyBadgesPageState extends ConsumerState<MyBadgesPage> {
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
                       color: theme.colorScheme.surface,
-                      boxShadow: [
-                        BoxShadow(
-                          color: iconColor.withValues(alpha: 0.2),
-                          blurRadius: 10,
-                          offset: const Offset(0, 4),
-                        )
-                      ],
+                      border: mj != null ? Border.all(color: mj.rule) : null,
+                      boxShadow: mj != null
+                          ? null
+                          : [
+                              BoxShadow(
+                                color: iconColor.withValues(alpha: 0.2),
+                                blurRadius: 10,
+                                offset: const Offset(0, 4),
+                              )
+                            ],
                     ),
                     padding: const EdgeInsets.all(8), // Padding to prevent image touching edges
                     child: Center(

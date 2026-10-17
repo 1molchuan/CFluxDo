@@ -374,6 +374,20 @@ class _DefaultEmptyState extends StatelessWidget {
 /// 各页面自定义空态（emptyDetail）时应使用本组件、只定制 icon/message，
 /// 不要自己拼 Center/Column，也不要自己包 ColoredBox 铺底——背景由
 /// [MasterDetailLayout] 的 detail 槽统一负责。
+/// 墨笺下的页面空态(淡墨晕染托着图标 + 宋体文案,同平行视界空态);
+/// 经典风格返回 null——调用方写 `mojianEmptyState(...) ?? 原来的空态`,
+/// 经典逐像素不变。
+Widget? mojianEmptyState(
+  BuildContext context,
+  IconData icon,
+  String message, {
+  EdgeInsets? padding,
+}) {
+  if (Theme.of(context).extension<MojianTokens>() == null) return null;
+  final state = MasterDetailEmptyState(icon: icon, message: message);
+  return padding == null ? state : Padding(padding: padding, child: state);
+}
+
 class MasterDetailEmptyState extends StatelessWidget {
   const MasterDetailEmptyState({
     super.key,

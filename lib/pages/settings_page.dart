@@ -267,25 +267,32 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     final filtered = allResults.where((r) => r.model.matchesQuery(q)).toList();
 
     if (filtered.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Symbols.search_off_rounded,
-              size: 48,
-              color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.4),
+      return mojianEmptyState(
+            context,
+            Symbols.search_off_rounded,
+            context.l10n.settings_searchEmpty,
+          ) ??
+          Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Symbols.search_off_rounded,
+                  size: 48,
+                  color: theme.colorScheme.onSurfaceVariant.withValues(
+                    alpha: 0.4,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  context.l10n.settings_searchEmpty,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(height: 12),
-            Text(
-              context.l10n.settings_searchEmpty,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
-              ),
-            ),
-          ],
-        ),
-      );
+          );
     }
 
     return ListView.separated(

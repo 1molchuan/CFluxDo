@@ -6,6 +6,8 @@ import '../../../pages/webview_page.dart';
 import '../../../utils/dialog_utils.dart';
 import '../../../services/toast_service.dart';
 import '../providers/ldc_reward_provider.dart';
+import '../../../theme/mojian_theme.dart';
+import '../../../widgets/common/mojian_ledger_card.dart';
 
 /// LDC 打赏凭证配置卡片（元宇宙页面用）
 class LdcRewardConfigTile extends ConsumerWidget {
@@ -17,6 +19,34 @@ class LdcRewardConfigTile extends ConsumerWidget {
     final credentialsAsync = ref.watch(ldcRewardCredentialsProvider);
 
     final isConfigured = credentialsAsync.value != null;
+
+    final mj = theme.extension<MojianTokens>();
+    if (mj != null) {
+      // 墨笺:与元宇宙页其他服务同一张账本卡;已配置用玉色对勾
+      return MojianLedgerCard(
+        icon: Symbols.volunteer_activism_rounded,
+        title: context.l10n.reward_title,
+        onTap: () => _showConfigDialog(context, ref, isConfigured),
+        trailing: Padding(
+          padding: const EdgeInsets.only(right: 8),
+          child: Icon(
+            isConfigured
+                ? Symbols.check_circle_rounded
+                : Symbols.settings_rounded,
+            size: 20,
+            color: isConfigured ? mj.jade : mj.ink3,
+          ),
+        ),
+        children: [
+          Text(
+            isConfigured
+                ? context.l10n.reward_configured
+                : context.l10n.reward_notConfigured,
+            style: theme.textTheme.bodyMedium?.copyWith(color: mj.ink3),
+          ),
+        ],
+      );
+    }
 
     return Card(
       elevation: 0,

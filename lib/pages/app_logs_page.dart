@@ -19,6 +19,7 @@ import '../widgets/post/reply_sheet.dart';
 import '../l10n/s.dart';
 import '../utils/dialog_utils.dart';
 import '../utils/time_utils.dart';
+import '../widgets/layout/master_detail_layout.dart';
 
 /// 日志类型筛选（公开供调试工具等入口预设初始筛选）
 enum LogTypeFilter {
@@ -879,7 +880,7 @@ class _AppLogsPageState extends State<AppLogsPage> {
     }
 
     if (_entries.isEmpty) {
-      return Center(
+      return mojianEmptyState(context, Symbols.article_rounded, context.l10n.appLogs_noLogs) ?? Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [

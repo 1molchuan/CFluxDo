@@ -3237,7 +3237,7 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage>
             summary.mostLikedUsers.isEmpty &&
             summary.topCategories.isEmpty &&
             summary.badges.isEmpty)
-          Center(
+          mojianEmptyState(context, Symbols.summarize_rounded, context.l10n.userProfile_noSummary, padding: const EdgeInsets.only(top: 80)) ?? Center(
             child: Padding(
               padding: const EdgeInsets.only(top: 80),
               child: Column(
@@ -3612,7 +3612,7 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage>
 
     // 空状态
     if (reactions == null || reactions.isEmpty) {
-      return Center(
+      return mojianEmptyState(context, Symbols.emoji_emotions_rounded, context.l10n.userProfile_noReactions) ?? Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
@@ -3680,7 +3680,7 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage>
 
     // 空状态
     if (boosts == null || boosts.isEmpty) {
-      return Center(
+      return mojianEmptyState(context, Symbols.rocket_launch_rounded, context.l10n.userProfile_noBoosts) ?? Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
@@ -3746,7 +3746,7 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage>
 
     // 空状态
     if (topics == null || topics.isEmpty) {
-      return Center(
+      return mojianEmptyState(context, Symbols.how_to_vote_rounded, context.l10n.userProfile_noVotes) ?? Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
@@ -3829,7 +3829,7 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage>
 
     // 空状态
     if (posts == null || posts.isEmpty) {
-      return Center(
+      return mojianEmptyState(context, Symbols.check_circle_rounded, context.l10n.userProfile_noSolved) ?? Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [

@@ -17,6 +17,61 @@ const double _kMenuMinWidth = 2.0 * _kMenuWidthStep;
 const double _kMenuWidthStep = 56.0;
 const double _kMenuScreenPadding = 8.0;
 
+/// 菜单顶部圆形快捷按钮条的外观覆盖(由界面风格经 ThemeExtension 注入)。
+/// 各字段为 null 时用原来的取色:未选中 surfaceContainerHighest 实心圆,
+/// 选中 primaryContainer 实心圆,无描边。
+class MenuQuickActionStyle extends ThemeExtension<MenuQuickActionStyle> {
+  const MenuQuickActionStyle({
+    this.fill,
+    this.activeFill,
+    this.iconColor,
+    this.activeIconColor,
+    this.border,
+    this.activeBorder,
+  });
+
+  final Color? fill;
+  final Color? activeFill;
+  final Color? iconColor;
+  final Color? activeIconColor;
+
+  /// 圆圈描边色;null = 无描边
+  final Color? border;
+  final Color? activeBorder;
+
+  @override
+  MenuQuickActionStyle copyWith({
+    Color? fill,
+    Color? activeFill,
+    Color? iconColor,
+    Color? activeIconColor,
+    Color? border,
+    Color? activeBorder,
+  }) {
+    return MenuQuickActionStyle(
+      fill: fill ?? this.fill,
+      activeFill: activeFill ?? this.activeFill,
+      iconColor: iconColor ?? this.iconColor,
+      activeIconColor: activeIconColor ?? this.activeIconColor,
+      border: border ?? this.border,
+      activeBorder: activeBorder ?? this.activeBorder,
+    );
+  }
+
+  @override
+  MenuQuickActionStyle lerp(MenuQuickActionStyle? other, double t) {
+    if (other == null) return this;
+    return MenuQuickActionStyle(
+      fill: Color.lerp(fill, other.fill, t),
+      activeFill: Color.lerp(activeFill, other.activeFill, t),
+      iconColor: Color.lerp(iconColor, other.iconColor, t),
+      activeIconColor: Color.lerp(activeIconColor, other.activeIconColor, t),
+      border: Color.lerp(border, other.border, t),
+      activeBorder: Color.lerp(activeBorder, other.activeBorder, t),
+    );
+  }
+}
+
 // 菜单顶部圆形快捷按钮配置。
 class MenuQuickAction {
   const MenuQuickAction({
@@ -80,6 +135,9 @@ class _QuickActionsHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ColorScheme cs = Theme.of(context).colorScheme;
+    final MenuQuickActionStyle? style = Theme.of(
+      context,
+    ).extension<MenuQuickActionStyle>();
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
       child: Row(
@@ -89,10 +147,12 @@ class _QuickActionsHeader extends StatelessWidget {
             if (i > 0) const SizedBox(width: 8),
             _QuickActionButton(
               action: actions[i],
-              activeColor: cs.primaryContainer,
-              inactiveColor: cs.surfaceContainerHighest,
-              activeIconColor: cs.onPrimaryContainer,
-              inactiveIconColor: cs.onSurface,
+              activeColor: style?.activeFill ?? cs.primaryContainer,
+              inactiveColor: style?.fill ?? cs.surfaceContainerHighest,
+              activeIconColor: style?.activeIconColor ?? cs.onPrimaryContainer,
+              inactiveIconColor: style?.iconColor ?? cs.onSurface,
+              border: style?.border,
+              activeBorder: style?.activeBorder,
               onAfterTap: onAfterTap,
             ),
           ],
@@ -110,6 +170,8 @@ class _QuickActionButton extends StatelessWidget {
     required this.activeIconColor,
     required this.inactiveIconColor,
     required this.onAfterTap,
+    this.border,
+    this.activeBorder,
   });
 
   final MenuQuickAction action;
@@ -117,6 +179,8 @@ class _QuickActionButton extends StatelessWidget {
   final Color inactiveColor;
   final Color activeIconColor;
   final Color inactiveIconColor;
+  final Color? border;
+  final Color? activeBorder;
   final VoidCallback onAfterTap;
 
   Future<void> _openSubmenu(BuildContext context) async {
@@ -141,9 +205,12 @@ class _QuickActionButton extends StatelessWidget {
     final bool enabled = action.enabled && (action.onTap != null || hasSubmenu);
     final Color bg = action.active ? activeColor : inactiveColor;
     final Color fg = action.active ? activeIconColor : inactiveIconColor;
+    final Color? side = action.active ? activeBorder : border;
     final Widget button = Material(
       color: bg,
-      shape: const CircleBorder(),
+      shape: side == null
+          ? const CircleBorder()
+          : CircleBorder(side: BorderSide(color: side)),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: enabled

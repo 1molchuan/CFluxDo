@@ -486,43 +486,48 @@ class _EmptyHint extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(
-            Symbols.visibility_rounded,
-            size: 48,
-            color: theme.colorScheme.onSurfaceVariant,
-          ),
-          const SizedBox(height: 12),
-          Text(
-            context.l10n.seeking_emptyHint,
-            textAlign: TextAlign.center,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
-            ),
-          ),
-          const SizedBox(height: 16),
-          Row(
+    return mojianEmptyState(
+          context,
+          Symbols.visibility_rounded,
+          context.l10n.seeking_emptyHint,
+        ) ??
+        Center(
+          child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              FilledButton.tonalIcon(
-                onPressed: onAdd,
-                icon: const Icon(Symbols.person_add_rounded, size: 18),
-                label: Text(context.l10n.seeking_addUser),
+              Icon(
+                Symbols.visibility_rounded,
+                size: 48,
+                color: theme.colorScheme.onSurfaceVariant,
               ),
-              const SizedBox(width: 12),
-              FilledButton.tonalIcon(
-                onPressed: onSync,
-                icon: const Icon(Symbols.group_add_rounded, size: 18),
-                label: Text(context.l10n.seeking_syncFollow),
+              const SizedBox(height: 12),
+              Text(
+                context.l10n.seeking_emptyHint,
+                textAlign: TextAlign.center,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: 16),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  FilledButton.tonalIcon(
+                    onPressed: onAdd,
+                    icon: const Icon(Symbols.person_add_rounded, size: 18),
+                    label: Text(context.l10n.seeking_addUser),
+                  ),
+                  const SizedBox(width: 12),
+                  FilledButton.tonalIcon(
+                    onPressed: onSync,
+                    icon: const Icon(Symbols.group_add_rounded, size: 18),
+                    label: Text(context.l10n.seeking_syncFollow),
+                  ),
+                ],
               ),
             ],
           ),
-        ],
-      ),
-    );
+        );
   }
 }
 

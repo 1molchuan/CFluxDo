@@ -13,6 +13,7 @@ import '../utils/dialog_utils.dart';
 import 'package:m3e_ui/m3e_ui.dart';
 import 'webview_page.dart';
 import 'download_list_page.dart';
+import '../widgets/layout/master_detail_layout.dart';
 
 // ---------------------------------------------------------------------------
 // 内置浏览器主页 — 地址栏 + 功能入口
@@ -237,7 +238,7 @@ class _BookmarkListPage extends ConsumerWidget {
         ],
       ),
       body: bookmarks.isEmpty
-          ? Center(
+          ? mojianEmptyState(context, Symbols.star_rounded, context.l10n.myBrowser_empty) ?? Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
@@ -445,7 +446,7 @@ class _WebHistoryPage extends ConsumerWidget {
         ],
       ),
       body: history.isEmpty
-          ? Center(
+          ? mojianEmptyState(context, Symbols.history_rounded, context.l10n.myBrowser_historyEmpty) ?? Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [

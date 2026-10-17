@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import '../../models/badge.dart';
+import '../../theme/mojian_theme.dart';
 import '../../../../../l10n/s.dart';
 
 class BadgeUIUtils {
@@ -14,6 +15,18 @@ class BadgeUIUtils {
 
   static Color getBadgeColor(BuildContext context, BadgeType type) {
     final isDark = _isDark(context);
+    final mj = Theme.of(context).extension<MojianTokens>();
+    if (mj != null) {
+      // 墨笺:金 = 令牌里的金色,银 = 淡墨,铜 = 赭色(深浅色各一档,对比度够)
+      switch (type) {
+        case BadgeType.gold:
+          return mj.gold;
+        case BadgeType.silver:
+          return mj.ink3;
+        case BadgeType.bronze:
+          return isDark ? const Color(0xFFC9987A) : const Color(0xFF8C5A3C);
+      }
+    }
     switch (type) {
       case BadgeType.gold:
         return isDark
@@ -41,6 +54,7 @@ class BadgeUIUtils {
   static LinearGradient getBadgeGradient(BuildContext context, BadgeType type) {
     final baseColor = getBadgeColor(context, type);
     final isDark = _isDark(context);
+    if (Theme.of(context).extension<MojianTokens>() != null) return _flat;
 
     // Using a 3-stop gradient for depth
     return LinearGradient(
@@ -55,9 +69,15 @@ class BadgeUIUtils {
     );
   }
 
+  /// 墨笺不用渐变:两端都透明
+  static const _flat = LinearGradient(
+    colors: [Colors.transparent, Colors.transparent],
+  );
+
   static LinearGradient getHeaderGradient(BuildContext context, BadgeType type) {
     final baseColor = getBadgeColor(context, type);
     final isDark = _isDark(context);
+    if (Theme.of(context).extension<MojianTokens>() != null) return _flat;
 
     return LinearGradient(
       begin: Alignment.topCenter,
@@ -75,6 +95,20 @@ class BadgeUIUtils {
 
   static BoxDecoration getCardDecoration(BuildContext context, BadgeType type) {
     final theme = Theme.of(context);
+    final mj = theme.extension<MojianTokens>();
+    if (mj != null) {
+      // 墨笺:直角纸笺,顶边一道等级色细线,其余三边发丝线,无阴影
+      final rule = BorderSide(color: mj.rule);
+      return BoxDecoration(
+        color: mj.paper3,
+        border: Border(
+          top: BorderSide(color: getBadgeColor(context, type), width: 2),
+          left: rule,
+          right: rule,
+          bottom: rule,
+        ),
+      );
+    }
     final isDark = _isDark(context);
     final gradient = getBadgeGradient(context, type);
     final borderColor = getBadgeColor(context, type);

@@ -11,6 +11,8 @@ import '../widgets/common/error_view.dart';
 import '../widgets/common/trust_level_skeleton.dart';
 import '../services/network/discourse_dio.dart';
 import '../l10n/s.dart';
+import '../theme/mojian_theme.dart';
+import '../widgets/common/mojian_section_label.dart';
 
 class TrustLevelRequirementsPage extends ConsumerStatefulWidget {
   const TrustLevelRequirementsPage({super.key});
@@ -22,6 +24,14 @@ class TrustLevelRequirementsPage extends ConsumerStatefulWidget {
 
 class _TrustLevelRequirementsPageState
     extends ConsumerState<TrustLevelRequirementsPage> {
+  /// 墨笺:达标玉色、未达标赭金、未通过用主题错误色;无渐变、无发光。
+  /// 经典风格返回原来的绿 / 橙 / 红。
+  MojianTokens? get _mj => Theme.of(context).extension<MojianTokens>();
+  Color get _good => _mj?.jade ?? const Color(0xFF22c55e);
+  Color get _warn => _mj?.gold ?? const Color(0xFFf59e0b);
+  Color get _bad =>
+      _mj != null ? Theme.of(context).colorScheme.error : const Color(0xFFef4444);
+
   bool _isLoading = true;
   Object? _error;
   StackTrace? _errorStack;
@@ -483,46 +493,55 @@ class _TrustLevelRequirementsPageState
     Color badgeText;
     switch (_data!.badgeType) {
       case TlBadgeType.success:
-        badgeBg = const Color(0xFF22c55e).withValues(alpha: 0.1);
-        badgeText = const Color(0xFF22c55e);
+        badgeBg = _good.withValues(alpha: 0.1);
+        badgeText = _good;
         break;
       case TlBadgeType.danger:
-        badgeBg = const Color(0xFFef4444).withValues(alpha: 0.1);
-        badgeText = const Color(0xFFef4444);
+        badgeBg = _bad.withValues(alpha: 0.1);
+        badgeText = _bad;
         break;
       default:
-        badgeBg = const Color(0xFFf59e0b).withValues(alpha: 0.1);
-        badgeText = const Color(0xFFf59e0b);
+        badgeBg = _warn.withValues(alpha: 0.1);
+        badgeText = _warn;
         break;
     }
+    final mj = _mj;
+    if (mj != null) badgeBg = Colors.transparent;
 
     return SliverAppBar.large(
       title: Text(context.l10n.trustLevel_appBarTitle),
       centerTitle: false,
       expandedHeight: 200,
       flexibleSpace: FlexibleSpaceBar(
+        // 墨笺:纸底,不要渐变与大盾牌水印
         background: Container(
           decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: [
-                colorScheme.surface,
-                colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
-              ],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
+            color: mj?.paper,
+            gradient: mj != null
+                ? null
+                : LinearGradient(
+                    colors: [
+                      colorScheme.surface,
+                      colorScheme.surfaceContainerHighest.withValues(
+                        alpha: 0.5,
+                      ),
+                    ],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
           ),
           child: Stack(
             children: [
-              Positioned(
-                right: -20,
-                top: -20,
-                child: Icon(
-                  Symbols.verified_user_rounded,
-                  size: 200,
-                  color: colorScheme.primary.withValues(alpha: 0.05),
+              if (mj == null)
+                Positioned(
+                  right: -20,
+                  top: -20,
+                  child: Icon(
+                    Symbols.verified_user_rounded,
+                    size: 200,
+                    color: colorScheme.primary.withValues(alpha: 0.05),
+                  ),
                 ),
-              ),
               Positioned(
                 left: 20 + MediaQuery.of(context).padding.left,
                 bottom: 20,
@@ -534,7 +553,7 @@ class _TrustLevelRequirementsPageState
                       _data!.subtitle,
                       style: TextStyle(
                         fontSize: 14,
-                        color: colorScheme.secondary,
+                        color: mj?.ink3 ?? colorScheme.secondary,
                         fontWeight: FontWeight.w500,
                       ),
                     ),
@@ -542,9 +561,10 @@ class _TrustLevelRequirementsPageState
                     Text(
                       _data!.title,
                       style: TextStyle(
+                        fontFamily: mj != null ? MojianTokens.serifFamily : null,
                         fontSize: 28,
-                        fontWeight: FontWeight.w600,
-                        color: colorScheme.onSurface,
+                        fontWeight: mj != null ? FontWeight.w700 : FontWeight.w600,
+                        color: mj?.ink ?? colorScheme.onSurface,
                         height: 1.2,
                       ),
                     ),
@@ -559,7 +579,9 @@ class _TrustLevelRequirementsPageState
                           color: badgeBg,
                           borderRadius: BorderRadius.circular(20),
                           border: Border.all(
-                            color: badgeText.withValues(alpha: 0.2),
+                            color: badgeText.withValues(
+                              alpha: mj != null ? 0.6 : 0.2,
+                            ),
                           ),
                         ),
                         child: Text(
@@ -586,6 +608,26 @@ class _TrustLevelRequirementsPageState
     required Widget child,
   }) {
     final colorScheme = theme.colorScheme;
+    final mj = _mj;
+    if (mj != null) {
+      // 墨笺:不要卡片,一道墨线 + 宋体小标题分节
+      return Container(
+        padding: const EdgeInsets.only(top: 12, bottom: 4),
+        decoration: BoxDecoration(
+          border: Border(top: BorderSide(color: mj.ink, width: 1)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(bottom: 18),
+              child: MojianSectionLabel(title),
+            ),
+            child,
+          ],
+        ),
+      );
+    }
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -651,9 +693,8 @@ class _TrustLevelRequirementsPageState
 
     // met -> #22c55e, unmet -> #f59e0b
     // Increase size to match 88px ~ 80-90 logical pixels
-    final color = ring.isMet
-        ? const Color(0xFF22c55e)
-        : const Color(0xFFf59e0b);
+    final color = ring.isMet ? _good : _warn;
+    final mj = _mj;
 
     return Column(
       children: [
@@ -661,12 +702,15 @@ class _TrustLevelRequirementsPageState
           alignment: Alignment.center,
           children: [
             // M3eCircularProgress 自带 track,底轨+进度合一
+            // 墨笺:细环(4px)、细线底轨,数字宋体
             M3eCircularProgress(
               value: progress,
               size: 80,
-              strokeWidth: 8,
+              strokeWidth: mj != null ? 4 : 8,
               color: color,
-              trackColor: colorScheme.secondaryContainer.withValues(alpha: 0.5),
+              trackColor:
+                  mj?.rule ??
+                  colorScheme.secondaryContainer.withValues(alpha: 0.5),
             ),
             Column(
               mainAxisSize: MainAxisSize.min,
@@ -674,8 +718,9 @@ class _TrustLevelRequirementsPageState
                 Text(
                   '${ring.current}',
                   style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w800,
-                    color: colorScheme.onSurface,
+                    fontWeight: mj != null ? FontWeight.w700 : FontWeight.w800,
+                    fontFamily: mj != null ? MojianTokens.serifFamily : null,
+                    color: mj?.ink ?? colorScheme.onSurface,
                   ),
                 ),
                 Text(
@@ -711,9 +756,8 @@ class _TrustLevelRequirementsPageState
   Widget _buildBarItem(ThemeData theme, TlBarData bar) {
     final colorScheme = theme.colorScheme;
 
-    final labelColor = bar.isMet
-        ? const Color(0xFF22c55e)
-        : const Color(0xFFf59e0b);
+    final labelColor = bar.isMet ? _good : _warn;
+    final mj = _mj;
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 16),
@@ -740,6 +784,22 @@ class _TrustLevelRequirementsPageState
             ],
           ),
           const SizedBox(height: 8),
+          // 墨笺:3px 细条,纯色,无渐变无发光
+          if (mj != null)
+            ClipRRect(
+              borderRadius: BorderRadius.circular(1.5),
+              child: Container(
+                height: 3,
+                width: double.infinity,
+                color: mj.rule,
+                child: FractionallySizedBox(
+                  alignment: Alignment.centerLeft,
+                  widthFactor: bar.progress,
+                  child: ColoredBox(color: labelColor),
+                ),
+              ),
+            )
+          else
           ClipRRect(
             borderRadius: BorderRadius.circular(4),
             child: Container(
@@ -818,17 +878,21 @@ class _TrustLevelRequirementsPageState
     // Met: default card style
     // Unmet: red border, red bg tint
 
+    final mj = _mj;
     final borderColor = quota.isMet
-        ? colorScheme.outlineVariant.withValues(alpha: 0.4)
-        : const Color(0xFFef4444).withValues(alpha: 0.3);
+        ? (mj?.rule ?? colorScheme.outlineVariant.withValues(alpha: 0.4))
+        : _bad.withValues(alpha: mj != null ? 0.5 : 0.3);
 
-    final bgColor = quota.isMet
+    // 墨笺:不铺红底,只用细框与文字颜色区分
+    final bgColor = mj != null
+        ? Colors.transparent
+        : quota.isMet
         ? colorScheme.surface
         : (isDark ? const Color(0xFF2e0a0a) : const Color(0xFFfef2f2));
 
     final textColor = quota.isMet
-        ? colorScheme.onSurfaceVariant
-        : const Color(0xFFef4444);
+        ? (mj?.ink2 ?? colorScheme.onSurfaceVariant)
+        : _bad;
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -868,9 +932,7 @@ class _TrustLevelRequirementsPageState
             children: List.generate(5, (index) {
               // Used slots are danger style, unused are success style
               final isUsed = index < quota.usedSlots;
-              final color = isUsed
-                  ? const Color(0xFFef4444)
-                  : const Color(0xFF22c55e);
+              final color = isUsed ? _bad : _good;
 
               return Expanded(
                 child: Container(
@@ -879,7 +941,7 @@ class _TrustLevelRequirementsPageState
                   decoration: BoxDecoration(
                     color: color.withValues(alpha: isUsed ? 0.9 : 0.2),
                     borderRadius: BorderRadius.circular(3),
-                    boxShadow: isUsed
+                    boxShadow: isUsed && mj == null
                         ? [
                             BoxShadow(
                               color: color.withValues(alpha: 0.3),
@@ -910,14 +972,21 @@ class _TrustLevelRequirementsPageState
 
     if (veto.isMet) {
       bgColor = isDark ? const Color(0xFF0a2e14) : const Color(0xFFf0fdf4);
-      borderColor = const Color(0xFF22c55e).withValues(alpha: 0.2);
-      iconBg = const Color(0xFF22c55e).withValues(alpha: 0.15);
-      iconColor = const Color(0xFF22c55e);
+      borderColor = _good.withValues(alpha: 0.2);
+      iconBg = _good.withValues(alpha: 0.15);
+      iconColor = _good;
     } else {
       bgColor = isDark ? const Color(0xFF2e0a0a) : const Color(0xFFfef2f2);
-      borderColor = const Color(0xFFef4444).withValues(alpha: 0.2);
-      iconBg = const Color(0xFFef4444).withValues(alpha: 0.15);
-      iconColor = const Color(0xFFef4444);
+      borderColor = _bad.withValues(alpha: 0.2);
+      iconBg = _bad.withValues(alpha: 0.15);
+      iconColor = _bad;
+    }
+    // 墨笺:不铺色底,细线框 + 细线圆圈图标
+    final mj = _mj;
+    if (mj != null) {
+      bgColor = Colors.transparent;
+      borderColor = veto.isMet ? mj.rule : _bad.withValues(alpha: 0.5);
+      iconBg = Colors.transparent;
     }
 
     return Container(
@@ -940,6 +1009,9 @@ class _TrustLevelRequirementsPageState
                 decoration: BoxDecoration(
                   color: iconBg,
                   shape: BoxShape.circle,
+                  border: mj != null
+                      ? Border.all(color: iconColor.withValues(alpha: 0.6))
+                      : null,
                 ),
                 child: Icon(
                   veto.isMet ? Symbols.check_rounded : Symbols.close_rounded,
@@ -951,6 +1023,7 @@ class _TrustLevelRequirementsPageState
                 veto.value,
                 style: theme.textTheme.headlineSmall?.copyWith(
                   fontWeight: FontWeight.w600,
+                  fontFamily: mj != null ? MojianTokens.serifFamily : null,
                   color: iconColor,
                 ),
               ),
@@ -977,9 +1050,8 @@ class _TrustLevelRequirementsPageState
   }
 
   Widget _buildFooter(ThemeData theme) {
-    final statusColor = _data!.isStatusMet
-        ? const Color(0xFF22c55e)
-        : const Color(0xFFef4444);
+    final statusColor = _data!.isStatusMet ? _good : _bad;
+    final mj = _mj;
 
     return Column(
       children: [
@@ -999,9 +1071,13 @@ class _TrustLevelRequirementsPageState
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: statusColor.withValues(alpha: 0.08),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: statusColor.withValues(alpha: 0.2)),
+              color: mj != null
+                  ? Colors.transparent
+                  : statusColor.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(mj != null ? 4 : 12),
+              border: Border.all(
+                color: statusColor.withValues(alpha: mj != null ? 0.55 : 0.2),
+              ),
             ),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -1178,7 +1254,7 @@ class _TrustLevelRequirementsPageState
     final colorScheme = theme.colorScheme;
     final isMet = item.isMet;
     final progress = item.progress;
-    final color = isMet ? const Color(0xFF22c55e) : const Color(0xFFf59e0b);
+    final color = isMet ? _good : _warn;
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),

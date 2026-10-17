@@ -8,6 +8,7 @@ import 'package:m3e_ui/m3e_ui.dart';
 import '../l10n/s.dart';
 import '../providers/apk_update_provider.dart';
 import '../services/apk_download_service.dart';
+import '../theme/mojian_theme.dart';
 
 /// APK 下载进度对话框
 ///
@@ -56,6 +57,17 @@ class DownloadProgressDialog extends ConsumerWidget {
 
   Widget _buildMeshBackground(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final mj = Theme.of(context).extension<MojianTokens>();
+    if (mj != null) {
+      // 墨笺:素纸底 + 发丝线框,不要流动的彩色网格渐变
+      return DecoratedBox(
+        decoration: BoxDecoration(
+          color: mj.paper3,
+          borderRadius: BorderRadius.circular(32),
+          border: Border.all(color: mj.rule),
+        ),
+      );
+    }
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     final colors = isDark
@@ -81,11 +93,15 @@ class DownloadProgressDialog extends ConsumerWidget {
   }
 
   Color _contentColor(BuildContext context) {
+    final mj = Theme.of(context).extension<MojianTokens>();
+    if (mj != null) return mj.ink;
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return isDark ? Colors.white : const Color(0xFF1e293b);
   }
 
   Color _subContentColor(BuildContext context) {
+    final mj = Theme.of(context).extension<MojianTokens>();
+    if (mj != null) return mj.ink3;
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return isDark ? Colors.white70 : const Color(0xFF64748b);
   }
@@ -100,12 +116,18 @@ class DownloadProgressDialog extends ConsumerWidget {
         children: [
           Text(
             '${state.progress}%',
+            // 墨笺:百分比用宋体
             style: TextStyle(
               fontSize: 64,
-              fontWeight: FontWeight.w300,
+              fontWeight:
+                  Theme.of(context).extension<MojianTokens>() != null
+                  ? FontWeight.w600
+                  : FontWeight.w300,
               color: color,
               height: 1.0,
-              fontFamily: 'monospace',
+              fontFamily: Theme.of(context).extension<MojianTokens>() != null
+                  ? MojianTokens.serifFamily
+                  : 'monospace',
             ),
           ),
           const SizedBox(height: 16),
@@ -132,7 +154,11 @@ class DownloadProgressDialog extends ConsumerWidget {
           break;
         case ApkDownloadStatus.error:
           icon = Symbols.error_rounded;
-          iconColor = isDark ? Colors.white : Colors.red.shade700;
+          iconColor = Theme.of(context).extension<MojianTokens>() != null
+              ? Theme.of(context).colorScheme.error
+              : isDark
+              ? Colors.white
+              : Colors.red.shade700;
           break;
         default:
           icon = Symbols.download_rounded;

@@ -20,6 +20,7 @@ import 'topic_detail_page/topic_detail_page.dart';
 import 'user_profile_page.dart';
 import '../l10n/s.dart';
 import 'package:app_icons/app_icons.dart';
+import '../theme/mojian_theme.dart';
 
 /// 徽章详情页面
 class BadgePage extends ConsumerStatefulWidget {
@@ -167,7 +168,7 @@ class _BadgePageState extends ConsumerState<BadgePage> {
                   _badgeDetail!.userBadges.isEmpty
                       ? SliverFillRemaining(
                           hasScrollBody: false,
-                          child: Center(
+                          child: mojianEmptyState(context, Symbols.person_off_rounded, context.l10n.badge_noGrantees) ?? Center(
                             child: Column(
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [
@@ -282,23 +283,32 @@ class _BadgeInfoCard extends StatelessWidget {
     final badgeType = badge.badgeType;
     final badgeColor = BadgeUIUtils.getBadgeColor(context, badgeType);
     final typeName = BadgeUIUtils.getBadgeTypeName(badgeType);
+    final mj = theme.extension<MojianTokens>();
 
     return Container(
       padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: theme.cardColor,
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(
-          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.2),
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.04),
-            blurRadius: 16,
-            offset: const Offset(0, 8),
-          ),
-        ],
-      ),
+      // 墨笺:不要浮起的大圆角卡,上下两道细线收住
+      decoration: mj != null
+          ? BoxDecoration(
+              border: Border(
+                top: BorderSide(color: mj.ink),
+                bottom: BorderSide(color: mj.rule),
+              ),
+            )
+          : BoxDecoration(
+              color: theme.cardColor,
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(
+                color: theme.colorScheme.outlineVariant.withValues(alpha: 0.2),
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.04),
+                  blurRadius: 16,
+                  offset: const Offset(0, 8),
+                ),
+              ],
+            ),
       child: Column(
         children: [
           // Name and Type
@@ -314,9 +324,13 @@ class _BadgeInfoCard extends StatelessWidget {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
             decoration: BoxDecoration(
-              color: badgeColor.withValues(alpha: 0.1),
+              color: mj != null
+                  ? Colors.transparent
+                  : badgeColor.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: badgeColor.withValues(alpha: 0.2)),
+              border: Border.all(
+                color: badgeColor.withValues(alpha: mj != null ? 0.6 : 0.2),
+              ),
             ),
             child: Text(
               typeName,
@@ -348,12 +362,17 @@ class _BadgeInfoCard extends StatelessWidget {
             const SizedBox(height: 16),
             Container(
               padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: theme.colorScheme.surfaceContainerHighest.withValues(
-                  alpha: 0.3,
-                ),
-                borderRadius: BorderRadius.circular(16),
-              ),
+              decoration: mj != null
+                  ? BoxDecoration(
+                      border: Border(
+                        left: BorderSide(color: mj.ruleStrong, width: 2),
+                      ),
+                    )
+                  : BoxDecoration(
+                      color: theme.colorScheme.surfaceContainerHighest
+                          .withValues(alpha: 0.3),
+                      borderRadius: BorderRadius.circular(16),
+                    ),
               child: FluxdoRenderCallbacks.generic(
                 heroTagNamespace: 'badge_${badge.id}_longdesc',
               ).render(
@@ -497,11 +516,23 @@ class _UserBadgeItem extends StatelessWidget {
                         horizontal: 10,
                         vertical: 6,
                       ),
-                      decoration: BoxDecoration(
-                        color: theme.colorScheme.surfaceContainerHighest
-                            .withValues(alpha: 0.4),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
+                      // 墨笺:来源话题改左侧细竖线,不铺灰底
+                      decoration: theme.extension<MojianTokens>() != null
+                          ? BoxDecoration(
+                              border: Border(
+                                left: BorderSide(
+                                  color: theme
+                                      .extension<MojianTokens>()!
+                                      .ruleStrong,
+                                  width: 2,
+                                ),
+                              ),
+                            )
+                          : BoxDecoration(
+                              color: theme.colorScheme.surfaceContainerHighest
+                                  .withValues(alpha: 0.4),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
                       child: Row(
                         children: [
                           Icon(

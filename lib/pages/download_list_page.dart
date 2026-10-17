@@ -21,6 +21,7 @@ import '../utils/dialog_utils.dart';
 import '../services/public_file_channel.dart';
 import '../utils/platform_utils.dart';
 import '../widgets/common/app_bottom_sheet.dart';
+import '../widgets/layout/master_detail_layout.dart';
 
 /// 下载管理页面
 class DownloadListPage extends ConsumerStatefulWidget {
@@ -97,7 +98,7 @@ class _DownloadListPageState extends ConsumerState<DownloadListPage> {
         ],
       ),
       body: downloads.isEmpty
-          ? Center(
+          ? mojianEmptyState(context, Symbols.download_rounded, context.l10n.myBrowser_downloadEmpty) ?? Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [

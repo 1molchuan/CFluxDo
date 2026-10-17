@@ -573,7 +573,7 @@ class _CategoryTopicsPageState extends ConsumerState<CategoryTopicsPage> {
     }
 
     if (_topics.isEmpty) {
-      return Center(
+      return mojianEmptyState(context, Symbols.inbox_rounded, context.l10n.categoryTopics_empty) ?? Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [

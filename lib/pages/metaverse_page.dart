@@ -13,6 +13,9 @@ import '../providers/cdk_providers.dart';
 import '../widgets/ldc_balance_card.dart';
 import '../widgets/cdk_balance_card.dart';
 import '../modules/ldc_reward/ldc_reward.dart';
+import '../theme/mojian_theme.dart';
+import '../widgets/common/mojian_ledger_card.dart';
+import '../widgets/common/mojian_section_label.dart';
 
 class MetaversePage extends ConsumerStatefulWidget {
   const MetaversePage({super.key});
@@ -172,13 +175,17 @@ class _MetaversePageState extends ConsumerState<MetaversePage> {
                         // 服务列表标题
                         Padding(
                           padding: const EdgeInsets.only(bottom: 16, top: 8),
-                          child: Text(
-                            context.l10n.metaverse_myServices,
-                            style: theme.textTheme.titleMedium?.copyWith(
-                              fontWeight: FontWeight.w600,
-                              color: colorScheme.onSurface,
-                            ),
-                          ),
+                          child: theme.extension<MojianTokens>() != null
+                              ? MojianSectionLabel(
+                                  context.l10n.metaverse_myServices,
+                                )
+                              : Text(
+                                  context.l10n.metaverse_myServices,
+                                  style: theme.textTheme.titleMedium?.copyWith(
+                                    fontWeight: FontWeight.w600,
+                                    color: colorScheme.onSurface,
+                                  ),
+                                ),
                         ),
                         // LDC 服务卡片
                         _buildLdcServiceItem(theme),
@@ -252,6 +259,19 @@ class _MetaversePageState extends ConsumerState<MetaversePage> {
       return LdcBalanceCard(
         onDisable: _ldcProcessing ? null : () => _toggleLdc(false),
         onReauthorize: _ldcProcessing ? null : _reauthorizeLdc,
+      );
+    }
+
+    final mj = theme.extension<MojianTokens>();
+    if (mj != null) {
+      return _mojianServiceRow(
+        theme,
+        mj,
+        icon: Symbols.storefront_rounded,
+        title: context.l10n.metaverse_ldcService,
+        desc: context.l10n.metaverse_ldcDesc,
+        processing: _ldcProcessing,
+        onEnable: () => _toggleLdc(true),
       );
     }
 
@@ -329,6 +349,19 @@ class _MetaversePageState extends ConsumerState<MetaversePage> {
       );
     }
 
+    final mj = theme.extension<MojianTokens>();
+    if (mj != null) {
+      return _mojianServiceRow(
+        theme,
+        mj,
+        icon: Symbols.token_rounded,
+        title: context.l10n.metaverse_cdkService,
+        desc: context.l10n.metaverse_cdkDesc,
+        processing: _cdkProcessing,
+        onEnable: () => _toggleCdk(true),
+      );
+    }
+
     // 未开启状态：展示连接卡片
     return Card(
       color: theme.colorScheme.surfaceContainerHigh,
@@ -395,7 +428,62 @@ class _MetaversePageState extends ConsumerState<MetaversePage> {
     );
   }
 
+  /// 墨笺:未开启的服务是一张账本卡——线形图标 + 宋体服务名,说明一行,
+  /// 行尾墨色「启用」
+  Widget _mojianServiceRow(
+    ThemeData theme,
+    MojianTokens mj, {
+    required IconData icon,
+    required String title,
+    required String desc,
+    required bool processing,
+    required VoidCallback onEnable,
+  }) {
+    return MojianLedgerCard(
+      icon: icon,
+      title: title,
+      onTap: processing ? null : onEnable,
+      trailing: processing
+          ? MojianLedgerCard.spinner(mj)
+          : FilledButton(
+              onPressed: onEnable,
+              style: FilledButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                visualDensity: VisualDensity.compact,
+              ),
+              child: Text(context.l10n.common_enable),
+            ),
+      children: [
+        Text(
+          desc,
+          style: theme.textTheme.bodyMedium?.copyWith(color: mj.ink3),
+        ),
+      ],
+    );
+  }
+
   Widget _buildComingSoonItem(ThemeData theme) {
+    final mj = theme.extension<MojianTokens>();
+    if (mj != null) {
+      // 墨笺:一行淡墨小字,上方一道细线
+      return Container(
+        padding: const EdgeInsets.symmetric(vertical: 20),
+        decoration: BoxDecoration(
+          border: Border(top: BorderSide(color: mj.rule)),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Symbols.hub_rounded, size: 18, color: mj.ink4),
+            const SizedBox(width: 8),
+            Text(
+              context.l10n.metaverse_comingSoon,
+              style: theme.textTheme.bodyMedium?.copyWith(color: mj.ink3),
+            ),
+          ],
+        ),
+      );
+    }
     return Card(
       color: theme.colorScheme.surfaceContainerLow.withValues(alpha: 0.5),
       shape: RoundedRectangleBorder(

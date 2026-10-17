@@ -21,6 +21,7 @@ import '../utils/platform_utils.dart';
 import '../utils/share_utils.dart';
 import '../utils/time_utils.dart';
 import '../widgets/common/app_bottom_sheet.dart';
+import '../widgets/layout/master_detail_layout.dart';
 
 /// 导出历史页面：列出当前账号所有导出/同步记录。
 class ExportHistoryPage extends ConsumerStatefulWidget {
@@ -353,7 +354,7 @@ class _EmptyState extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Center(
+    return mojianEmptyState(context, Symbols.history_edu_rounded, context.l10n.exportHistory_empty) ?? Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [

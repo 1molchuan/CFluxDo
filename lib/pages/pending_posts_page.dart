@@ -51,7 +51,7 @@ class _PendingPostsPageState extends ConsumerState<PendingPostsPage> {
         child: pendingAsync.when(
           data: (pendingPosts) {
             if (pendingPosts.isEmpty) {
-              return Center(
+              return mojianEmptyState(context, Symbols.pending_actions_rounded, context.l10n.review_empty) ?? Center(
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [

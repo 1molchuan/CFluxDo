@@ -6,6 +6,8 @@ import '../pages/webview_page.dart';
 import '../services/network/exceptions/oauth_exception.dart';
 import 'package:m3e_ui/m3e_ui.dart';
 import '../../../../l10n/s.dart';
+import '../theme/mojian_theme.dart';
+import 'common/mojian_ledger_card.dart';
 
 class CdkBalanceCard extends ConsumerWidget {
   static const String _dashboardUrl = 'https://cdk.linux.do/dashboard';
@@ -173,6 +175,39 @@ class CdkBalanceCard extends ConsumerWidget {
           ),
         ),
       ),
+      );
+    }
+
+    final mj = theme.extension<MojianTokens>();
+    if (mj != null) {
+      // 墨笺:账本卡代替彩色渐变大卡——宋体大号积分 + 单位小字
+      return MojianLedgerCard(
+        icon: Symbols.token_rounded,
+        title: 'LINUX DO CDK',
+        onTap: () =>
+            WebViewPage.open(context, _dashboardUrl, title: 'LINUX DO CDK'),
+        trailing: isRefreshing
+            ? MojianLedgerCard.spinner(mj)
+            : onDisable != null
+            ? MojianLedgerCard.powerButton(mj, onDisable!)
+            : null,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.baseline,
+            textBaseline: TextBaseline.alphabetic,
+            children: [
+              Text(
+                '${userInfo.score}',
+                style: MojianLedgerCard.figureStyle(mj),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                S.current.cdk_points,
+                style: theme.textTheme.bodyMedium?.copyWith(color: mj.ink3),
+              ),
+            ],
+          ),
+        ],
       );
     }
 
@@ -441,6 +476,47 @@ class CdkBalanceCard extends ConsumerWidget {
       );
     }
 
+    final mj = theme.extension<MojianTokens>();
+    if (mj != null) {
+      // 墨笺:账本卡;过期时框线与状态字用错误色
+      return MojianLedgerCard(
+        icon: isExpired ? Symbols.lock_clock_rounded : Symbols.error_rounded,
+        title: 'LINUX DO CDK',
+        danger: isExpired,
+        trailing: onDisable != null
+            ? MojianLedgerCard.powerButton(mj, onDisable!)
+            : null,
+        children: [
+          Text(
+            isExpired
+                ? S.current.common_authExpired
+                : S.current.common_loadFailed,
+            style: MojianLedgerCard.figureStyle(mj).copyWith(
+              fontSize: 24,
+              color: isExpired ? theme.colorScheme.error : mj.ink,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            isExpired ? S.current.cdk_reAuthHint : S.current.common_checkNetworkRetry,
+            style: theme.textTheme.bodyMedium?.copyWith(color: mj.ink3),
+          ),
+          const SizedBox(height: 14),
+          OutlinedButton.icon(
+            onPressed: isExpired && onReauthorize != null
+                ? onReauthorize
+                : () => ref.read(cdkUserInfoProvider.notifier).refresh(),
+            icon: const Icon(Symbols.refresh_rounded, size: 18),
+            label: Text(
+              isExpired && onReauthorize != null
+                  ? S.current.common_reAuth
+                  : S.current.common_retry,
+            ),
+          ),
+        ],
+      );
+    }
+
     // full 模式错误卡片
     return Card(
       elevation: 8,
@@ -668,6 +744,21 @@ class CdkBalanceCard extends ConsumerWidget {
             ],
           ),
         ),
+      );
+    }
+
+    final mj = theme.extension<MojianTokens>();
+    if (mj != null) {
+      return MojianLedgerCard(
+        icon: Symbols.token_rounded,
+        title: 'LINUX DO CDK',
+        trailing: MojianLedgerCard.spinner(mj),
+        children: [
+          Text(
+            '—',
+            style: MojianLedgerCard.figureStyle(mj).copyWith(color: mj.ink4),
+          ),
+        ],
       );
     }
 

@@ -8,6 +8,8 @@ import '../services/network/exceptions/oauth_exception.dart';
 import '../utils/number_utils.dart';
 import 'package:m3e_ui/m3e_ui.dart';
 import '../../../../l10n/s.dart';
+import '../theme/mojian_theme.dart';
+import 'common/mojian_ledger_card.dart';
 
 class LdcBalanceCard extends ConsumerWidget {
   static const String _homeUrl = 'https://credit.linux.do/home';
@@ -244,6 +246,45 @@ class LdcBalanceCard extends ConsumerWidget {
             ),
           ),
         ),
+      );
+    }
+
+    final mj = theme.extension<MojianTokens>();
+    if (mj != null) {
+      // 墨笺:账本卡代替彩色渐变大卡——宋体大号余额,今日收益用玉色小字
+      return MojianLedgerCard(
+        icon: Symbols.account_balance_wallet_rounded,
+        title: 'LINUX DO Credits',
+        onTap: () =>
+            WebViewPage.open(context, _homeUrl, title: 'LINUX DO Credits'),
+        trailing: isRefreshing
+            ? MojianLedgerCard.spinner(mj)
+            : onDisable != null
+            ? MojianLedgerCard.powerButton(mj, onDisable!)
+            : null,
+        children: [
+          Text(
+            userInfo.availableBalance,
+            style: MojianLedgerCard.figureStyle(mj),
+          ),
+          if (dailyIncomeText != null) ...[
+            const SizedBox(height: 8),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Symbols.trending_up_rounded, size: 15, color: mj.jade),
+                const SizedBox(width: 4),
+                Text(
+                  S.current.ldc_dailyIncome(dailyIncomeText),
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: mj.jade,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ],
       );
     }
 
@@ -537,6 +578,47 @@ class LdcBalanceCard extends ConsumerWidget {
       );
     }
 
+    final mj = theme.extension<MojianTokens>();
+    if (mj != null) {
+      // 墨笺:账本卡;过期时框线与状态字用错误色
+      return MojianLedgerCard(
+        icon: isExpired ? Symbols.lock_clock_rounded : Symbols.error_rounded,
+        title: 'LINUX DO Credits',
+        danger: isExpired,
+        trailing: onDisable != null
+            ? MojianLedgerCard.powerButton(mj, onDisable!)
+            : null,
+        children: [
+          Text(
+            isExpired
+                ? S.current.common_authExpired
+                : S.current.common_loadFailed,
+            style: MojianLedgerCard.figureStyle(mj).copyWith(
+              fontSize: 24,
+              color: isExpired ? theme.colorScheme.error : mj.ink,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            isExpired ? S.current.ldc_reAuthHint : S.current.common_checkNetworkRetry,
+            style: theme.textTheme.bodyMedium?.copyWith(color: mj.ink3),
+          ),
+          const SizedBox(height: 14),
+          OutlinedButton.icon(
+            onPressed: isExpired && onReauthorize != null
+                ? onReauthorize
+                : () => ref.read(ldcUserInfoProvider.notifier).refresh(),
+            icon: const Icon(Symbols.refresh_rounded, size: 18),
+            label: Text(
+              isExpired && onReauthorize != null
+                  ? S.current.common_reAuth
+                  : S.current.common_retry,
+            ),
+          ),
+        ],
+      );
+    }
+
     // full 模式错误卡片
     return Card(
       elevation: 8,
@@ -765,6 +847,21 @@ class LdcBalanceCard extends ConsumerWidget {
             ],
           ),
         ),
+      );
+    }
+
+    final mj = theme.extension<MojianTokens>();
+    if (mj != null) {
+      return MojianLedgerCard(
+        icon: Symbols.account_balance_wallet_rounded,
+        title: 'LINUX DO Credits',
+        trailing: MojianLedgerCard.spinner(mj),
+        children: [
+          Text(
+            '—',
+            style: MojianLedgerCard.figureStyle(mj).copyWith(color: mj.ink4),
+          ),
+        ],
       );
     }
 

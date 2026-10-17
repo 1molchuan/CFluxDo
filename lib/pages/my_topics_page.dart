@@ -170,7 +170,7 @@ class _MyTopicsPageState extends ConsumerState<MyTopicsPage> {
       child: myTopicsAsync.when(
         data: (topics) {
           if (topics.isEmpty) {
-            return Center(
+            return mojianEmptyState(context, Symbols.article_rounded, context.l10n.myTopics_empty) ?? Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
