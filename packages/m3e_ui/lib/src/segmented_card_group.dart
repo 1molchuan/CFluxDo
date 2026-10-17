@@ -1,5 +1,53 @@
 import 'package:flutter/material.dart';
 
+/// 宿主经 [ThemeData.extensions] 注入的分段卡片组样式。
+///
+/// 不注入时保持 M3E 分段卡片原样;[flat] 为 true 时(如 cfluxdo 的「墨笺」)
+/// 改成平铺细线列表:无圆角、无块间缝,首项上方与每项下方各一条发丝线,
+/// 底色透明(调用方显式传了 color 的条目仍按 color 填充)。
+@immutable
+class SegmentedCardStyle extends ThemeExtension<SegmentedCardStyle> {
+  const SegmentedCardStyle({
+    this.flat = false,
+    this.dividerColor,
+    this.background,
+  });
+
+  final bool flat;
+
+  /// 平铺模式的分隔线颜色(默认 dividerColor)
+  final Color? dividerColor;
+
+  /// 平铺模式的条目底色(默认透明)
+  final Color? background;
+
+  static SegmentedCardStyle? of(BuildContext context) =>
+      Theme.of(context).extension<SegmentedCardStyle>();
+
+  @override
+  SegmentedCardStyle copyWith({
+    bool? flat,
+    Color? dividerColor,
+    Color? background,
+  }) {
+    return SegmentedCardStyle(
+      flat: flat ?? this.flat,
+      dividerColor: dividerColor ?? this.dividerColor,
+      background: background ?? this.background,
+    );
+  }
+
+  @override
+  SegmentedCardStyle lerp(covariant SegmentedCardStyle? other, double t) {
+    if (other == null) return this;
+    return SegmentedCardStyle(
+      flat: t < 0.5 ? flat : other.flat,
+      dividerColor: Color.lerp(dividerColor, other.dividerColor, t),
+      background: Color.lerp(background, other.background, t),
+    );
+  }
+}
+
 /// M3 Expressive 风格分段卡片组
 ///
 /// 参照最新 Material 3 Expressive 列表规范（Chrome / Android 系统设置）：
@@ -31,10 +79,11 @@ class SegmentedCardGroup extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final flat = SegmentedCardStyle.of(context)?.flat ?? false;
     return Column(
       children: [
         for (int i = 0; i < children.length; i++) ...[
-          if (i > 0) SizedBox(height: gap),
+          if (i > 0 && !flat) SizedBox(height: gap),
           SegmentedCardItem(
             index: i,
             count: children.length,
@@ -74,6 +123,16 @@ class SegmentedCardItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final style = SegmentedCardStyle.of(context);
+    if (style != null && style.flat) {
+      final line = BorderSide(color: style.dividerColor ?? theme.dividerColor);
+      return Material(
+        color: color ?? style.background ?? Colors.transparent,
+        clipBehavior: Clip.antiAlias,
+        shape: Border(top: index == 0 ? line : BorderSide.none, bottom: line),
+        child: child,
+      );
+    }
     final background =
         color ?? theme.cardTheme.color ?? theme.colorScheme.surfaceContainerLow;
 

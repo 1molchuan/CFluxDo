@@ -205,10 +205,12 @@ flutter:
         # Flutter 3.41+ FontWeight 会映射到 wght variation axis，因此即使
         # 不显式声明 weight，TextStyle(fontWeight: FontWeight.wXXX) 也能精准命中。
         - asset: assets/fonts/MiSansVF.ttf
-    # 墨笺风格的标题宋体：Noto Serif SC 按 GB2312 常用字裁剪（OFL，见 MojianSerif-OFL.txt），
-    # 缺的字回落到正文字体
+    # 墨笺风格的宋体：Noto Serif SC 按 GB2312 常用字裁剪（OFL，见 MojianSerif-OFL.txt），
+    # 400 给引用块正文，600/700 给标题；缺的字回落到正文字体
     - family: MojianSerif
       fonts:
+        - asset: assets/fonts/MojianSerif-Regular.otf
+          weight: 400
         - asset: assets/fonts/MojianSerif-SemiBold.otf
           weight: 600
         - asset: assets/fonts/MojianSerif-Bold.otf

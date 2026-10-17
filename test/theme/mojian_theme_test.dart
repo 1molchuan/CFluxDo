@@ -146,6 +146,7 @@ void main() {
           expect(rs?.quoteBarWidth, 2);
           expect(rs?.quoteBackground, Colors.transparent);
           expect(rs?.headingFontFamily, MojianTokens.serifFamily);
+          expect(rs?.quoteFontFamily, MojianTokens.serifFamily);
         });
       }
     }

@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:fluxdo_render/fluxdo_render.dart' show FluxdoRenderStyle;
+import 'package:m3e_ui/m3e_ui.dart' show SegmentedCardStyle;
 
 import 'theme_resolver.dart';
 
@@ -238,6 +239,17 @@ class MojianTheme {
     );
   }
 
+  /// 分类色块:服务端给的十六进制色;深色模式掺三成白,免得暗色分类在墨蓝底上看不见。
+  static Color categoryColor(String hex, Brightness brightness) {
+    final clean = hex.replaceAll('#', '');
+    final c = clean.length == 6
+        ? Color(int.parse('FF$clean', radix: 16))
+        : const Color(0xFF9E9E9E);
+    return brightness == Brightness.dark
+        ? Color.lerp(c, const Color(0xFFFFFFFF), 0.3)!
+        : c;
+  }
+
   /// 标题类文字换成宋体：display / headline / titleLarge（AppBar 标题、对话框标题都走这里）。
   /// 正文、标签、按钮仍用用户选的正文字体。
   static TextTheme serifTitles(TextTheme base) {
@@ -292,10 +304,13 @@ class MojianTheme {
           quoteBackground: Colors.transparent,
           quoteRadius: 0,
           quoteTextColor: t.ink2,
+          quoteFontFamily: MojianTokens.serifFamily,
           headingFontFamily: MojianTokens.serifFamily,
           headingColor: t.ink,
           ruleColor: t.rule,
         ),
+        // 设置、我的、会话列表等分段卡片组:平铺细线列表
+        SegmentedCardStyle(flat: true, dividerColor: t.rule),
       ],
       appBarTheme: AppBarThemeData(
         backgroundColor: t.paper,
@@ -410,7 +425,8 @@ class MojianTheme {
         backgroundColor: t.paper,
         surfaceTintColor: Colors.transparent,
         elevation: 0,
-        indicatorColor: scheme.secondaryContainer,
+        // 选中记号是顶边的强调色短横(见 adaptive_navigation 的 _MojianNavFrame)
+        indicatorColor: Colors.transparent,
         iconTheme: WidgetStateProperty.resolveWith(
           (s) => IconThemeData(
             color: s.contains(WidgetState.selected) ? t.ink : t.ink3,
