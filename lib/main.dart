@@ -713,7 +713,12 @@ class MainApp extends ConsumerWidget {
         // 开关由 ThemeResolver 切换到"强调色 × 中性层"的合成路径。
         // 动态色路径只取系统动态色 primary 当种子，不用 OEM 原始 scheme。
         final resolvedTheme = themeState.isMojian
-            ? MojianTheme.resolve(themeState.mode, themeState.mojianAccent)
+            ? MojianTheme.resolve(
+                themeState.mode,
+                themeState.mojianAccent,
+                black: themeState.blackEnabled,
+                accentPair: themeState.mojianAccentPair,
+              )
             : ThemeResolver.resolve(
                 mode: themeState.mode,
                 neutral: themeState.neutralEnabled,

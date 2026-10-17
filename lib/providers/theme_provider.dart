@@ -81,6 +81,9 @@ class ThemeState {
   /// 墨笺的强调色
   final MojianAccent mojianAccent;
 
+  /// 墨笺跟随系统壁纸取色(Android 12+;系统没给动态色时回落 [mojianAccent])
+  final bool mojianWallpaperAccent;
+
   const ThemeState({
     required this.mode,
     this.neutralEnabled = false,
@@ -97,9 +100,16 @@ class ThemeState {
     this.background = const AppBackground(),
     this.uiStyle = UiStyle.mojian,
     this.mojianAccent = MojianAccent.cinnabar,
+    this.mojianWallpaperAccent = false,
   });
 
   bool get isMojian => uiStyle == UiStyle.mojian;
+
+  /// 墨笺壁纸取色的明/暗两档;未启用或系统不支持时为 null(用预设强调色)
+  (Color, Color)? get mojianAccentPair =>
+      mojianWallpaperAccent && dynamicPrimary != null
+      ? MojianTheme.accentFromSeed(dynamicPrimary!)
+      : null;
 
   /// 透明模式当前是否真正生效（开了开关且有背景图才生效；
   /// 无图时回退普通表面，避免裸透明造成的可读性事故；墨笺风格下不生效）
@@ -139,6 +149,7 @@ class ThemeState {
     AppBackground? background,
     UiStyle? uiStyle,
     MojianAccent? mojianAccent,
+    bool? mojianWallpaperAccent,
   }) {
     return ThemeState(
       mode: mode ?? this.mode,
@@ -156,6 +167,8 @@ class ThemeState {
       background: background ?? this.background,
       uiStyle: uiStyle ?? this.uiStyle,
       mojianAccent: mojianAccent ?? this.mojianAccent,
+      mojianWallpaperAccent:
+          mojianWallpaperAccent ?? this.mojianWallpaperAccent,
     );
   }
 }
@@ -179,6 +192,8 @@ class ThemeNotifier extends StateNotifier<ThemeState> {
   static const String _bgBlurKey = 'bg_blur';
   static const String _uiStyleKey = 'ui_style';
   static const String _mojianAccentKey = 'mojian_accent';
+  static const String _mojianAccentFallbackKey = 'mojian_accent_fallback';
+  static const String _wallpaperAccentValue = 'wallpaper';
   static const String _onboardingCompletedKey = 'onboarding_completed';
 
   // 旧版键：只读迁移，不再写入
@@ -299,7 +314,12 @@ class ThemeNotifier extends StateNotifier<ThemeState> {
           UiStyle.mojian,
       mojianAccent:
           MojianAccent.values.asNameMap()[prefs.getString(_mojianAccentKey)] ??
+          MojianAccent.values.asNameMap()[prefs.getString(
+            _mojianAccentFallbackKey,
+          )] ??
           MojianAccent.cinnabar,
+      mojianWallpaperAccent:
+          prefs.getString(_mojianAccentKey) == _wallpaperAccentValue,
     );
   }
 
@@ -423,8 +443,16 @@ class ThemeNotifier extends StateNotifier<ThemeState> {
   }
 
   Future<void> setMojianAccent(MojianAccent accent) async {
-    state = state.copyWith(mojianAccent: accent);
+    state = state.copyWith(mojianAccent: accent, mojianWallpaperAccent: false);
     await _prefs.setString(_mojianAccentKey, accent.name);
+    await _prefs.setString(_mojianAccentFallbackKey, accent.name);
+  }
+
+  /// 墨笺强调色改为跟随系统壁纸;之前选的预设留作系统不支持时的回落
+  Future<void> setMojianWallpaperAccent() async {
+    state = state.copyWith(mojianWallpaperAccent: true);
+    await _prefs.setString(_mojianAccentKey, _wallpaperAccentValue);
+    await _prefs.setString(_mojianAccentFallbackKey, state.mojianAccent.name);
   }
 
   Future<void> setFontFamily(AppFontFamily fontFamily) async {

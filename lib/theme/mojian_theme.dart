@@ -74,20 +74,47 @@ class MojianTokens extends ThemeExtension<MojianTokens> {
 
   Color get accentSoft => accent.withValues(alpha: 0.09);
 
-  static MojianTokens of(Brightness brightness, MojianAccent accent) {
+  /// [black]:深色用纯黑纸(OLED),只影响深色;墨色与强调色不变。
+  static MojianTokens of(
+    Brightness brightness,
+    MojianAccent accent, {
+    bool black = false,
+    Color? accentColor,
+  }) {
     final light = brightness == Brightness.light;
+    final oled = !light && black;
     return MojianTokens(
-      paper: light ? const Color(0xFFF6F2EA) : const Color(0xFF12161C),
-      paper2: light ? const Color(0xFFEEE8DC) : const Color(0xFF0D1015),
-      paper3: light ? const Color(0xFFFBF8F2) : const Color(0xFF181D25),
+      paper: light
+          ? const Color(0xFFF6F2EA)
+          : oled
+          ? const Color(0xFF000000)
+          : const Color(0xFF12161C),
+      paper2: light
+          ? const Color(0xFFEEE8DC)
+          : oled
+          ? const Color(0xFF101215)
+          : const Color(0xFF0D1015),
+      paper3: light
+          ? const Color(0xFFFBF8F2)
+          : oled
+          ? const Color(0xFF0B0C0F)
+          : const Color(0xFF181D25),
       ink: light ? const Color(0xFF1D1B18) : const Color(0xFFECE6DA),
       inkBody: light ? const Color(0xFF2E2A25) : const Color(0xFFD6CFC2),
       ink2: light ? const Color(0xFF4A453E) : const Color(0xFFBDB5A7),
       ink3: light ? const Color(0xFF68615A) : const Color(0xFF9A9385),
       ink4: light ? const Color(0xFFA9A195) : const Color(0xFF5F5A52),
-      rule: light ? const Color(0xFFE3DBCD) : const Color(0xFF242A33),
-      ruleStrong: light ? const Color(0xFFCDC3B1) : const Color(0xFF343C47),
-      accent: accent.of(brightness),
+      rule: light
+          ? const Color(0xFFE3DBCD)
+          : oled
+          ? const Color(0xFF1E2228)
+          : const Color(0xFF242A33),
+      ruleStrong: light
+          ? const Color(0xFFCDC3B1)
+          : oled
+          ? const Color(0xFF30363E)
+          : const Color(0xFF343C47),
+      accent: accentColor ?? accent.of(brightness),
       jade: light ? const Color(0xFF2F6450) : const Color(0xFF78B39C),
       gold: light ? const Color(0xFF977633) : const Color(0xFFCFAE6A),
     );
@@ -155,9 +182,20 @@ class MojianTheme {
   /// 墨笺的 ColorScheme。所有 role 显式给出，不走 fromSeed：
   /// primary 是强调色（链接、选中、进度都取它），secondary 是中性墨色，
   /// 表面是纸色阶梯，surfaceTint 透明（不给抬高的表面染色）。
-  static ColorScheme colorScheme(Brightness brightness, MojianAccent accent) {
-    final t = MojianTokens.of(brightness, accent);
+  static ColorScheme colorScheme(
+    Brightness brightness,
+    MojianAccent accent, {
+    bool black = false,
+    Color? accentColor,
+  }) {
+    final t = MojianTokens.of(
+      brightness,
+      accent,
+      black: black,
+      accentColor: accentColor,
+    );
     final light = brightness == Brightness.light;
+    final oled = !light && black;
     final onAccent = light ? const Color(0xFFFFF9F2) : t.paper;
     Color tint(Color c, double a) =>
         Color.alphaBlend(c.withValues(alpha: a), t.paper);
@@ -169,8 +207,11 @@ class MojianTheme {
       onPrimaryContainer: Color.lerp(t.accent, t.ink, light ? 0.45 : 0.35)!,
       secondary: t.ink2,
       onSecondary: t.paper,
+      // 纯黑下也压暗,别在黑底上浮出一块墨蓝
       secondaryContainer: light
           ? const Color(0xFFE9E2D5)
+          : oled
+          ? const Color(0xFF1E2228)
           : const Color(0xFF262D37),
       onSecondaryContainer: t.ink,
       tertiary: t.jade,
@@ -186,39 +227,70 @@ class MojianTheme {
       surface: t.paper,
       onSurface: t.ink,
       onSurfaceVariant: t.ink3,
-      surfaceDim: light ? const Color(0xFFE4DCCE) : const Color(0xFF0F1318),
-      surfaceBright: light ? const Color(0xFFFBF8F2) : const Color(0xFF2A313B),
+      surfaceDim: light
+          ? const Color(0xFFE4DCCE)
+          : oled
+          ? const Color(0xFF000000)
+          : const Color(0xFF0F1318),
+      surfaceBright: light
+          ? const Color(0xFFFBF8F2)
+          : oled
+          ? const Color(0xFF22262C)
+          : const Color(0xFF2A313B),
       surfaceContainerLowest: light
           ? const Color(0xFFFBF8F2)
+          : oled
+          ? const Color(0xFF000000)
           : const Color(0xFF0D1015),
       surfaceContainerLow: light
           ? const Color(0xFFF3EEE5)
+          : oled
+          ? const Color(0xFF0A0B0D)
           : const Color(0xFF161A21),
       surfaceContainer: light
           ? const Color(0xFFEEE8DC)
+          : oled
+          ? const Color(0xFF101215)
           : const Color(0xFF1A1F27),
       surfaceContainerHigh: light
           ? const Color(0xFFE9E2D5)
+          : oled
+          ? const Color(0xFF16191D)
           : const Color(0xFF20262F),
       surfaceContainerHighest: light
           ? const Color(0xFFE3DBCD)
+          : oled
+          ? const Color(0xFF1E2228)
           : const Color(0xFF262D37),
       outline: light ? const Color(0xFF857D71) : const Color(0xFF736D63),
       outlineVariant: t.rule,
       inverseSurface: light ? t.inkBody : t.ink,
       onInverseSurface: light ? t.paper : const Color(0xFF12161C),
       inversePrimary: accent.of(light ? Brightness.dark : Brightness.light),
+      // (自定义强调色时 inversePrimary 仍取预设的另一档:只用于反色 SnackBar 的按钮)
       surfaceTint: Colors.transparent,
       shadow: Colors.black,
       scrim: Colors.black,
     );
   }
 
-  /// 墨笺的明暗两套配色（不支持透明背景）。
-  static ResolvedTheme resolve(ThemeMode mode, MojianAccent accent) {
+  /// 墨笺的明暗两套配色（不支持透明背景）。[black] = 深色用纯黑(OLED)。
+  ///
+  /// [accentPair] 给出时(跟随壁纸取色)覆盖预设强调色的明/暗两档。
+  static ResolvedTheme resolve(
+    ThemeMode mode,
+    MojianAccent accent, {
+    bool black = false,
+    (Color, Color)? accentPair,
+  }) {
     return ResolvedTheme(
-      light: colorScheme(Brightness.light, accent),
-      dark: colorScheme(Brightness.dark, accent),
+      light: colorScheme(Brightness.light, accent, accentColor: accentPair?.$1),
+      dark: colorScheme(
+        Brightness.dark,
+        accent,
+        black: black,
+        accentColor: accentPair?.$2,
+      ),
       mode: mode,
       transparent: false,
     );
@@ -237,6 +309,44 @@ class MojianTheme {
       fontSize: size * 15 / 14,
       color: mj.inkBody,
     );
+  }
+
+  /// 由任意种子色(系统壁纸取色)推出墨笺可用的强调色明/暗两档:保留色相,
+  /// 饱和度封顶,明度逐步压暗 / 提亮到在纸色各层上对比度 ≥ 4.5:1。
+  static (Color, Color) accentFromSeed(Color seed) {
+    final hsl = HSLColor.fromColor(seed);
+    final sat = math.min(hsl.saturation, 0.62);
+    Color fit(Brightness b) {
+      final light = b == Brightness.light;
+      final bgs = [
+        MojianTokens.of(b, MojianAccent.cinnabar).paper,
+        MojianTokens.of(b, MojianAccent.cinnabar).paper2,
+        MojianTokens.of(b, MojianAccent.cinnabar).paper3,
+        MojianTokens.of(b, MojianAccent.cinnabar, black: true).paper,
+        if (light) const Color(0xFFE9E2D5) else const Color(0xFF20262F),
+      ];
+      double minContrast(Color c) {
+        final lc = c.computeLuminance();
+        var worst = double.infinity;
+        for (final bg in bgs) {
+          final lb = bg.computeLuminance();
+          final hi = math.max(lc, lb), lo = math.min(lc, lb);
+          worst = math.min(worst, (hi + 0.05) / (lo + 0.05));
+        }
+        return worst;
+      }
+
+      var l = light ? 0.42 : 0.68;
+      for (var i = 0; i < 60; i++) {
+        final c = hsl.withSaturation(sat).withLightness(l).toColor();
+        if (minContrast(c) >= 4.6) return c;
+        l = light ? l - 0.01 : l + 0.01;
+        if (l <= 0.05 || l >= 0.95) break;
+      }
+      return hsl.withSaturation(sat).withLightness(l.clamp(0.05, 0.95)).toColor();
+    }
+
+    return (fit(Brightness.light), fit(Brightness.dark));
   }
 
   /// 分类色块:服务端给的十六进制色;深色模式掺三成白,免得暗色分类在墨蓝底上看不见。
@@ -280,7 +390,17 @@ class MojianTheme {
     required IconThemeData primaryIconTheme,
     List<ThemeExtension<dynamic>> extensions = const [],
   }) {
-    final t = MojianTokens.of(scheme.brightness, accent);
+    // 纯黑由配色带进来(深色且底色为纯黑),令牌跟着取同一套
+    final black =
+        scheme.brightness == Brightness.dark &&
+        scheme.surface.toARGB32() == 0xFF000000;
+    // 强调色以配色里的 primary 为准(跟随壁纸取色时不等于预设)
+    final t = MojianTokens.of(
+      scheme.brightness,
+      accent,
+      black: black,
+      accentColor: scheme.primary,
+    );
     final stadium = WidgetStatePropertyAll<OutlinedBorder>(
       const StadiumBorder(),
     );
@@ -383,9 +503,16 @@ class MojianTheme {
           ),
         ),
         shape: const StadiumBorder(),
-        labelStyle: WidgetStateTextStyle.resolveWith(
-          (s) => TextStyle(
-            color: s.contains(WidgetState.selected) ? t.paper : t.ink2,
+        // 颜色要用 WidgetStateColor:RawChip 会先把 labelStyle 与组件自带样式
+        // merge(WidgetStateTextStyle 的解析器在 merge 时丢失),再只对 color
+        // 做状态解析。用 WidgetStateTextStyle 时未选中标签会落成纸色、看不见
+        labelStyle: TextStyle(
+          color: WidgetStateColor.resolveWith(
+            (s) => s.contains(WidgetState.disabled)
+                ? t.ink4
+                : s.contains(WidgetState.selected)
+                ? t.paper
+                : t.ink2,
           ),
         ),
       ),

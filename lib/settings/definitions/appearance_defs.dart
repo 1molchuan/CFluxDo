@@ -95,7 +95,12 @@ List<SettingsGroup> buildAppearanceGroups(BuildContext context) {
 
             // 卡片预览实时反映中性/纯黑开关（透明不影响卡片预览）
             final preview = themeState.isMojian
-                ? MojianTheme.resolve(currentMode, themeState.mojianAccent)
+                ? MojianTheme.resolve(
+                    currentMode,
+                    themeState.mojianAccent,
+                    black: themeState.blackEnabled,
+                    accentPair: themeState.mojianAccentPair,
+                  )
                 : ThemeResolver.resolve(
                     mode: currentMode,
                     neutral: themeState.neutralEnabled,
@@ -162,13 +167,14 @@ List<SettingsGroup> buildAppearanceGroups(BuildContext context) {
     ),
 
     // ── 表面质感 ───────────────────────────────────────────────────
+    // 墨笺:只有「纯黑」(深色换 OLED 纯黑纸);「中性」是经典配色的选项
     SettingsGroup(
       title: l10n.appearance_surfaceStyle,
       icon: Symbols.contrast_rounded,
-      visibleWhen: _classicOnly,
       items: [
         SwitchModel(
           id: 'neutral',
+          enabledWhen: _classicOnly,
           title: l10n.appearance_neutral,
           subtitle: l10n.appearance_neutralDesc,
           icon: Symbols.format_color_reset_rounded,
@@ -2309,7 +2315,16 @@ class _UiStyleSection extends ConsumerWidget {
                   title: l10n.appearance_styleMojian,
                   description: l10n.appearance_styleMojianDesc,
                   preview: _MojianMiniPreview(
-                    tokens: MojianTokens.of(brightness, s.mojianAccent),
+                    tokens: MojianTokens.of(
+                      brightness,
+                      s.mojianAccent,
+                      black: s.blackEnabled,
+                      accentColor: switch (s.mojianAccentPair) {
+                        final p? =>
+                          brightness == Brightness.light ? p.$1 : p.$2,
+                        null => null,
+                      },
+                    ),
                   ),
                   onTap: () => notifier.setUiStyle(UiStyle.mojian),
                 ),
@@ -2344,10 +2359,27 @@ class _UiStyleSection extends ConsumerWidget {
                 _AccentChoice(
                   color: a.of(brightness),
                   label: accentName(a),
-                  selected: s.mojianAccent == a,
+                  selected: !s.mojianWallpaperAccent && s.mojianAccent == a,
                   onTap: () => notifier.setMojianAccent(a),
                 ),
+              // 系统给了壁纸取色(Android 12+)才出现:色相取壁纸,明度校正到墨笺对比度
+              if (s.dynamicPrimary != null)
+                _AccentChoice(
+                  color: switch (MojianTheme.accentFromSeed(s.dynamicPrimary!)) {
+                    final p => brightness == Brightness.light ? p.$1 : p.$2,
+                  },
+                  label: l10n.appearance_accentWallpaper,
+                  selected: s.mojianWallpaperAccent,
+                  onTap: notifier.setMojianWallpaperAccent,
+                ),
             ],
+          ),
+          const SizedBox(height: 14),
+          Text(
+            l10n.appearance_mojianClassicOnlyHint,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
           ),
         ],
       ],

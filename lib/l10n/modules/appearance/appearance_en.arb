@@ -161,5 +161,7 @@
   "appearance_accentIndigo": "Indigo",
   "appearance_accentPine": "Pine soot",
   "appearance_accentOchre": "Ochre",
-  "appearance_mojianSwitched": "The app now uses the new \"Ink & Paper\" style. You can switch back to \"Classic\" in Appearance → UI style."
+  "appearance_mojianSwitched": "The app now uses the new \"Ink & Paper\" style. You can switch back to \"Classic\" in Appearance → UI style.",
+  "appearance_accentWallpaper": "Wallpaper",
+  "appearance_mojianClassicOnlyHint": "Background image, theme colors and M3E motion belong to the Classic style. Switch back to Classic to use them; your previous settings are kept."
 }

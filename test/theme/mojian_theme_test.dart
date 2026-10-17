@@ -59,6 +59,24 @@ void main() {
       expect(prefs.getString('mojian_accent'), 'pine');
     });
 
+    test('壁纸取色:落盘为 wallpaper,重启后保留,预设色留作回落;再选预设即取消', () async {
+      SharedPreferences.setMockInitialValues({'mojian_accent': 'indigo'});
+      final prefs = await SharedPreferences.getInstance();
+      final n = ThemeNotifier(prefs);
+      await n.setMojianWallpaperAccent();
+      expect(prefs.getString('mojian_accent'), 'wallpaper');
+      final again = ThemeNotifier(prefs);
+      expect(again.state.mojianWallpaperAccent, isTrue);
+      expect(again.state.mojianAccent, MojianAccent.indigo);
+      // 系统没给动态色 → 不覆盖预设
+      expect(again.state.mojianAccentPair, isNull);
+      again.setDynamicPrimary(const Color(0xFF3366CC));
+      expect(again.state.mojianAccentPair, isNotNull);
+      await again.setMojianAccent(MojianAccent.pine);
+      expect(again.state.mojianWallpaperAccent, isFalse);
+      expect(prefs.getString('mojian_accent'), 'pine');
+    });
+
     test('墨笺下透明背景不生效，经典下照旧', () {
       const bg = AppBackground(imagePath: '/tmp/bg.png');
       const base = ThemeState(
@@ -151,6 +169,68 @@ void main() {
       }
     }
 
+    test('纯黑:只改深色的纸与表面,文字对比度仍达标;浅色不受影响', () {
+      for (final accent in MojianAccent.values) {
+        final s = MojianTheme.colorScheme(Brightness.dark, accent, black: true);
+        expect(s.surface, const Color(0xFF000000));
+        for (final bg in [s.surface, s.surfaceContainer]) {
+          expect(_contrast(s.onSurfaceVariant, bg), greaterThanOrEqualTo(4.5));
+          expect(_contrast(s.primary, bg), greaterThanOrEqualTo(4.5));
+        }
+        final theme = MojianTheme.build(
+          scheme: s,
+          accent: accent,
+          fontFamily: null,
+          pageTransitionsTheme: const PageTransitionsTheme(),
+          iconTheme: const IconThemeData(),
+          primaryIconTheme: const IconThemeData(),
+        );
+        expect(theme.extension<MojianTokens>()!.paper, const Color(0xFF000000));
+        expect(
+          MojianTheme.colorScheme(Brightness.light, accent, black: true),
+          MojianTheme.colorScheme(Brightness.light, accent),
+        );
+      }
+    });
+
+    test('壁纸取色:任意种子色推出的强调色在纸色各层上都 ≥ 4.5:1', () {
+      for (final seed in const [
+        Color(0xFFFFEB3B), // 亮黄
+        Color(0xFF90CAF9), // 浅蓝
+        Color(0xFF0D1B4C), // 深海军蓝
+        Color(0xFF00E676), // 荧光绿
+        Color(0xFF9E9E9E), // 灰
+      ]) {
+        final (light, dark) = MojianTheme.accentFromSeed(seed);
+        for (final b in Brightness.values) {
+          for (final black in [false, true]) {
+            final s = MojianTheme.colorScheme(
+              b,
+              MojianAccent.cinnabar,
+              black: black,
+              accentColor: b == Brightness.light ? light : dark,
+            );
+            for (final bg in [
+              s.surface,
+              s.surfaceContainerLow,
+              s.surfaceContainer,
+              s.surfaceContainerHigh,
+            ]) {
+              expect(
+                _contrast(s.primary, bg),
+                greaterThanOrEqualTo(4.5),
+                reason: 'seed $seed $b black=$black bg $bg',
+              );
+            }
+            expect(
+              _contrast(s.onPrimary, s.primary),
+              greaterThanOrEqualTo(4.5),
+            );
+          }
+        }
+      }
+    });
+
     test('令牌插值两端取值正确', () {
       final a = MojianTokens.of(Brightness.light, MojianAccent.cinnabar);
       final b = MojianTokens.of(Brightness.dark, MojianAccent.indigo);
@@ -158,5 +238,47 @@ void main() {
       expect(a.lerp(b, 1).accent, b.accent);
       expect(a.lerp(null, 0.5), same(a));
     });
+  });
+
+  testWidgets('选择标签:未选中墨色、选中纸色(不能落成看不见的纸色)', (tester) async {
+    final theme = MojianTheme.build(
+      scheme: MojianTheme.colorScheme(Brightness.light, MojianAccent.cinnabar),
+      accent: MojianAccent.cinnabar,
+      fontFamily: null,
+      pageTransitionsTheme: const PageTransitionsTheme(),
+      iconTheme: const IconThemeData(),
+      primaryIconTheme: const IconThemeData(),
+    );
+    final t = theme.extension<MojianTokens>()!;
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: theme,
+        home: Scaffold(
+          body: Row(
+            children: [
+              ChoiceChip(
+                label: const Text('on'),
+                selected: true,
+                onSelected: (_) {},
+              ),
+              ChoiceChip(
+                label: const Text('off'),
+                selected: false,
+                onSelected: (_) {},
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    Color? colorOf(String label) {
+      final rich = tester.widget<RichText>(
+        find.descendant(of: find.text(label), matching: find.byType(RichText)),
+      );
+      return rich.text.style?.color;
+    }
+
+    expect(colorOf('on'), t.paper);
+    expect(colorOf('off'), t.ink2);
   });
 }

@@ -161,5 +161,7 @@
   "appearance_accentIndigo": "黛青",
   "appearance_accentPine": "松烟",
   "appearance_accentOchre": "赭石",
-  "appearance_mojianSwitched": "界面已换成新的「墨笺」风格，可在「外观 → 界面风格」改回「经典」"
+  "appearance_mojianSwitched": "界面已换成新的「墨笺」风格，可在「外观 → 界面风格」改回「经典」",
+  "appearance_accentWallpaper": "壁纸",
+  "appearance_mojianClassicOnlyHint": "背景图、主题色与 M3E 动效属于「经典」风格，切回经典即可使用，之前的设置都保留着。"
 }
