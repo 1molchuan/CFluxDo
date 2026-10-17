@@ -405,7 +405,8 @@ class TopicCard extends ConsumerWidget {
           borderRadius: cardRadius,
           shouldClip: topWidget != null,
           child: DecoratedBox(
-            decoration: mojianCardDecoration(
+            decoration:
+                mojianCardDecoration(
                   theme,
                   isSelected: isSelected,
                   highlightColor: highlightColor,

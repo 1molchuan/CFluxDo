@@ -11,6 +11,7 @@ import '../providers/preferences_provider.dart';
 import '../utils/responsive.dart';
 import '../widgets/topic/painted_topic_card.dart';
 import '../widgets/topic/topic_card_layout.dart';
+import '../theme/mojian_theme.dart';
 
 /// 话题卡片样式设置页
 ///
@@ -113,6 +114,8 @@ class _TopicCardStyleSettingsPageState
         const SizedBox(height: 12),
         SegmentedCardGroup(
           children: [
+            // 墨笺的话题行头像固定在元信息行内,这个排布选项只对经典风格有效
+            if (theme.extension<MojianTokens>() == null)
             RadioGroup<TopicCardAvatarLayout>(
               groupValue: style.avatarLayout,
               onChanged: (v) {
