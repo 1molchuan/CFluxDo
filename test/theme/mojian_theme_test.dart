@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:fluxdo/providers/theme_provider.dart';
 import 'package:fluxdo/theme/app_background.dart';
 import 'package:fluxdo/theme/mojian_theme.dart';
+import 'package:fluxdo_render/fluxdo_render.dart' show FluxdoRenderStyle;
 import 'package:shared_preferences/shared_preferences.dart';
 
 double _contrast(Color a, Color b) {
@@ -140,6 +141,11 @@ void main() {
           final tokens = theme.extension<MojianTokens>();
           expect(tokens, isNotNull);
           expect(tokens!.accent, accent.of(brightness));
+          // 正文引用块/小标题的覆盖样式随墨笺一起注入
+          final rs = theme.extension<FluxdoRenderStyle>();
+          expect(rs?.quoteBarWidth, 2);
+          expect(rs?.quoteBackground, Colors.transparent);
+          expect(rs?.headingFontFamily, MojianTokens.serifFamily);
         });
       }
     }

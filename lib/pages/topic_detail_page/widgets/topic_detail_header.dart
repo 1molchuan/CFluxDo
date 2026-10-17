@@ -5,8 +5,10 @@ import 'package:app_icons/app_icons.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import '../../../l10n/s.dart';
+import '../../../models/category.dart';
 import '../../../models/topic.dart';
 import '../../../providers/discourse_providers.dart';
+import '../../../theme/mojian_theme.dart';
 import '../../../utils/font_awesome_helper.dart';
 import '../../../widgets/topic/topic_summary_widget.dart';
 import '../../../widgets/common/emoji_text.dart';
@@ -65,6 +67,9 @@ class TopicDetailHeader extends ConsumerWidget {
         logoUrl = parent?.uploadedLogo;
       }
     }
+
+    final mj = theme.extension<MojianTokens>();
+    if (mj != null) return _buildMojian(context, ref, theme, mj, category);
 
     return Container(
       padding: EdgeInsets.fromLTRB(16, showTitle ? 20 : 12, 16, 16),
@@ -309,6 +314,294 @@ class TopicDetailHeader extends ConsumerWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  void _openCategory(BuildContext context, Category category) {
+    final workspace = HomeWorkspaceScope.maybeOf(context);
+    if (workspace != null) {
+      workspace.onShowCategory(category);
+      return;
+    }
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => CategoryTopicsPage(category: category)),
+    );
+  }
+
+  void _openTag(BuildContext context, String name) {
+    final workspace = HomeWorkspaceScope.maybeOf(context);
+    if (workspace != null) {
+      workspace.onShowTag(name);
+      return;
+    }
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => TagTopicsPage(tagName: name)),
+    );
+  }
+
+  /// 墨笺的标题区:分类与标签一行纯文字在上,宋体大标题,统计行在细线
+  /// 之下(宋体数字 + 小字标签),再接 AI 摘要与订阅。
+  Widget _buildMojian(
+    BuildContext context,
+    WidgetRef ref,
+    ThemeData theme,
+    MojianTokens mj,
+    Category? category,
+  ) {
+    final l10n = context.l10n;
+    final wide = MediaQuery.sizeOf(context).width >= 600;
+    final titleStyle = theme.textTheme.headlineSmall?.copyWith(
+      fontFamily: MojianTokens.serifFamily,
+      fontWeight: FontWeight.w700,
+      fontSize: wide ? 28 : 24,
+      height: 1.4,
+      letterSpacing: 0.3,
+      color: mj.ink,
+    );
+    final kickerStyle = theme.textTheme.bodySmall?.copyWith(
+      color: mj.ink3,
+      fontSize: 12.5,
+    );
+    final tags = detail.tags ?? const <Tag>[];
+    final showKicker =
+        !detail.isPrivateMessage &&
+        (category != null || tags.isNotEmpty || detail.hasAcceptedAnswer);
+
+    Widget statItem(String number, String label) => Text.rich(
+      TextSpan(
+        children: [
+          TextSpan(
+            text: number,
+            style: TextStyle(
+              fontFamily: MojianTokens.serifFamily,
+              fontWeight: FontWeight.w600,
+              fontSize: 16,
+              color: mj.ink,
+            ),
+          ),
+          TextSpan(text: ' $label'),
+        ],
+      ),
+      style: theme.textTheme.bodySmall?.copyWith(color: mj.ink3),
+    );
+
+    return Container(
+      padding: EdgeInsets.fromLTRB(16, showTitle ? 18 : 10, 16, 14),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        border: Border(bottom: BorderSide(color: mj.rule, width: 0)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (showKicker) ...[
+            Wrap(
+              spacing: 14,
+              runSpacing: 6,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                if (category != null)
+                  InkWell(
+                    onTap: () => _openCategory(context, category),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        DecoratedBox(
+                          decoration: BoxDecoration(
+                            color: Color(
+                              int.tryParse(
+                                    'FF${category.color.replaceAll('#', '')}',
+                                    radix: 16,
+                                  ) ??
+                                  0xFF888888,
+                            ),
+                            borderRadius: BorderRadius.circular(1.5),
+                          ),
+                          child: const SizedBox(width: 7, height: 7),
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          category.name,
+                          style: kickerStyle?.copyWith(
+                            color: mj.ink2,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                for (final tag in tags)
+                  InkWell(
+                    onTap: () => _openTag(context, tag.name),
+                    child: Text.rich(
+                      TextSpan(
+                        children: [
+                          TextSpan(
+                            text: '#',
+                            style: TextStyle(color: mj.ink4),
+                          ),
+                          TextSpan(text: tag.name),
+                        ],
+                      ),
+                      style: kickerStyle,
+                    ),
+                  ),
+                if (detail.hasAcceptedAnswer)
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Symbols.check_rounded, size: 15, color: mj.jade),
+                      const SizedBox(width: 2),
+                      Text(
+                        l10n.post_solved,
+                        style: kickerStyle?.copyWith(color: mj.jade),
+                      ),
+                    ],
+                  ),
+              ],
+            ),
+            SizedBox(height: showTitle ? 10 : 4),
+          ],
+          if (showTitle)
+            SelectableText.rich(
+              TextSpan(
+                style: titleStyle,
+                children: [
+                  if (detail.isPrivateMessage)
+                    WidgetSpan(
+                      alignment: PlaceholderAlignment.middle,
+                      child: Padding(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: Icon(
+                          Symbols.mail_rounded,
+                          size: 20,
+                          color: mj.ink3,
+                        ),
+                      ),
+                    ),
+                  if (detail.closed)
+                    WidgetSpan(
+                      alignment: PlaceholderAlignment.middle,
+                      child: Padding(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: Icon(
+                          Symbols.lock_rounded,
+                          size: 20,
+                          color: mj.ink3,
+                        ),
+                      ),
+                    ),
+                  ...EmojiText.buildEmojiSpans(
+                    context,
+                    detail.title,
+                    titleStyle,
+                  ),
+                ],
+              ),
+              key: headerKey,
+            )
+          else
+            SizedBox(key: headerKey),
+          SizedBox(height: showTitle ? 14 : 6),
+          if (detail.isAssigned) ...[
+            _assignedBadge(context, ref, theme),
+            const SizedBox(height: 12),
+          ],
+          // 统计行:细线之上是标题,之下是宋体数字
+          DecoratedBox(
+            decoration: BoxDecoration(
+              border: Border(top: BorderSide(color: mj.rule, width: 0)),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.only(top: 10),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Wrap(
+                      spacing: 18,
+                      runSpacing: 4,
+                      crossAxisAlignment: WrapCrossAlignment.end,
+                      children: [
+                        statItem(
+                          NumberUtils.formatCount(detail.postsCount - 1),
+                          l10n.topicDetail_replyLabel,
+                        ),
+                        statItem(
+                          NumberUtils.formatCount(detail.views),
+                          l10n.topicDetail_viewsLabel,
+                        ),
+                        if (detail.likeCount > 0)
+                          statItem(
+                            NumberUtils.formatCount(detail.likeCount),
+                            l10n.topicDetail_likesLabel,
+                          ),
+                        Tooltip(
+                          message: TimeUtils.formatTooltipTime(
+                            detail.createdAt,
+                          ),
+                          child: RelativeTimeText(
+                            dateTime: detail.createdAt,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: mj.ink3,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  TopicVoteButton(topic: detail, onVoteChanged: onVoteChanged),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 14),
+          CollapsibleTopicSummary(
+            topicId: detail.id,
+            topicDetail: detail,
+            onJumpToPost: onJumpToPost,
+            headerExtra: TopicNotificationButton(
+              level: detail.notificationLevel,
+              onChanged: onNotificationLevelChanged,
+              style: TopicNotificationButtonStyle.chip,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _assignedBadge(BuildContext context, WidgetRef ref, ThemeData theme) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(16),
+      onTap: () => unawaited(showAssignSheet(context, ref, topicId: detail.id)),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: theme.colorScheme.primaryContainer.withValues(alpha: 0.5),
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.assignment_ind_rounded,
+              size: 16,
+              color: theme.colorScheme.primary,
+            ),
+            const SizedBox(width: 6),
+            Text(
+              '已指定给 '
+              '${detail.assignedToUser?.displayName ?? detail.assignedToGroupName ?? ''}',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.primary,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

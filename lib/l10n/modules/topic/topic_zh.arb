@@ -287,5 +287,6 @@
         "type": "int"
       }
     }
-  }
+  },
+  "topicDetail_likesLabel": "赞"
 }

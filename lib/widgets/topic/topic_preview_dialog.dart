@@ -23,6 +23,7 @@ import '../../utils/fluxdo_render_callbacks.dart';
 import '../../pages/category_topics_page.dart';
 import '../../pages/tag_topics_page.dart';
 import '../../../../../l10n/s.dart';
+import '../../theme/mojian_theme.dart';
 
 /// 预览弹窗中的操作项
 class PreviewAction {
@@ -364,11 +365,7 @@ class _TopicPreviewDialogState extends ConsumerState<TopicPreviewDialog> {
         },
       ).render(
         cookedHtml: _firstPostCooked!,
-        baseTextStyle: theme.textTheme.bodyMedium?.copyWith(
-          height: 1.5,
-          fontSize:
-              (theme.textTheme.bodyMedium?.fontSize ?? 14) * contentFontScale,
-        ),
+        baseTextStyle: MojianTheme.postBodyStyle(theme, contentFontScale),
         compact: true,
         selectionEnabled: false,
       );

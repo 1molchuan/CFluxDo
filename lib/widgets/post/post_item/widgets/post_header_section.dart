@@ -14,6 +14,7 @@ import '../../small_action_item.dart';
 import 'post_header.dart';
 import 'post_reply_history.dart';
 import 'post_stamp_painter.dart';
+import '../../../../theme/mojian_theme.dart';
 
 class PostHeaderSection extends ConsumerStatefulWidget {
   final Post post;
@@ -304,12 +305,19 @@ class _PostHeaderSectionState extends ConsumerState<PostHeaderSection> {
                     const SizedBox(height: 2),
                     Text(
                       '#${post.postNumber}',
-                      style: theme.textTheme.labelSmall?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant.withValues(
-                          alpha: 0.4,
-                        ),
-                        fontSize: 10,
-                      ),
+                      // 墨笺:楼层号用宋体,浅墨但可读
+                      style: theme.extension<MojianTokens>() != null
+                          ? theme.textTheme.labelSmall?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
+                              fontFamily: MojianTokens.serifFamily,
+                              fontWeight: FontWeight.w600,
+                              fontSize: 11,
+                            )
+                          : theme.textTheme.labelSmall?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant
+                                  .withValues(alpha: 0.4),
+                              fontSize: 10,
+                            ),
                     ),
                   ],
                 ),

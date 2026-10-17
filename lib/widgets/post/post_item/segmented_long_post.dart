@@ -21,6 +21,7 @@ import 'render_parse_cache.dart';
 import 'widgets/post_footer_section/post_footer_section.dart';
 import 'widgets/post_header_section.dart';
 import 'widgets/post_segment_frame.dart';
+import '../../../theme/mojian_theme.dart';
 
 /// 新引擎长帖分段数据(chunk 切分 eager,单 chunk 解析 lazy)。
 /// - 解析状态([LongPostParseData]:切分结果 + 逐 chunk 解析记忆化)存
@@ -245,10 +246,9 @@ class NewEngineChunkSegment extends ConsumerWidget {
           parsedNodes: unit.nodes,
           // 正文字号注入 contentFontScale(与 PostItem 短帖路径一致):
           // 不传时 NodeFactory 回退 theme.bodyMedium,长帖 chunk 的字号设置失效。
-          baseTextStyle: theme.textTheme.bodyMedium?.copyWith(
-            height: 1.5,
-            fontSize: (theme.textTheme.bodyMedium?.fontSize ?? 14) *
-                ref.watch(preferencesProvider).contentFontScale,
+          baseTextStyle: MojianTheme.postBodyStyle(
+            theme,
+            ref.watch(preferencesProvider).contentFontScale,
           ),
           imageIndexOffset: unit.imageIndexOffset,
           footnotesHtml: unit.footnotesHtml,

@@ -13,6 +13,7 @@ import '../../../../services/emoji_handler.dart';
 import '../../../../services/preloaded_data_service.dart';
 import '../../../../utils/platform_utils.dart';
 import 'post_reaction_picker.dart';
+import '../../../../theme/mojian_theme.dart';
 
 /// 获取 emoji 图片 URL（未加载完成时返回空字符串，由 errorBuilder 处理）
 String _getEmojiUrl(String emojiName) {
@@ -313,7 +314,7 @@ class _PostActionBarState extends State<PostActionBar>
                 decoration: BoxDecoration(
                   color: showReplies
                       ? theme.colorScheme.primaryContainer.withValues(alpha: 0.3)
-                      : theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
+                      : _idleFill(theme),
                   borderRadius: BorderRadius.circular(18),
                   border: Border.all(
                     color: showReplies
@@ -424,7 +425,7 @@ class _PostActionBarState extends State<PostActionBar>
         width: 36,
         decoration: BoxDecoration(
           color:
-              theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
+              _idleFill(theme),
           shape: BoxShape.circle,
         ),
         child: Icon(
@@ -621,7 +622,7 @@ class _PostActionBarState extends State<PostActionBar>
       decoration: BoxDecoration(
         color: widget.currentUserReaction != null
             ? theme.colorScheme.primaryContainer.withValues(alpha: 0.3)
-            : theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
+            : _idleFill(theme),
         borderRadius: BorderRadius.circular(18),
         border: Border.all(
           color: widget.currentUserReaction != null
@@ -808,3 +809,8 @@ class _OutlinedEmojiPainter extends CustomPainter {
         outlineColor != oldDelegate.outlineColor;
   }
 }
+
+/// 操作按钮的常态底色:经典是淡灰圆底;墨笺不要底色,只留图标(按下/激活态照旧)
+Color _idleFill(ThemeData theme) => theme.extension<MojianTokens>() != null
+    ? Colors.transparent
+    : theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.3);

@@ -25,6 +25,7 @@ import 'widgets/post_header_section.dart';
 import 'widgets/post_notice_widget.dart';
 import 'widgets/post_segment_frame.dart';
 import 'widgets/post_voting_control.dart';
+import '../../../theme/mojian_theme.dart';
 
 class PostItem extends ConsumerStatefulWidget {
   final Post post;
@@ -370,13 +371,9 @@ class _PostItemState extends ConsumerState<PostItem> {
                             parsedNodes: data.unit.nodes,
                             // 正文字号经 baseTextStyle 注入 contentFontScale
                             // (此前新引擎分支未接入,顺带修复)。
-                            baseTextStyle: theme.textTheme.bodyMedium?.copyWith(
-                              height: 1.5,
-                              fontSize:
-                                  (theme.textTheme.bodyMedium?.fontSize ?? 14) *
-                                  ref
-                                      .watch(preferencesProvider)
-                                      .contentFontScale,
+                            baseTextStyle: MojianTheme.postBodyStyle(
+                              theme,
+                              ref.watch(preferencesProvider).contentFontScale,
                             ),
                             // 自研选区恒开(外层系统 SelectionArea 已拆):
                             // 未登录时 onQuoteRequest 为 null,toolbar 自动

@@ -7,6 +7,7 @@ import '../../../../utils/fluxdo_render_callbacks.dart';
 import '../../../../utils/time_utils.dart';
 import '../../../../utils/url_helper.dart';
 import '../../../common/smart_avatar.dart';
+import '../../../../theme/mojian_theme.dart';
 
 /// 解决方案横幅(仅在主贴下方展示)
 ///
@@ -48,21 +49,27 @@ class _PostSolutionBannerState extends State<PostSolutionBanner> {
 
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
+    // 墨笺:不用大块亮绿,改成玉色细框 + 极淡底
+    final mj = theme.extension<MojianTokens>();
 
     return Padding(
       padding: const EdgeInsets.only(top: 16),
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(mj != null ? 10 : 12),
         child: Container(
           decoration: BoxDecoration(
-            color: isDark
+            color: mj != null
+                ? mj.jade.withValues(alpha: 0.05)
+                : isDark
                 ? Colors.green.withValues(alpha: 0.05)
                 : Colors.green.withValues(alpha: 0.04),
             border: Border.all(
-              color: Colors.green.withValues(alpha: 0.3),
+              color: mj != null
+                  ? mj.jade.withValues(alpha: 0.35)
+                  : Colors.green.withValues(alpha: 0.3),
               width: 1,
             ),
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(mj != null ? 10 : 12),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -97,23 +104,32 @@ class _BannerHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
+    final mj = theme.extension<MojianTokens>();
+    final fg = mj?.jade ?? Colors.white;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
-        color: isDark
+        color: mj != null
+            ? null
+            : isDark
             ? const Color(0xFF2E7D32)
             : const Color(0xFF43A047),
       ),
       child: Row(
         children: [
-          const Icon(Symbols.check_box_rounded, color: Colors.white, size: 18),
+          Icon(
+            mj != null ? Symbols.check_rounded : Symbols.check_box_rounded,
+            color: fg,
+            size: 18,
+          ),
           const SizedBox(width: 8),
           Text(
             context.l10n.post_topicSolved,
             style: theme.textTheme.titleSmall?.copyWith(
-              color: Colors.white,
+              color: fg,
               fontWeight: FontWeight.w700,
               letterSpacing: 0.3,
+              fontFamily: mj != null ? MojianTokens.serifFamily : null,
             ),
           ),
           if (count > 1) ...[
@@ -121,7 +137,7 @@ class _BannerHeader extends StatelessWidget {
             Text(
               context.l10n.post_solutionsCount(count),
               style: theme.textTheme.bodySmall?.copyWith(
-                color: Colors.white.withValues(alpha: 0.85),
+                color: mj?.ink3 ?? Colors.white.withValues(alpha: 0.85),
                 fontWeight: FontWeight.w500,
               ),
             ),

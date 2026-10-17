@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:fluxdo_render/fluxdo_render.dart' show FluxdoRenderStyle;
 
 import 'theme_resolver.dart';
 
@@ -222,6 +223,21 @@ class MojianTheme {
     );
   }
 
+  /// 帖子正文的基础字样(短帖、长帖分段、嵌套楼层、话题预览共用一处,
+  /// 段落预热按挂载处实际字样学习,各处必须同源)。
+  /// 经典 = bodyMedium · 行高 1.5;墨笺 = 大一号、行高 1.72、正文墨色。
+  static TextStyle? postBodyStyle(ThemeData theme, double contentFontScale) {
+    final base = theme.textTheme.bodyMedium;
+    final size = (base?.fontSize ?? 14) * contentFontScale;
+    final mj = theme.extension<MojianTokens>();
+    if (mj == null) return base?.copyWith(height: 1.5, fontSize: size);
+    return base?.copyWith(
+      height: 1.72,
+      fontSize: size * 15 / 14,
+      color: mj.inkBody,
+    );
+  }
+
   /// 标题类文字换成宋体：display / headline / titleLarge（AppBar 标题、对话框标题都走这里）。
   /// 正文、标签、按钮仍用用户选的正文字体。
   static TextTheme serifTitles(TextTheme base) {
@@ -266,7 +282,21 @@ class MojianTheme {
       pageTransitionsTheme: pageTransitionsTheme,
       iconTheme: iconTheme,
       primaryIconTheme: primaryIconTheme,
-      extensions: [...extensions, t],
+      extensions: [
+        ...extensions,
+        t,
+        // 帖子正文:引用块改 2px 强调色竖条、无底色;小标题用宋体
+        FluxdoRenderStyle(
+          quoteBarColor: t.accent.withValues(alpha: 0.75),
+          quoteBarWidth: 2,
+          quoteBackground: Colors.transparent,
+          quoteRadius: 0,
+          quoteTextColor: t.ink2,
+          headingFontFamily: MojianTokens.serifFamily,
+          headingColor: t.ink,
+          ruleColor: t.rule,
+        ),
+      ],
       appBarTheme: AppBarThemeData(
         backgroundColor: t.paper,
         foregroundColor: t.ink,

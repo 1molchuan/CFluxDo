@@ -286,5 +286,6 @@
         "type": "int"
       }
     }
-  }
+  },
+  "topicDetail_likesLabel": "讚"
 }

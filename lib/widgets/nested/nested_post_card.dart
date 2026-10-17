@@ -27,6 +27,7 @@ import '../user/avatar_action_menu.dart';
 import 'nested_collapsed_bar.dart';
 import 'nested_post_gutter.dart';
 import 'nested_thread_sheet.dart';
+import '../../theme/mojian_theme.dart';
 
 // 桌面端布局常量
 const double _avatarSize = NestedPostAvatar.size;
@@ -624,11 +625,9 @@ class _NestedPostCardState extends ConsumerState<NestedPostCard> {
                     topicId: widget.topicId,
                   ).render(
                     cookedHtml: post.cooked,
-                    baseTextStyle: theme.textTheme.bodyMedium?.copyWith(
-                      height: 1.5,
-                      fontSize:
-                          (theme.textTheme.bodyMedium?.fontSize ?? 14) *
-                          ref.watch(preferencesProvider).contentFontScale,
+                    baseTextStyle: MojianTheme.postBodyStyle(
+                      theme,
+                      ref.watch(preferencesProvider).contentFontScale,
                     ),
                     selectionEnabled: true,
                     selectionScopeId: post.id,
