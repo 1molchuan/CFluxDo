@@ -6,6 +6,8 @@ import '../../utils/url_helper.dart';
 import '../common/emoji_text.dart';
 import '../common/smart_avatar.dart';
 import '../common/relative_time_text.dart';
+import '../../theme/mojian_theme.dart';
+import '../topic/topic_card.dart' show mojianCardDecoration;
 
 // discourse-follow 插件的自定义 SVG 图标
 const _followNewFollowerSvg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 33 30">'
@@ -150,6 +152,8 @@ class NotificationItem extends StatelessWidget {
 
   Color _getNotificationColor(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final mj = Theme.of(context).extension<MojianTokens>();
+    if (mj != null) return _mojianColor(mj);
     switch (notification.notificationType) {
       case NotificationType.liked:
       case NotificationType.likedConsolidated:
@@ -176,15 +180,50 @@ class NotificationItem extends StatelessWidget {
     }
   }
 
+  /// 墨笺:通知类型色收进同一套墨色体系(赞/提及用强调色,徽章用金,关注用玉)
+  Color _mojianColor(MojianTokens mj) {
+    switch (notification.notificationType) {
+      case NotificationType.liked:
+      case NotificationType.likedConsolidated:
+      case NotificationType.reaction:
+      case NotificationType.mentioned:
+      case NotificationType.groupMentioned:
+      case NotificationType.adminProblems:
+        return mj.accent;
+      case NotificationType.grantedBadge:
+        return mj.gold;
+      case NotificationType.following:
+        return mj.jade;
+      case NotificationType.privateMessage:
+      case NotificationType.invitedToPrivateMessage:
+      case NotificationType.boost:
+      case NotificationType.newFeatures:
+        return mj.ink2;
+      default:
+        return mj.ink3;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final mj = theme.extension<MojianTokens>();
     final iconColor = _getNotificationColor(context);
-    final titleStyle = TextStyle(
-      fontWeight: notification.read ? FontWeight.normal : FontWeight.w500,
-    );
+    // 墨笺:通知标题(多为话题标题)用宋体,已读只降颜色
+    final titleStyle = mj != null
+        ? TextStyle(
+            fontFamily: MojianTokens.serifFamily,
+            fontWeight: FontWeight.w600,
+            fontSize: 15,
+            height: 1.4,
+            color: notification.read ? mj.ink2 : mj.ink,
+          )
+        : TextStyle(
+            fontWeight: notification.read ? FontWeight.normal : FontWeight.w500,
+          );
 
-    return ListTile(
+    final tile = ListTile(
       leading: SizedBox(
         width: 48,
         height: 48,
@@ -204,25 +243,33 @@ class NotificationItem extends StatelessWidget {
               right: -2,
               child: Container(
                 padding: const EdgeInsets.all(4),
-                decoration: BoxDecoration(
-                  color: notification.read
-                      ? colorScheme.surfaceContainerHighest
-                      : colorScheme.surface,
-                  shape: BoxShape.circle,
-                  border: Border.all(
-                    color: colorScheme.surface,
-                    width: 1.5,
-                  ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.1),
-                      blurRadius: 2,
-                      offset: const Offset(0, 1),
-                    ),
-                  ],
-                ),
+                decoration: mj != null
+                    ? BoxDecoration(
+                        color: colorScheme.surface,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: mj.rule),
+                      )
+                    : BoxDecoration(
+                        color: notification.read
+                            ? colorScheme.surfaceContainerHighest
+                            : colorScheme.surface,
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: colorScheme.surface,
+                          width: 1.5,
+                        ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.1),
+                            blurRadius: 2,
+                            offset: const Offset(0, 1),
+                          ),
+                        ],
+                      ),
                 child: _buildBadgeIcon(
-                  notification.read ? colorScheme.onSurfaceVariant : iconColor,
+                  notification.read && mj == null
+                      ? colorScheme.onSurfaceVariant
+                      : iconColor,
                 ),
               ),
             ),
@@ -281,5 +328,10 @@ class NotificationItem extends StatelessWidget {
             )
           : null,
     );
+    // 墨笺:条目之间一条内缩细线
+    final rowDecoration = mojianCardDecoration(theme, isSelected: false);
+    return rowDecoration == null
+        ? tile
+        : DecoratedBox(decoration: rowDecoration, child: tile);
   }
 }

@@ -485,6 +485,13 @@ class TopicCardLayout {
     layoutBuildCount++;
     final scheme = theme.colorScheme;
     final mj = theme.extension<MojianTokens>();
+    // 搜索命中高亮:经典 = 主色容器;墨笺 = 荧光笔式淡金底、正文墨色
+    final hlBg = mj == null
+        ? scheme.primaryContainer
+        : mj.gold.withValues(
+            alpha: theme.brightness == Brightness.light ? 0.26 : 0.32,
+          );
+    final hlFg = mj?.ink ?? scheme.onPrimaryContainer;
     mojian = mj != null;
     // 墨笺的普通话题行另走一套纵向装配(分类在上、宋体标题、细线分隔);
     // 私信卡沿用经典装配,只换字体与外壳
@@ -680,11 +687,11 @@ class TopicCardLayout {
       if (highlighted) {
         tb.pushStyle(_tStyle(
           baseText,
-          color: scheme.onPrimaryContainer,
+          color: hlFg,
           fontSize: titleFontSize,
-          weight: FontWeight.w500,
+          weight: mjRow ? FontWeight.w600 : FontWeight.w500,
           height: titleHeight,
-          background: scheme.primaryContainer,
+          background: hlBg,
           fontFamily: titleFamily,
         ));
         tb.addText(text);
@@ -738,11 +745,11 @@ class TopicCardLayout {
         if (highlighted) {
           ex.pushStyle(_tStyle(
             baseText,
-            color: scheme.onPrimaryContainer,
-            fontSize: 12,
+            color: hlFg,
+            fontSize: mjRow ? 13 : 12,
             weight: FontWeight.w500,
-            height: 1.4,
-            background: scheme.primaryContainer,
+            height: mjRow ? 1.6 : 1.4,
+            background: hlBg,
           ));
           ex.addText(text);
           ex.pop();

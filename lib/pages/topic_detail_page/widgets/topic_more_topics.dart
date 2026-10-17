@@ -15,6 +15,7 @@ import '../../../widgets/common/icon_glyph_span.dart';
 import '../../../widgets/common/smart_avatar.dart';
 import '../../category_topics_page.dart';
 import '../topic_detail_page.dart';
+import '../../../theme/mojian_theme.dart';
 
 /// 帖子流末尾的推荐区(对齐网页版 more-topics)
 ///
@@ -59,11 +60,18 @@ class _MoreTopicsSectionState extends ConsumerState<MoreTopicsSection> {
     final topics = showRelated ? related : suggested;
     final categoryMap = ref.watch(categoryMapProvider).value;
 
+    final mj = theme.extension<MojianTokens>();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        // 墨笺:与正文之间一条墨色粗线,像报纸版块的分隔
+        if (mj != null)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 20, 16, 0),
+            child: Container(height: 1, color: mj.ink),
+          ),
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+          padding: EdgeInsets.fromLTRB(16, mj != null ? 10 : 16, 16, 8),
           child: hasTabs
               ? Row(
                   children: [
@@ -149,6 +157,38 @@ class _MoreTopicsTab extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final mj = theme.extension<MojianTokens>();
+    if (mj != null) {
+      // 墨笺:纯文字页签,选中为墨色加粗 + 下方一小段强调色短横
+      return InkWell(
+        onTap: selected ? null : onTap,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(2, 6, 2, 4),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                label,
+                style: theme.textTheme.titleSmall?.copyWith(
+                  fontFamily: MojianTokens.serifFamily,
+                  fontWeight: FontWeight.w600,
+                  color: selected ? mj.ink : mj.ink3,
+                ),
+              ),
+              const SizedBox(height: 5),
+              Container(
+                width: 18,
+                height: 2,
+                decoration: BoxDecoration(
+                  color: selected ? mj.accent : Colors.transparent,
+                  borderRadius: BorderRadius.circular(1),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
     final fg = selected
         ? theme.colorScheme.onSecondaryContainer
         : theme.colorScheme.onSurfaceVariant;
@@ -254,6 +294,7 @@ class _MoreTopicTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final mj = theme.extension<MojianTokens>();
     final density = resolveMoreTopicTileDensity(topic, category: category);
     final metaColor = theme.colorScheme.onSurfaceVariant;
 
@@ -262,10 +303,18 @@ class _MoreTopicTile extends StatelessWidget {
       children: [
         Text(
           topic.title,
-          style: theme.textTheme.bodyMedium?.copyWith(
-            fontWeight: FontWeight.w500,
-            height: 1.35,
-          ),
+          style: mj != null
+              ? theme.textTheme.bodyMedium?.copyWith(
+                  fontFamily: MojianTokens.serifFamily,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 15.5,
+                  height: 1.45,
+                  color: mj.ink,
+                )
+              : theme.textTheme.bodyMedium?.copyWith(
+                  fontWeight: FontWeight.w500,
+                  height: 1.35,
+                ),
           maxLines: 2,
           overflow: TextOverflow.ellipsis,
         ),
@@ -289,6 +338,20 @@ class _MoreTopicTile extends StatelessWidget {
       ],
     );
 
+    if (mj != null) {
+      // 墨笺:不放头像,标题 + 元信息,条目之间细线
+      return InkWell(
+        onTap: onTap,
+        child: Container(
+          margin: const EdgeInsets.symmetric(horizontal: 16),
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          decoration: BoxDecoration(
+            border: Border(bottom: BorderSide(color: mj.rule, width: 0)),
+          ),
+          child: content,
+        ),
+      );
+    }
     return InkWell(
       onTap: onTap,
       child: Padding(

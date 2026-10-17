@@ -58,6 +58,7 @@ import 'package:common_ui/common_ui.dart';
 import '../l10n/s.dart';
 import '../utils/dialog_utils.dart';
 import '../widgets/common/hero_image.dart';
+import '../theme/mojian_theme.dart';
 
 /// 用户个人页
 /// 头像的展示方式:方形账号是 cover 裁切 + 圆角,圆形账号走 circular。
@@ -2288,11 +2289,16 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage>
                               : (_user?.username ?? ''),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
+                          // 墨笺:名字用宋体(横幅背景保留,白字不变)
+                          style: TextStyle(
+                            fontFamily:
+                                theme.extension<MojianTokens>() != null
+                                ? MojianTokens.serifFamily
+                                : null,
                             color: Colors.white,
                             fontSize: 22,
                             fontWeight: FontWeight.w600,
-                            shadows: [
+                            shadows: const [
                               Shadow(
                                 color: Colors.black45,
                                 offset: Offset(0, 1),
@@ -2777,7 +2783,11 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage>
         children: [
           Text(
             value,
-            style: const TextStyle(
+            style: TextStyle(
+              fontFamily:
+                  Theme.of(context).extension<MojianTokens>() != null
+                  ? MojianTokens.serifFamily
+                  : null,
               color: Colors.white,
               fontSize: 17,
               fontWeight: FontWeight.w600,
@@ -3181,7 +3191,12 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage>
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.bodyMedium?.copyWith(
-                    fontWeight: FontWeight.w500,
+                    fontWeight: theme.extension<MojianTokens>() != null
+                        ? FontWeight.w600
+                        : FontWeight.w500,
+                    fontFamily: theme.extension<MojianTokens>() != null
+                        ? MojianTokens.serifFamily
+                        : null,
                   ),
                 ),
               ),
@@ -3974,7 +3989,12 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage>
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 style: theme.textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.w500,
+                  fontWeight: theme.extension<MojianTokens>() != null
+                      ? FontWeight.w600
+                      : FontWeight.w500,
+                  fontFamily: theme.extension<MojianTokens>() != null
+                      ? MojianTokens.serifFamily
+                      : null,
                 ),
               ),
 
