@@ -41,7 +41,9 @@ class AppearanceWarmup {
   }) {
     final variant = themeState.schemeVariant;
     final signature = (
-      themeState.isMojian ? -1 : themeState.accentSource.index,
+      themeState.isClassic
+          ? themeState.accentSource.index
+          : -themeState.uiStyle.index,
       themeState.effectiveSeedColor.toARGB32(),
       variant.index,
       brightness.index,
@@ -63,9 +65,9 @@ class AppearanceWarmup {
     if (installedFamily != null) {
       queue(() => _warmUpTypeface(installedFamily));
     }
-    // 墨笺风格下外观页不显示色卡与配色风格卡，主题模式卡用墨笺固定配色；
+    // 墨笺与 Claude 风格下外观页不显示色卡与配色风格卡，主题模式卡用固定配色；
     // 只有「经典」风格卡的预览要用当前种子算亮/暗两套
-    if (themeState.isMojian) {
+    if (!themeState.isClassic) {
       for (final previewBrightness in Brightness.values) {
         queue(
           () => SeedColorScheme.from(

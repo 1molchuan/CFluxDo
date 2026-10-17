@@ -141,4 +141,33 @@ void main() {
     }
     expect(SeedColorScheme.cachedCount, 2);
   });
+
+  testWidgets('Claude 风格：只预热「经典」风格卡预览的亮/暗两套', (tester) async {
+    SeedColorScheme.resetCache();
+
+    const themeState = ThemeState(
+      mode: ThemeMode.system,
+      uiStyle: UiStyle.claude,
+      seedColor: Colors.deepPurple,
+      schemeVariant: DynamicSchemeVariant.tonalSpot,
+    );
+    expect(themeState.isClaude, isTrue);
+
+    AppearanceWarmup.schedule(
+      themeState: themeState,
+      brightness: Brightness.light,
+    );
+
+    await tester.idle();
+    await tester.pump();
+
+    expect(SeedColorScheme.cachedCount, 2);
+    for (final b in Brightness.values) {
+      SeedColorScheme.from(
+        seedColor: themeState.effectiveSeedColor,
+        brightness: b,
+      );
+    }
+    expect(SeedColorScheme.cachedCount, 2);
+  });
 }

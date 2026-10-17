@@ -25,6 +25,7 @@ import '../../services/toast_service.dart';
 import '../../theme/app_background.dart';
 import '../../theme/app_palettes.dart';
 import '../../theme/mojian_theme.dart';
+import '../../theme/claude_theme.dart';
 import '../../theme/theme_resolver.dart';
 import '../../utils/dialog_utils.dart';
 import '../../widgets/common/app_bottom_sheet.dart';
@@ -32,9 +33,9 @@ import '../../utils/platform_utils.dart';
 import '../../utils/seed_color_scheme.dart';
 import '../settings_model.dart';
 
-/// 只在经典风格下有意义的分组（墨笺有自己固定的纸色与强调色）
+/// 只在经典风格下有意义的分组（墨笺与 Claude 有自己固定的底色与强调色）
 bool _classicOnly(WidgetRef ref) =>
-    !ref.watch(themeProvider.select((s) => s.isMojian));
+    ref.watch(themeProvider.select((s) => s.isClassic));
 
 /// 外观设置数据声明
 List<SettingsGroup> buildAppearanceGroups(BuildContext context) {
@@ -75,7 +76,7 @@ List<SettingsGroup> buildAppearanceGroups(BuildContext context) {
           id: 'uiStyle',
           title: l10n.appearance_uiStyle,
           subtitle:
-              '${l10n.appearance_styleMojian} ${l10n.appearance_styleClassic}',
+              '${l10n.appearance_styleMojian} ${l10n.appearance_styleClaude} ${l10n.appearance_styleClassic}',
           builder: (context, ref) => const _UiStyleSection(),
         ),
       ],
@@ -97,21 +98,23 @@ List<SettingsGroup> buildAppearanceGroups(BuildContext context) {
             final l10n = context.l10n;
 
             // 卡片预览实时反映中性/纯黑开关（透明不影响卡片预览）
-            final preview = themeState.isMojian
-                ? MojianTheme.resolve(
-                    currentMode,
-                    themeState.mojianAccent,
-                    black: themeState.blackEnabled,
-                    accentPair: themeState.mojianAccentPair,
-                  )
-                : ThemeResolver.resolve(
-                    mode: currentMode,
-                    neutral: themeState.neutralEnabled,
-                    black: themeState.blackEnabled,
-                    transparent: false,
-                    seed: themeState.effectiveSeedColor,
-                    variant: themeState.schemeVariant,
-                  );
+            final preview = switch (themeState.uiStyle) {
+              UiStyle.mojian => MojianTheme.resolve(
+                currentMode,
+                themeState.mojianAccent,
+                black: themeState.blackEnabled,
+                accentPair: themeState.mojianAccentPair,
+              ),
+              UiStyle.claude => ClaudeTheme.resolve(currentMode),
+              UiStyle.classic => ThemeResolver.resolve(
+                mode: currentMode,
+                neutral: themeState.neutralEnabled,
+                black: themeState.blackEnabled,
+                transparent: false,
+                seed: themeState.effectiveSeedColor,
+                variant: themeState.schemeVariant,
+              ),
+            };
             final lightScheme = preview.light;
             final darkScheme = preview.dark;
 
@@ -2723,7 +2726,7 @@ class _UiStyleSection extends ConsumerWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 420),
+          constraints: const BoxConstraints(maxWidth: 620),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -2750,7 +2753,19 @@ class _UiStyleSection extends ConsumerWidget {
               const SizedBox(width: 12),
               Expanded(
                 child: _StyleCard(
-                  selected: !s.isMojian,
+                  selected: s.isClaude,
+                  title: l10n.appearance_styleClaude,
+                  description: l10n.appearance_styleClaudeDesc,
+                  preview: _ClaudeMiniPreview(
+                    tokens: ClaudeTokens.of(brightness),
+                  ),
+                  onTap: () => notifier.setUiStyle(UiStyle.claude),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _StyleCard(
+                  selected: s.isClassic,
                   title: l10n.appearance_styleClassic,
                   description: l10n.appearance_styleClassicDesc,
                   preview: _ClassicMiniPreview(scheme: classicScheme),
@@ -2976,6 +2991,90 @@ class _MojianMiniPreview extends StatelessWidget {
     );
   }
 }
+/// Claude 的迷你预览：温润底色 + 陶土星标 / 标题 + 对话卡片微缩视图。
+class _ClaudeMiniPreview extends StatelessWidget {
+  const _ClaudeMiniPreview({required this.tokens});
+
+  final ClaudeTokens tokens;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = tokens;
+    Widget bar(double w, Color color, {double height = 3}) =>
+        FractionallySizedBox(
+          widthFactor: w,
+          child: Container(
+            height: height,
+            decoration: BoxDecoration(
+              color: color,
+              borderRadius: BorderRadius.circular(height / 2),
+            ),
+          ),
+        );
+
+    return Container(
+      color: t.background,
+      padding: const EdgeInsets.fromLTRB(8, 7, 8, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 7,
+                height: 7,
+                decoration: BoxDecoration(
+                  color: t.accent,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(width: 4),
+              Text(
+                'Claude',
+                style: TextStyle(
+                  fontSize: 8.5,
+                  fontWeight: FontWeight.w700,
+                  color: t.textPrimary,
+                  height: 1.1,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 5),
+          Align(
+            alignment: Alignment.centerRight,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 3),
+              decoration: BoxDecoration(
+                color: t.surface2,
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: bar(0.65, t.textSecondary, height: 2.5),
+            ),
+          ),
+          const SizedBox(height: 5),
+          Container(
+            padding: const EdgeInsets.all(5),
+            decoration: BoxDecoration(
+              color: t.surface1,
+              borderRadius: BorderRadius.circular(5),
+              border: Border.all(color: t.border, width: 0.6),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                bar(0.85, t.textPrimary, height: 2.5),
+                const SizedBox(height: 3),
+                bar(0.55, t.textSecondary, height: 2.5),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 
 /// 经典风格的迷你预览：顶栏色块 + 圆角卡片 + 主题色按钮。
 class _ClassicMiniPreview extends StatelessWidget {

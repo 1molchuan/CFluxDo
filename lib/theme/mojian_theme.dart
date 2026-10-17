@@ -5,10 +5,11 @@ import 'package:fluxdo_render/fluxdo_render.dart' show FluxdoRenderStyle;
 import 'package:common_ui/common_ui.dart' show MenuQuickActionStyle;
 import 'package:m3e_ui/m3e_ui.dart' show SegmentedCardStyle;
 
+import 'claude_theme.dart';
 import 'theme_resolver.dart';
 
-/// 界面风格：墨笺（默认）/ 经典（原来的 Material 外观，含调色板、中性、纯黑、透明背景等）
-enum UiStyle { mojian, classic }
+/// 界面风格：墨笺（默认）/ Claude（人文温润陶土）/ 经典（Material 外观）
+enum UiStyle { mojian, claude, classic }
 
 /// 墨笺的强调色。只落在链接、选中、未读、进度这类少量位置；
 /// 按钮、开关、悬浮按钮一律用墨色，避免满屏强调色。
@@ -299,17 +300,28 @@ class MojianTheme {
 
   /// 帖子正文的基础字样(短帖、长帖分段、嵌套楼层、话题预览共用一处,
   /// 段落预热按挂载处实际字样学习,各处必须同源)。
-  /// 经典 = bodyMedium · 行高 1.5;墨笺 = 大一号、行高 1.72、正文墨色。
+  /// 经典 = bodyMedium · 行高 1.5；墨笺 = 大一号、行高 1.72、正文墨色；
+  /// Claude = 行高 1.6、正文深暖色。
   static TextStyle? postBodyStyle(ThemeData theme, double contentFontScale) {
     final base = theme.textTheme.bodyMedium;
     final size = (base?.fontSize ?? 14) * contentFontScale;
     final mj = theme.extension<MojianTokens>();
-    if (mj == null) return base?.copyWith(height: 1.5, fontSize: size);
-    return base?.copyWith(
-      height: 1.72,
-      fontSize: size * 15 / 14,
-      color: mj.inkBody,
-    );
+    if (mj != null) {
+      return base?.copyWith(
+        height: 1.72,
+        fontSize: size * 15 / 14,
+        color: mj.inkBody,
+      );
+    }
+    final cl = theme.extension<ClaudeTokens>();
+    if (cl != null) {
+      return base?.copyWith(
+        height: 1.6,
+        fontSize: size,
+        color: cl.textPrimary,
+      );
+    }
+    return base?.copyWith(height: 1.5, fontSize: size);
   }
 
   /// 由任意种子色(系统壁纸取色)推出墨笺可用的强调色明/暗两档:保留色相,

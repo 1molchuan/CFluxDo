@@ -94,6 +94,7 @@ import 'widgets/post/post_item/render_parse_cache.dart';
 import 'utils/scroll_busy_signal.dart';
 import 'theme/mojian_theme.dart';
 import 'utils/responsive.dart';
+import 'theme/claude_theme.dart';
 import 'theme/theme_resolver.dart';
 import 'widgets/common/app_background_layer.dart';
 import 'utils/time_utils.dart';
@@ -666,34 +667,49 @@ ButtonStyle _m3eIconButtonShapeStyle() => ButtonStyle(
   }),
 );
 
-/// 按界面风格装配 ThemeData:墨笺走 [MojianTheme.build],经典走原来的
-/// [_buildAppTheme]。页面转场与图标主题两种风格共用。墨笺不启用 M3E
-/// (按压形变等表现与墨笺的安静气质不合),但仍挂上 M3eFlags 保持明暗对称。
+/// 按界面风格装配 ThemeData:
+/// - 墨笺走 [MojianTheme.build]（宋体标题、细线排版）；
+/// - Claude 走 [ClaudeTheme.build]（人文温润陶土、全局字体）；
+/// - 经典走原来的 [_buildAppTheme]。
+/// 页面转场与图标主题共用一套；墨笺与 Claude 均不启用 M3E，但挂上 M3eFlags 保持对称。
 ThemeData _buildThemeForStyle(
   ColorScheme scheme,
   ThemeState themeState, {
   required bool fullscreenSwipeBack,
   required bool transparent,
 }) {
-  if (!themeState.isMojian) {
-    return _buildAppTheme(
-      scheme,
-      themeState,
-      fullscreenSwipeBack: fullscreenSwipeBack,
-      transparent: transparent,
-    );
+  switch (themeState.uiStyle) {
+    case UiStyle.mojian:
+      return MojianTheme.build(
+        scheme: scheme,
+        accent: themeState.mojianAccent,
+        fontFamily: themeState.fontFamilyName,
+        pageTransitionsTheme: fullscreenSwipeBack
+            ? _fullscreenSwipePageTransitionsTheme
+            : _pageTransitionsTheme,
+        iconTheme: _appIconTheme(scheme.onSurface),
+        primaryIconTheme: _appIconTheme(scheme.onPrimary),
+        extensions: const [M3eFlags(enabled: false)],
+      );
+    case UiStyle.claude:
+      return ClaudeTheme.build(
+        scheme: scheme,
+        fontFamily: themeState.fontFamilyName,
+        pageTransitionsTheme: fullscreenSwipeBack
+            ? _fullscreenSwipePageTransitionsTheme
+            : _pageTransitionsTheme,
+        iconTheme: _appIconTheme(scheme.onSurface),
+        primaryIconTheme: _appIconTheme(scheme.onPrimary),
+        extensions: const [M3eFlags(enabled: false)],
+      );
+    case UiStyle.classic:
+      return _buildAppTheme(
+        scheme,
+        themeState,
+        fullscreenSwipeBack: fullscreenSwipeBack,
+        transparent: transparent,
+      );
   }
-  return MojianTheme.build(
-    scheme: scheme,
-    accent: themeState.mojianAccent,
-    fontFamily: themeState.fontFamilyName,
-    pageTransitionsTheme: fullscreenSwipeBack
-        ? _fullscreenSwipePageTransitionsTheme
-        : _pageTransitionsTheme,
-    iconTheme: _appIconTheme(scheme.onSurface),
-    primaryIconTheme: _appIconTheme(scheme.onPrimary),
-    extensions: const [M3eFlags(enabled: false)],
-  );
 }
 
 /// light/dark 共用的 ThemeData 装配(两侧必须对称,尤其 M3eFlags ——
@@ -781,21 +797,23 @@ class MainApp extends ConsumerWidget {
         // 默认走完整 fromSeed 方案（表面带种子色相）；中性/纯黑/透明
         // 开关由 ThemeResolver 切换到"强调色 × 中性层"的合成路径。
         // 动态色路径只取系统动态色 primary 当种子，不用 OEM 原始 scheme。
-        final resolvedTheme = themeState.isMojian
-            ? MojianTheme.resolve(
-                themeState.mode,
-                themeState.mojianAccent,
-                black: themeState.blackEnabled,
-                accentPair: themeState.mojianAccentPair,
-              )
-            : ThemeResolver.resolve(
-                mode: themeState.mode,
-                neutral: themeState.neutralEnabled,
-                black: themeState.blackEnabled,
-                transparent: themeState.isTransparentActive,
-                seed: themeState.effectiveSeedColor,
-                variant: themeState.schemeVariant,
-              );
+        final resolvedTheme = switch (themeState.uiStyle) {
+          UiStyle.mojian => MojianTheme.resolve(
+            themeState.mode,
+            themeState.mojianAccent,
+            black: themeState.blackEnabled,
+            accentPair: themeState.mojianAccentPair,
+          ),
+          UiStyle.claude => ClaudeTheme.resolve(themeState.mode),
+          UiStyle.classic => ThemeResolver.resolve(
+            mode: themeState.mode,
+            neutral: themeState.neutralEnabled,
+            black: themeState.blackEnabled,
+            transparent: themeState.isTransparentActive,
+            seed: themeState.effectiveSeedColor,
+            variant: themeState.schemeVariant,
+          ),
+        };
         final lightScheme = resolvedTheme.light;
         final darkScheme = resolvedTheme.dark;
 

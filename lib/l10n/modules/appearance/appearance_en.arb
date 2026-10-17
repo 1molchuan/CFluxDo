@@ -180,6 +180,8 @@
   "appearance_uiStyle": "UI style",
   "appearance_styleMojian": "Ink & Paper",
   "appearance_styleMojianDesc": "Paper tones, serif headings, hairline dividers",
+  "appearance_styleClaude": "Claude",
+  "appearance_styleClaudeDesc": "Warm parchment & charcoal, terracotta accent",
   "appearance_styleClassic": "Classic",
   "appearance_styleClassicDesc": "The original look, with theme colors and backgrounds",
   "appearance_mojianAccent": "Accent",

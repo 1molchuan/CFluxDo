@@ -180,6 +180,8 @@
   "appearance_uiStyle": "介面風格",
   "appearance_styleMojian": "墨箋",
   "appearance_styleMojianDesc": "紙色底、宋體標題、細線分隔",
+  "appearance_styleClaude": "Claude",
+  "appearance_styleClaudeDesc": "暖調羊皮紙與暖炭黑、陶土紅強調色",
   "appearance_styleClassic": "經典",
   "appearance_styleClassicDesc": "原來的外觀，可選主題色與背景",
   "appearance_mojianAccent": "強調色",

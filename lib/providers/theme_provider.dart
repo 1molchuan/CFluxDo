@@ -136,6 +136,8 @@ class ThemeState {
   });
 
   bool get isMojian => uiStyle == UiStyle.mojian;
+  bool get isClaude => uiStyle == UiStyle.claude;
+  bool get isClassic => uiStyle == UiStyle.classic;
 
   /// 墨笺壁纸取色的明/暗两档;未启用或系统不支持时为 null(用预设强调色)
   (Color, Color)? get mojianAccentPair =>
@@ -144,16 +146,19 @@ class ThemeState {
       : null;
 
   /// 透明模式当前是否真正生效（开了开关且有背景图才生效；
-  /// 无图时回退普通表面，避免裸透明造成的可读性事故；墨笺风格下不生效）
+  /// 无图时回退普通表面，避免裸透明造成的可读性事故；仅在经典风格下生效）
   bool get isTransparentActive =>
-      !isMojian && transparentEnabled && background.hasImage;
+      isClassic && transparentEnabled && background.hasImage;
 
   /// 当前生效的种子色（色卡预览、主题合成、预热等场景使用）
-  Color get effectiveSeedColor => switch (accentSource) {
-    AccentSource.dynamic => dynamicPrimary ?? seedColor,
-    AccentSource.palette => AppPalettes.byId(paletteId).seedColor,
-    AccentSource.custom => seedColor,
-  };
+  Color get effectiveSeedColor {
+    if (isClaude) return const Color(0xFFDA7756);
+    return switch (accentSource) {
+      AccentSource.dynamic => dynamicPrimary ?? seedColor,
+      AccentSource.palette => AppPalettes.byId(paletteId).seedColor,
+      AccentSource.custom => seedColor,
+    };
+  }
 
   /// 自选字体的 family 名（由文件路径推出）；未选文件时为 null。
   ///
