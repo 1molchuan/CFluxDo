@@ -70,10 +70,14 @@ class _PaintedTopicCardState extends State<PaintedTopicCard> {
   @override
   Widget build(BuildContext context) {
     final layout = widget.layout;
-    final cardRadius = BorderRadius.circular(10);
     final theme = Theme.of(context);
+    // 墨笺:直角平铺的行(细线分隔),选中 = 浅一层纸色 + 左侧强调色短竖条
+    final mojian = layout.mojian;
+    final cardRadius = mojian ? BorderRadius.zero : BorderRadius.circular(10);
     final bgColor = widget.isSelected
-        ? theme.colorScheme.primaryContainer.withValues(alpha: 0.4)
+        ? (mojian
+              ? theme.colorScheme.surfaceContainer
+              : theme.colorScheme.primaryContainer.withValues(alpha: 0.4))
         : (widget.highlightColor ?? layout.cardColor);
     // 动图头像混合岛:layout.animatedAvatarUrl 非空(开关开启且用户有
     // 动图)时挂播放 overlay 钉在 avatarRect,画布先画静态模板小图
@@ -95,11 +99,15 @@ class _PaintedTopicCardState extends State<PaintedTopicCard> {
       decoration: BoxDecoration(
         color: bgColor,
         borderRadius: cardRadius,
-        border: widget.isSelected
-            ? Border.all(
-                color: theme.colorScheme.primary.withValues(alpha: 0.5),
+        border: !widget.isSelected
+            ? null
+            : mojian
+            ? Border(
+                left: BorderSide(color: theme.colorScheme.primary, width: 2),
               )
-            : null,
+            : Border.all(
+                color: theme.colorScheme.primary.withValues(alpha: 0.5),
+              ),
       ),
       child: TopicCardInteractiveSurface(
         borderRadius: cardRadius,
@@ -118,7 +126,11 @@ class _PaintedTopicCardState extends State<PaintedTopicCard> {
     if (layout.band != null) {
       card = ClipRRect(borderRadius: cardRadius, child: card);
     }
-    return Padding(padding: const EdgeInsets.only(bottom: 8), child: card);
+    if (layout.bottomGap == 0) return card;
+    return Padding(
+      padding: EdgeInsets.only(bottom: layout.bottomGap),
+      child: card,
+    );
   }
 }
 
@@ -211,9 +223,9 @@ class _RenderTopicCard extends RenderBox
     // 列表格子真实宽不同,估错 = 右对齐元素画出卡外)。真实约束宽在
     // 此才可知,差 >0.5px 触发一次按宽重排(结果缓存,后续帧零成本)
     _layout.ensureWidth(constraints.maxWidth);
-    // cardHeight 含底部 8px 卡间距(由外层 Padding 提供),内容体扣除
+    // cardHeight 含底部卡间距(由外层 Padding 提供),内容体扣除
     size = constraints.constrain(
-      Size(constraints.maxWidth, _layout.cardHeight - 8),
+      Size(constraints.maxWidth, _layout.cardHeight - _layout.bottomGap),
     );
     // 动图头像子节点(SmartAvatar 混合岛):钉在 avatarRect
     final c = child;
@@ -230,6 +242,20 @@ class _RenderTopicCard extends RenderBox
   void paint(PaintingContext context, Offset offset) {
     final canvas = context.canvas;
     final l = _layout;
+
+    // 墨笺:行底细线(与内容同宽,左右各让出内边距)
+    final sep = l.separatorColor;
+    if (sep != null) {
+      // strokeWidth 0 = 一个物理像素的发丝线,任何像素密度下都最细
+      final y = offset.dy + size.height - 0.5;
+      canvas.drawLine(
+        Offset(offset.dx + 12, y),
+        Offset(offset.dx + size.width - 12, y),
+        Paint()
+          ..color = sep
+          ..strokeWidth = 0,
+      );
+    }
 
     // 色带底色(裁剪由外层 ClipRRect 承担,与 widget 版同构)
     if (l.band != null) {

@@ -279,5 +279,13 @@
       }
     }
   },
-  "topic_keywordFilter_manage": "管理"
+  "topic_keywordFilter_manage": "管理",
+  "topic_cardNewReplies": "{count} 条新回复",
+  "@topic_cardNewReplies": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  }
 }

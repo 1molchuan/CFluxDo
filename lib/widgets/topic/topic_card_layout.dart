@@ -7,6 +7,7 @@ import '../../models/category.dart';
 import '../../models/search_result.dart';
 import '../../models/topic.dart';
 import '../../models/topic_card_style.dart';
+import '../../theme/mojian_theme.dart';
 import '../../utils/color_utils.dart';
 import '../../utils/number_utils.dart';
 import '../../utils/relative_time_clock.dart';
@@ -69,7 +70,17 @@ class TopicCardLayout {
 
   // ── 几何 ────────────────────────────────────────────────────
   double bandHeight = 0;
-  double cardHeight = 0; // 含底部 8px 卡间距
+  double cardHeight = 0; // 含底部卡间距 [bottomGap]
+
+  /// 卡片之间的间距(由外层 Padding 提供):经典 8;墨笺 0(行与行之间
+  /// 用 [separatorColor] 细线分隔)
+  double bottomGap = 8;
+
+  /// 墨笺:行底细线颜色;null = 不画(经典的圆角卡片)
+  Color? separatorColor;
+
+  /// 是否按墨笺排版(主题带 [MojianTokens] 时)
+  bool mojian = false;
   Rect avatarRect = Rect.zero;
   Offset titleOffset = Offset.zero;
   Offset excerptOffset = Offset.zero;
@@ -184,6 +195,7 @@ class TopicCardLayout {
     String? bandReminder,
     bool bandExpired = false,
     TopicCardStyle? style,
+    String Function(int count)? newRepliesLabel,
   }) {
     // 私信卡不受话题卡自定义样式影响:强制回默认。列表调用方不传
     // style 时直读全局快照(预览页显式传草稿值)
@@ -270,6 +282,7 @@ class TopicCardLayout {
           : null,
       titleRightChips: const [],
       style: effStyle,
+      newRepliesLabel: newRepliesLabel,
     );
     layout._doLayout!(width);
     return layout;
@@ -378,12 +391,13 @@ class TopicCardLayout {
     FontWeight? weight,
     double? height,
     Color? background,
+    String? fontFamily,
   }) {
     return ui.TextStyle(
       color: color ?? base.color,
       fontSize: fontSize ?? base.fontSize,
       fontWeight: weight ?? base.fontWeight,
-      fontFamily: base.fontFamily,
+      fontFamily: fontFamily ?? base.fontFamily,
       fontFamilyFallback: base.fontFamilyFallback,
       height: height,
       background: background == null ? null : (Paint()..color = background),
@@ -466,9 +480,17 @@ class TopicCardLayout {
     String? animatedAvatarUrlValue,
     required List<(_ChipKind, String)> titleRightChips,
     required TopicCardStyle style,
+    String Function(int count)? newRepliesLabel,
   }) {
     layoutBuildCount++;
     final scheme = theme.colorScheme;
+    final mj = theme.extension<MojianTokens>();
+    mojian = mj != null;
+    // 墨笺的普通话题行另走一套纵向装配(分类在上、宋体标题、细线分隔);
+    // 私信卡沿用经典装配,只换字体与外壳
+    final mjRow = mj != null && !messageStyle;
+    bottomGap = mj != null ? 0 : 8;
+    separatorColor = mj?.rule;
     final baseText = theme.textTheme.bodyMedium ?? const TextStyle();
     final labelSmall = theme.textTheme.labelSmall ?? const TextStyle();
     const hPad = 12.0;
@@ -477,13 +499,17 @@ class TopicCardLayout {
 
     // 头像布局:inline = 头像在元信息行内(32);column = 头像独占
     // 左列(40,与私信卡一致),标题/摘要/元信息统一从 contentX 起排
-    final avatarCol =
-        !messageStyle && style.avatarLayout == TopicCardAvatarLayout.column;
+    // 墨笺行的头像固定在元信息行内(18),不受「头像独占一列」设置影响
+    final avatarCol = !messageStyle &&
+        !mjRow &&
+        style.avatarLayout == TopicCardAvatarLayout.column;
     const colAvatarD = 40.0;
     final contentX = avatarCol ? hPad + colAvatarD + 10 : hPad;
     final contentW = avatarCol ? innerWidth - colAvatarD - 10 : innerWidth;
 
-    cardColor = theme.cardTheme.color ?? scheme.surface;
+    cardColor = mj != null
+        ? Colors.transparent
+        : (theme.cardTheme.color ?? scheme.surface);
     extraFills.clear();
     extraTexts.clear();
     titleIcons.clear();
@@ -491,8 +517,9 @@ class TopicCardLayout {
     bandIcons.clear();
     statsIcons.clear();
 
-    final metaColor =
-        scheme.onSurfaceVariant.withValues(alpha: isFullyRead ? 0.6 : 0.8);
+    final metaColor = mj != null
+        ? mj.ink3
+        : scheme.onSurfaceVariant.withValues(alpha: isFullyRead ? 0.6 : 0.8);
 
     // ── 色带 ────────────────────────────────────────────────
     band = null;
@@ -536,7 +563,9 @@ class TopicCardLayout {
     // ── 未读槽位(徽章/蓝点)先测量,标题/发件人行给它留宽 ────────
     ui.Paragraph? unreadBadgeP;
     var unreadW = 0.0;
-    if (unreadCount > 0) {
+    if (mjRow) {
+      // 墨笺:未读不占标题行右侧
+    } else if (unreadCount > 0) {
       final b = ui.ParagraphBuilder(
         _pStyle(fontSize: labelSmall.fontSize ?? 11, maxLines: 1),
       )
@@ -603,18 +632,28 @@ class TopicCardLayout {
     final subjectColor = isFullyRead
         ? scheme.onSurfaceVariant.withValues(alpha: 0.75)
         : scheme.onSurface.withValues(alpha: 0.9);
-    final titleFontSize =
-        messageStyle ? (baseText.fontSize ?? 14) : style.titleFontSize;
-    final titleWeight = messageStyle
+    // 墨笺标题用宋体:同字号的宋体视觉上偏小,大一号半;已读只降颜色不降字重
+    final titleFontSize = messageStyle
+        ? (baseText.fontSize ?? 14)
+        : (mjRow ? style.titleFontSize + 1.5 : style.titleFontSize);
+    final titleWeight = mjRow
+        ? FontWeight.w600
+        : messageStyle
         ? (isFullyRead ? FontWeight.w400 : FontWeight.w500)
         : normalTitleWeight;
-    final effTitleColor = messageStyle ? subjectColor : titleColor;
+    final effTitleColor = mjRow
+        ? (isFullyRead ? mj.ink3 : mj.ink)
+        : messageStyle
+        ? subjectColor
+        : titleColor;
+    final titleFamily = mj != null ? MojianTokens.serifFamily : null;
+    final titleHeight = mjRow ? 1.45 : 1.3;
 
     final tb = ui.ParagraphBuilder(
       _pStyle(
         fontSize: titleFontSize,
         weight: titleWeight,
-        height: 1.3,
+        height: titleHeight,
         maxLines: 2,
       ),
     )..pushStyle(_tStyle(
@@ -622,8 +661,14 @@ class TopicCardLayout {
         color: effTitleColor,
         fontSize: titleFontSize,
         weight: titleWeight,
-        height: 1.3,
+        height: titleHeight,
+        fontFamily: titleFamily,
       ));
+    // 墨笺:未读话题标题前一个强调色小圆点(占位 6 + 右距 7)
+    final unreadDotPh = mjRow && isUnread;
+    if (unreadDotPh) {
+      tb.addPlaceholder(13, 6, ui.PlaceholderAlignment.middle);
+    }
     final pendingTitleIcons = <ui.Paragraph>[];
     for (final (icon, color) in titleIconSpecs) {
       // 15px 图标 + 4px 右距(placeholder 宽 19 复刻 Padding(right:4))
@@ -638,8 +683,9 @@ class TopicCardLayout {
           color: scheme.onPrimaryContainer,
           fontSize: titleFontSize,
           weight: FontWeight.w500,
-          height: 1.3,
+          height: titleHeight,
           background: scheme.primaryContainer,
+          fontFamily: titleFamily,
         ));
         tb.addText(text);
         tb.pop();
@@ -655,7 +701,12 @@ class TopicCardLayout {
         : contentW - (unreadW > 0 ? unreadW : 0) - titleRightW;
     title = tb.build()
       ..layout(ui.ParagraphConstraints(width: titleAvailW.clamp(40, width)));
-    final phBoxes = title!.getBoxesForPlaceholders();
+    final allPhBoxes = title!.getBoxesForPlaceholders();
+    final Rect? unreadDotBox =
+        unreadDotPh && allPhBoxes.isNotEmpty ? allPhBoxes.first.toRect() : null;
+    final phBoxes = unreadDotPh && allPhBoxes.isNotEmpty
+        ? allPhBoxes.sublist(1)
+        : allPhBoxes;
     for (var i = 0; i < phBoxes.length; i++) {
       final rect = phBoxes[i].toRect();
       if (i < pendingTitleIcons.length) {
@@ -679,9 +730,9 @@ class TopicCardLayout {
         _pStyle(fontSize: 12, height: 1.4, maxLines: 2),
       )..pushStyle(_tStyle(
           baseText,
-          color: scheme.onSurfaceVariant.withValues(alpha: 0.7),
-          fontSize: 12,
-          height: 1.4,
+          color: mj?.ink3 ?? scheme.onSurfaceVariant.withValues(alpha: 0.7),
+          fontSize: mjRow ? 13 : 12,
+          height: mjRow ? 1.6 : 1.4,
         ));
       for (final (text, highlighted) in exSegments) {
         if (highlighted) {
@@ -721,7 +772,7 @@ class TopicCardLayout {
     )
       ..pushStyle(_tStyle(
         labelSmall,
-        color: timeHighlight ? scheme.primary : metaColor,
+        color: timeHighlight && !mjRow ? scheme.primary : metaColor,
       ))
       ..addText(timeStr);
     // 时间是卡片骨架字段,恒定显示
@@ -730,17 +781,23 @@ class TopicCardLayout {
     final ab = ui.ParagraphBuilder(
       _pStyle(
         fontSize: authorFontSize,
-        weight: authorWeight,
+        weight: mjRow ? null : authorWeight,
         maxLines: 1,
       ),
     )
       ..pushStyle(_tStyle(
         messageStyle ? baseText : labelSmall,
-        color: authorColor,
+        color: mjRow ? mj.ink2 : authorColor,
         fontSize: authorFontSize,
-        weight: authorWeight,
+        weight: mjRow ? FontWeight.w400 : authorWeight,
       ))
       ..addText(authorName);
+    if (mjRow) {
+      ab
+        ..pushStyle(ui.TextStyle(color: mj.ink4))
+        ..addText(' ·')
+        ..pop();
+    }
 
     // ── 分类 + 标签行(私信卡无此行;字段开关各自过滤)──────────
     catTags = null;
@@ -748,8 +805,10 @@ class TopicCardLayout {
     final effCategory = category; // 分类是骨架字段,恒定显示
     final effTags = style.showTags ? tags : const <Tag>[];
     if (!messageStyle && (effCategory != null || effTags.isNotEmpty)) {
-      final dimF = isFullyRead ? 0.55 : 1.0;
-      final lineColor = metaColor.withValues(alpha: metaColor.a * dimF);
+      final dimF = isFullyRead && !mjRow ? 0.55 : 1.0;
+      final lineColor = mjRow
+          ? mj.ink2
+          : metaColor.withValues(alpha: metaColor.a * dimF);
       final b = ui.ParagraphBuilder(
         _pStyle(fontSize: labelSmall.fontSize ?? 11, maxLines: 1),
       )..pushStyle(_tStyle(labelSmall, color: lineColor));
@@ -768,12 +827,21 @@ class TopicCardLayout {
       for (final tag in effTags) {
         if (!first) b.addText('   ');
         first = false;
-        b.pushStyle(
-          ui.TextStyle(color: metaColor.withValues(alpha: 0.6 * dimF)),
-        );
-        b.addText('#');
-        b.pop();
-        b.addText(tag.name);
+        if (mjRow) {
+          b.pushStyle(ui.TextStyle(color: mj.ink4));
+          b.addText('#');
+          b.pop();
+          b.pushStyle(ui.TextStyle(color: mj.ink3));
+          b.addText(tag.name);
+          b.pop();
+        } else {
+          b.pushStyle(
+            ui.TextStyle(color: metaColor.withValues(alpha: 0.6 * dimF)),
+          );
+          b.addText('#');
+          b.pop();
+          b.addText(tag.name);
+        }
       }
       catTags = b.build();
     }
@@ -782,7 +850,23 @@ class TopicCardLayout {
     const vPad = 10.0;
     var y = bandHeight + vPad;
 
-    if (messageStyle) {
+    if (mjRow) {
+      _assembleMojianRow(
+        mj: mj,
+        width: width,
+        hPad: hPad,
+        innerWidth: innerWidth,
+        labelSmall: labelSmall,
+        ab: ab,
+        style: style,
+        authorName: authorName,
+        unreadCount: unreadCount,
+        unreadDotBox: unreadDotBox,
+        chipItems: chipItems,
+        scheme: scheme,
+        newRepliesLabel: newRepliesLabel,
+      );
+    } else if (messageStyle) {
       // Gmail 式:头像 40 跨两行,右侧 发件人行 + 主题行
       const avatarD = 40.0;
       final rightX = hPad + avatarD + 10;
@@ -993,6 +1077,144 @@ class TopicCardLayout {
     ].join(', ');
   }
 
+  /// 墨笺话题行的纵向装配:分类行 → 宋体标题(未读前置圆点)→ 摘要 →
+  /// 元信息行 [头像 18 · 署名 · 时间 …… N 条新回复 统计]。行底细线由
+  /// 渲染层按 [separatorColor] 画,卡间距 [bottomGap] 为 0。
+  void _assembleMojianRow({
+    required MojianTokens mj,
+    required double width,
+    required double hPad,
+    required double innerWidth,
+    required TextStyle labelSmall,
+    required ui.ParagraphBuilder ab,
+    required TopicCardStyle style,
+    required String authorName,
+    required int unreadCount,
+    required Rect? unreadDotBox,
+    required List<(_ChipKind, ui.Paragraph?)> chipItems,
+    required ColorScheme scheme,
+    String Function(int count)? newRepliesLabel,
+  }) {
+    const top = 15.0;
+    const bottom = 14.0;
+    var y = bandHeight + top;
+
+    // 1. 分类 + 标签
+    if (catTags != null) {
+      final dotSpace = categoryDotColor != null ? 13.0 : 0.0;
+      catTags!.layout(ui.ParagraphConstraints(
+        width: (innerWidth - dotSpace).clamp(20, innerWidth),
+      ));
+      if (categoryDotColor != null) {
+        categoryDotRect =
+            Rect.fromLTWH(hPad, y + (catTags!.height - 7) / 2, 7, 7);
+      }
+      catTagsOffset = Offset(hPad + dotSpace, y);
+      y += catTags!.height + 5;
+    }
+
+    // 2. 标题(未读圆点在标题段落的首个占位里;搜索卡 chips 钉右上)
+    titleOffset = Offset(hPad, y);
+    if (unreadDotBox != null) {
+      final cy = titleOffset.dy + unreadDotBox.center.dy;
+      final cx = titleOffset.dx + unreadDotBox.left + 3;
+      extraFills.add((
+        RRect.fromRectAndRadius(
+          Rect.fromCenter(center: Offset(cx, cy), width: 6, height: 6),
+          const Radius.circular(3),
+        ),
+        mj.accent,
+      ));
+    }
+    var chipX = width - hPad;
+    for (var i = chipItems.length - 1; i >= 0; i--) {
+      final (kind, p) = chipItems[i];
+      if (kind == _ChipKind.aiIcon) {
+        chipX -= 14;
+        extraTexts.add((
+          Offset(chipX, y + 4),
+          _iconParagraph(Symbols.auto_awesome_rounded, 14, scheme.tertiary),
+        ));
+        chipX -= 6;
+      } else if (p != null) {
+        final w = p.longestLine + 12;
+        final h = p.height + 4;
+        chipX -= w;
+        extraFills.add((
+          RRect.fromRectAndRadius(
+            Rect.fromLTWH(chipX, y + 3, w, h),
+            const Radius.circular(10),
+          ),
+          scheme.surfaceContainerHigh,
+        ));
+        extraTexts.add((Offset(chipX + 6, y + 5), p));
+        chipX -= 4;
+      }
+    }
+    y += title!.height;
+
+    // 3. 摘要
+    if (excerpt != null) {
+      y += 5;
+      excerptOffset = Offset(hPad, y);
+      y += excerpt!.height;
+    }
+
+    // 4. 元信息行
+    y += 10;
+    const avatarD = 18.0;
+    ui.Paragraph? newP;
+    if (unreadCount > 0) {
+      final b = ui.ParagraphBuilder(
+        _pStyle(fontSize: labelSmall.fontSize ?? 11, maxLines: 1),
+      )
+        ..pushStyle(_tStyle(
+          labelSmall,
+          color: mj.accent,
+          weight: FontWeight.w500,
+        ))
+        ..addText(newRepliesLabel?.call(unreadCount) ?? '+$unreadCount');
+      newP = b.build()..layout(const ui.ParagraphConstraints(width: 200));
+    }
+    var rightReserve = (stats?.longestLine ?? 0.0) +
+        (newP == null ? 0.0 : newP.longestLine) +
+        (stats != null && newP != null ? 10 : 0);
+    if (rightReserve > 0) rightReserve += 10;
+    final leftX = hPad + avatarD + 6;
+    final leftW =
+        (innerWidth - avatarD - 6 - rightReserve).clamp(40.0, innerWidth);
+    final timeW = time!.longestLine;
+    author = (style.showAuthor && authorName.isNotEmpty) ? ab.build() : null;
+    author?.layout(ui.ParagraphConstraints(
+      width: (leftW - timeW - 4).clamp(20.0, leftW),
+    ));
+    final rowH = [
+      avatarD,
+      author?.height ?? 0.0,
+      time!.height,
+      stats?.height ?? 0.0,
+    ].reduce((a, b) => a > b ? a : b);
+    avatarRect = Rect.fromLTWH(hPad, y + (rowH - avatarD) / 2, avatarD, avatarD);
+    var tx = leftX;
+    if (author != null) {
+      authorOffset = Offset(leftX, y + (rowH - author!.height) / 2);
+      tx = leftX + author!.longestLine + 4;
+    }
+    timeOffset = Offset(tx, y + (rowH - time!.height) / 2);
+    var rx = width - hPad;
+    if (stats != null) {
+      rx -= stats!.longestLine;
+      statsOffset = Offset(rx, y + (rowH - stats!.height) / 2);
+      rx -= 10;
+    }
+    if (newP != null) {
+      rx -= newP.longestLine;
+      extraTexts.add((Offset(rx, y + (rowH - newP.height) / 2), newP));
+    }
+    y += rowH;
+    cardHeight = y + bottom + bottomGap;
+  }
+
   /// 未读徽章/蓝点入通用装饰通道;返回其左缘 x(供同行右侧排布)
   double _placeUnread(
     ui.Paragraph? badge,
@@ -1069,10 +1291,12 @@ class TopicCardLayout {
     final showReplies = style.showReplies && replies > 0;
     if (!showLikes && !showViews && !showReplies) return;
 
-    var base = scheme.onSurfaceVariant.withValues(alpha: 0.75);
-    if (isFullyRead) base = base.withValues(alpha: base.a * 0.55);
-    var heat = heatColor ?? base;
-    if (heatColor != null && isFullyRead) {
+    final mj = theme.extension<MojianTokens>();
+    var base = mj?.ink3 ?? scheme.onSurfaceVariant.withValues(alpha: 0.75);
+    if (isFullyRead && mj == null) base = base.withValues(alpha: base.a * 0.55);
+    // 墨笺:热度统一用强调色,不用橙色阶
+    var heat = heatColor == null ? base : (mj?.accent ?? heatColor);
+    if (heatColor != null && isFullyRead && mj == null) {
       heat = heatColor.withValues(alpha: heatColor.a * 0.55);
     }
 

@@ -3,7 +3,9 @@ import '../../models/category.dart';
 import '../../models/topic.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../providers/discourse_providers.dart';
+import '../../l10n/s.dart';
 import '../../services/topic_preview_preloader.dart';
+import '../../theme/mojian_theme.dart';
 import '../../utils/responsive.dart';
 import 'painted_topic_card.dart';
 import 'topic_card.dart';
@@ -48,6 +50,7 @@ TopicCardLayout obtainTopicItemLayout({
     emojiUrlOf: topicCardEmojiUrlResolver,
     statsAvailableWidth: statsAvailableWidth ?? (cardWidth - 64),
     messageStyle: messageStyle,
+    newRepliesLabel: context.l10n.topic_cardNewReplies,
   );
 }
 
@@ -96,7 +99,9 @@ Widget buildTopicItem({
           customActionPanelBuilder: previewCustomActionPanelBuilder,
           anchorRect: topicCardAnchorRect(
             cardContext,
-            bottomGap: topic.pinned ? 6 : 8,
+            bottomGap: theme.extension<MojianTokens>() != null
+                ? 0
+                : (topic.pinned ? 6 : 8),
           ),
           anchorColor: anchorColor,
         )

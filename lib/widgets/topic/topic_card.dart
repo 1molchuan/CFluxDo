@@ -1,6 +1,8 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+
+import '../../theme/mojian_theme.dart';
 import 'package:app_icons/app_icons.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
@@ -40,6 +42,81 @@ Widget _clipCardIfNeeded({
 /// 话题卡交互面(公共):桌面 = Material + InkWell(hover/水波纹/右键/
 /// 中键),移动 = 灰底按压面。widget 卡与自绘卡(painted_bookmark_card)
 /// 共用同一实现,保证两种卡的交互观感逐像素一致。
+/// 墨笺话题行(widget 版卡片)的外壳装饰:直角平铺,选中时浅一层纸色 +
+/// 左侧强调色短竖条,行底一条左右内缩 12 的发丝细线。经典风格返回 null。
+Decoration? mojianCardDecoration(
+  ThemeData theme, {
+  required bool isSelected,
+  Color? highlightColor,
+}) {
+  final mj = theme.extension<MojianTokens>();
+  if (mj == null) return null;
+  return _MojianRowDecoration(
+    background: isSelected
+        ? theme.colorScheme.surfaceContainer
+        : highlightColor,
+    bar: isSelected ? mj.accent : null,
+    rule: mj.rule,
+  );
+}
+
+class _MojianRowDecoration extends Decoration {
+  const _MojianRowDecoration({
+    required this.background,
+    required this.bar,
+    required this.rule,
+  });
+
+  final Color? background;
+  final Color? bar;
+  final Color rule;
+
+  @override
+  BoxPainter createBoxPainter([VoidCallback? onChanged]) =>
+      _MojianRowPainter(this);
+
+  @override
+  bool operator ==(Object other) =>
+      other is _MojianRowDecoration &&
+      other.background == background &&
+      other.bar == bar &&
+      other.rule == rule;
+
+  @override
+  int get hashCode => Object.hash(background, bar, rule);
+}
+
+class _MojianRowPainter extends BoxPainter {
+  _MojianRowPainter(this.d);
+
+  final _MojianRowDecoration d;
+
+  @override
+  void paint(Canvas canvas, Offset offset, ImageConfiguration configuration) {
+    final size = configuration.size;
+    if (size == null) return;
+    final rect = offset & size;
+    final bg = d.background;
+    if (bg != null && bg.a > 0) canvas.drawRect(rect, Paint()..color = bg);
+    final bar = d.bar;
+    if (bar != null) {
+      canvas.drawRect(
+        Rect.fromLTWH(rect.left, rect.top, 2, rect.height),
+        Paint()..color = bar,
+      );
+    }
+    // strokeWidth 0 = 一个物理像素的发丝线
+    final y = rect.bottom - 0.5;
+    canvas.drawLine(
+      Offset(rect.left + 12, y),
+      Offset(rect.right - 12, y),
+      Paint()
+        ..color = d.rule
+        ..strokeWidth = 0,
+    );
+  }
+}
+
 class TopicCardInteractiveSurface extends StatelessWidget {
   const TopicCardInteractiveSurface({
     super.key,
@@ -299,11 +376,15 @@ class TopicCard extends ConsumerWidget {
 
     // 标题字号可自定义(默认 15:Gmail 主题行 14 与原版 16 的折中);
     // 私信卡主题行字号在 _buildMessageBody 内部另定,不走这里
+    final mj = theme.extension<MojianTokens>();
     final titleStyle = theme.textTheme.bodyMedium?.copyWith(
-      fontSize: style.titleFontSize,
-      fontWeight: isFullyRead ? FontWeight.w500 : FontWeight.w600,
-      height: 1.3,
-      color: titleColor,
+      fontSize: mj != null ? style.titleFontSize + 1.5 : style.titleFontSize,
+      fontWeight: mj != null || !isFullyRead
+          ? FontWeight.w600
+          : FontWeight.w500,
+      height: mj != null ? 1.45 : 1.3,
+      color: mj == null ? titleColor : (isFullyRead ? mj.ink3 : mj.ink),
+      fontFamily: mj != null ? MojianTokens.serifFamily : null,
     );
 
     // Card 壳换轻装(视觉逐项等价):cardTheme elevation=0 无阴影无 tint,
@@ -311,28 +392,40 @@ class TopicCard extends ConsumerWidget {
     // (AnimationController/Ticker/PhysicalShape),对列表滚动物化是纯税
     // (生产 PROF 点名)。DecoratedBox 复刻色/圆角/选中描边,ClipRRect
     // 复刻 antiAlias 裁剪,Material(transparency) 只做 InkWell 的 ink 载体。
-    final cardRadius = BorderRadius.circular(10);
+    final cardRadius = mj != null
+        ? BorderRadius.zero
+        : BorderRadius.circular(10);
     // PerfSpanBox:整卡子树的 layout/paint 账单(lay:card#N / pnt:card#N),
     // 与 noteBuild 在场名单互补(监控关闭零开销,纯代理盒无视觉影响)
     return PerfSpanBox(
       label: 'card#${topic.id}',
       child: Padding(
-        padding: const EdgeInsets.only(bottom: 8),
+        padding: EdgeInsets.only(bottom: mj != null ? 0 : 8),
         child: _clipCardIfNeeded(
           borderRadius: cardRadius,
           shouldClip: topWidget != null,
           child: DecoratedBox(
-            decoration: BoxDecoration(
-              color: isSelected
-                  ? theme.colorScheme.primaryContainer.withValues(alpha: 0.4)
-                  : (highlightColor ?? theme.cardTheme.color),
-              borderRadius: cardRadius,
-              border: isSelected
-                  ? Border.all(
-                      color: theme.colorScheme.primary.withValues(alpha: 0.5),
-                    )
-                  : null,
-            ),
+            decoration: mojianCardDecoration(
+                  theme,
+                  isSelected: isSelected,
+                  highlightColor: highlightColor,
+                ) ??
+                BoxDecoration(
+                  color: isSelected
+                      ? theme.colorScheme.primaryContainer.withValues(
+                          alpha: 0.4,
+                        )
+                      : (highlightColor ?? theme.cardTheme.color),
+                  borderRadius: cardRadius,
+                  border: isSelected
+                      ? Border.all(
+                          color: theme.colorScheme.primary.withValues(
+                            alpha: 0.5,
+                          ),
+                        )
+                      : null,
+                ),
+
             child: TopicCardInteractiveSurface(
               borderRadius: cardRadius,
               onTap: onTap,
@@ -1016,38 +1109,55 @@ class CompactTopicCard extends ConsumerWidget {
 
     // 同 TopicCard:Card 壳换轻装(elevation=0 主题下视觉逐项等价),
     // 砍每卡一套 AnimatedPhysicalModel 隐式动画基建。
-    final cardRadius = BorderRadius.circular(10);
-    final compactTitleStyle = theme.textTheme.labelMedium?.copyWith(
-      fontWeight: isUnread ? FontWeight.w500 : FontWeight.w400,
-      color: isUnread
-          ? theme.colorScheme.onSurface
-          : theme.colorScheme.onSurfaceVariant,
-    );
+    final mj = theme.extension<MojianTokens>();
+    final cardRadius = mj != null
+        ? BorderRadius.zero
+        : BorderRadius.circular(10);
+    // 墨笺:置顶行也是宋体单行标题,已读只降颜色
+    final compactTitleStyle = mj != null
+        ? theme.textTheme.labelMedium?.copyWith(
+            fontFamily: MojianTokens.serifFamily,
+            fontSize: 14.5,
+            fontWeight: FontWeight.w600,
+            color: isUnread ? mj.ink : mj.ink2,
+          )
+        : theme.textTheme.labelMedium?.copyWith(
+            fontWeight: isUnread ? FontWeight.w500 : FontWeight.w400,
+            color: isUnread
+                ? theme.colorScheme.onSurface
+                : theme.colorScheme.onSurfaceVariant,
+          );
     final needsRichTitle =
         topic.closed ||
         topic.hasAcceptedAnswer ||
         topic.canHaveAnswer ||
         topic.title.contains(':');
     return Padding(
-      padding: const EdgeInsets.only(bottom: 6),
+      padding: EdgeInsets.only(bottom: mj != null ? 0 : 6),
       child: _clipCardIfNeeded(
         borderRadius: cardRadius,
         shouldClip: false,
         child: DecoratedBox(
-          decoration: BoxDecoration(
-            color: isSelected
-                ? theme.colorScheme.primaryContainer.withValues(alpha: 0.4)
-                : highlightColor ??
-                      theme.colorScheme.surfaceContainerLow.withValues(
-                        alpha: 0.5,
-                      ),
-            borderRadius: cardRadius,
-            border: isSelected
-                ? Border.all(
-                    color: theme.colorScheme.primary.withValues(alpha: 0.5),
-                  )
-                : null,
-          ),
+          decoration:
+              mojianCardDecoration(
+                theme,
+                isSelected: isSelected,
+                highlightColor: highlightColor,
+              ) ??
+              BoxDecoration(
+                color: isSelected
+                    ? theme.colorScheme.primaryContainer.withValues(alpha: 0.4)
+                    : highlightColor ??
+                          theme.colorScheme.surfaceContainerLow.withValues(
+                            alpha: 0.5,
+                          ),
+                borderRadius: cardRadius,
+                border: isSelected
+                    ? Border.all(
+                        color: theme.colorScheme.primary.withValues(alpha: 0.5),
+                      )
+                    : null,
+              ),
           child: TopicCardInteractiveSurface(
             borderRadius: cardRadius,
             onTap: onTap,
@@ -1055,7 +1165,10 @@ class CompactTopicCard extends ConsumerWidget {
             onPreviewIntent: onPreviewIntent,
             onMiddleClick: onMiddleClick,
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              padding: EdgeInsets.symmetric(
+                horizontal: 12,
+                vertical: mj != null ? 12 : 10,
+              ),
               child: Row(
                 children: [
                   // 1. 置顶图标
