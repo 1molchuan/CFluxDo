@@ -152,6 +152,7 @@ void main() {
 
   testWidgets('时间轴:点轨道按比例跳到对应序号', (tester) async {
     final seeks = <int>[];
+    var jumps = 0;
     await _pump(
       tester,
       Center(
@@ -166,6 +167,9 @@ void main() {
           onSeekIndex: seeks.add,
           onReply: () {},
           onBookmark: () {},
+          onProgressTap: () => jumps++,
+          liked: false,
+          onLike: () {},
         ),
       ),
       size: const Size(1600, 900),
@@ -180,7 +184,46 @@ void main() {
     await tester.tapAt(topLeft + const Offset(20, 150));
     await tester.pump();
     expect(seeks, [76]);
-    expect(find.text('76 / 101'), findsNothing); // 松手后圆钮回到当前楼层
+    // 松手后圆钮先停在目标处,等楼层真正变化(或超时)才回到当前楼层
+    expect(find.text('76 / 101'), findsOneWidget);
+    await tester.pump(const Duration(seconds: 2));
     expect(find.text('1 / 101'), findsOneWidget);
+
+    // 「跳转楼层」= 原楼层胶囊的单击(打开时间线弹窗);首帖可赞时有赞按钮
+    await tester.tap(find.text(t.topic.topic_detail_jump_floor));
+    await tester.pump();
+    expect(jumps, 1);
+    expect(find.text(t.topic.topic_detail_like), findsOneWidget);
+  });
+
+  testWidgets('时间轴:三个按钮 + 跳转楼层的整列高度在预留之内,不压底部工具行', (tester) async {
+    // 与 topic_detail_overlay 的算法一致:可用高 700,预留 440 → 轨道 260;
+    // 列顶在 96,底部工具行 80 高
+    const available = 700.0;
+    const trackHeight = available - 440;
+    await _pump(
+      tester,
+      Align(
+        alignment: Alignment.topLeft,
+        child: MojianTimeline(
+          streamIndexListenable: ValueNotifier<int>(1),
+          totalCount: 40,
+          startDate: DateTime(2026, 10, 1),
+          endDate: DateTime(2026, 10, 17),
+          isLoggedIn: true,
+          bookmarked: false,
+          trackHeight: trackHeight,
+          onSeekIndex: (_) {},
+          onReply: () {},
+          onBookmark: () {},
+          onProgressTap: () {},
+          liked: false,
+          onLike: () {},
+        ),
+      ),
+      size: const Size(1600, 900),
+    );
+    final h = tester.getSize(find.byType(MojianTimeline)).height;
+    expect(96 + h, lessThanOrEqualTo(available - 80));
   });
 }

@@ -176,5 +176,7 @@
   "topicDetail_likesLabel": "likes",
   "topicDetail_writeReply": "Write a reply…",
   "topicDetail_likeTopic": "Like this topic",
-  "topicDetail_bookmarkTopic": "Bookmark"
+  "topicDetail_bookmarkTopic": "Bookmark",
+  "topicDetail_like": "Like",
+  "topicDetail_jumpFloor": "Jump to…"
 }

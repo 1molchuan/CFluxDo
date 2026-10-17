@@ -94,8 +94,8 @@ class _MoreTopicsSectionState extends ConsumerState<MoreTopicsSection> {
                     if (showRelated) ...[
                       Icon(
                         Symbols.auto_awesome_rounded,
-                        size: 16,
-                        color: theme.colorScheme.primary,
+                        size: mj != null ? 13 : 16,
+                        color: mj?.accent ?? theme.colorScheme.primary,
                       ),
                       const SizedBox(width: 6),
                     ],
@@ -105,6 +105,8 @@ class _MoreTopicsSectionState extends ConsumerState<MoreTopicsSection> {
                           : l10n.topicDetail_suggestedTopics,
                       style: theme.textTheme.titleSmall?.copyWith(
                         fontWeight: FontWeight.w600,
+                        fontFamily: mj != null ? MojianTokens.serifFamily : null,
+                        color: mj?.ink,
                       ),
                     ),
                   ],
@@ -167,13 +169,27 @@ class _MoreTopicsTab extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(
-                label,
-                style: theme.textTheme.titleSmall?.copyWith(
-                  fontFamily: MojianTokens.serifFamily,
-                  fontWeight: FontWeight.w600,
-                  color: selected ? mj.ink : mj.ink3,
-                ),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // 「相关」是 AI 推荐,和经典一样带小星标
+                  if (icon != null) ...[
+                    Icon(
+                      icon,
+                      size: 13,
+                      color: selected ? mj.accent : mj.ink3,
+                    ),
+                    const SizedBox(width: 4),
+                  ],
+                  Text(
+                    label,
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontFamily: MojianTokens.serifFamily,
+                      fontWeight: FontWeight.w600,
+                      color: selected ? mj.ink : mj.ink3,
+                    ),
+                  ),
+                ],
               ),
               const SizedBox(height: 5),
               Container(

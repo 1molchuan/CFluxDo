@@ -290,5 +290,7 @@
   "topicDetail_likesLabel": "讚",
   "topicDetail_writeReply": "寫回覆…",
   "topicDetail_likeTopic": "讚好這個話題",
-  "topicDetail_bookmarkTopic": "書籤"
+  "topicDetail_bookmarkTopic": "書籤",
+  "topicDetail_like": "讚好",
+  "topicDetail_jumpFloor": "跳到樓層"
 }

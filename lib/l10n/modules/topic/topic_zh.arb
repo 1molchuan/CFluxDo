@@ -291,5 +291,7 @@
   "topicDetail_likesLabel": "赞",
   "topicDetail_writeReply": "写回复…",
   "topicDetail_likeTopic": "赞这个话题",
-  "topicDetail_bookmarkTopic": "书签"
+  "topicDetail_bookmarkTopic": "书签",
+  "topicDetail_like": "赞",
+  "topicDetail_jumpFloor": "跳转楼层"
 }

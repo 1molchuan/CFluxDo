@@ -250,8 +250,10 @@ class TopicDetailOverlay extends StatelessWidget {
     final contentWidth = width < Breakpoints.maxContentWidth
         ? width
         : Breakpoints.maxContentWidth;
-    // 轨道高度随可用高度伸缩:扣掉顶距、日期、两个按钮与底部工具行
-    final trackHeight = (constraints.maxHeight - 380).clamp(120.0, 280.0);
+    // 轨道高度随可用高度伸缩:扣掉顶距 96、起止日期、跳转楼层、回复/赞/书签
+    // 三个 34 高按钮与底部工具行(80 + 余量);首帖赞不显示时少一个按钮
+    final reserve = 440.0 - (firstPostLiked == null ? 42 : 0);
+    final trackHeight = (constraints.maxHeight - reserve).clamp(120.0, 280.0);
     return Stack(
       children: [
         ValueListenableBuilder<bool>(
@@ -281,6 +283,10 @@ class TopicDetailOverlay extends StatelessWidget {
               onSeekIndex: onSeekIndex ?? (_) {},
               onReply: onReply,
               onBookmark: onBookmark ?? () {},
+              onProgressTap: onProgressTap,
+              onProgressGesture: onProgressGesture,
+              liked: firstPostLiked,
+              onLike: onLikeFirstPost,
             ),
           )
         else if (isLoggedIn)

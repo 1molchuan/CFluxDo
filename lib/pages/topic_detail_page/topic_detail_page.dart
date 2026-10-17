@@ -1223,9 +1223,13 @@ class _TopicDetailPageState extends ConsumerState<TopicDetailPage>
                 elevation: currentElevation,
                 scrolledUnderElevation: currentElevation,
                 shadowColor: Colors.transparent,
-                surfaceTintColor: theme.colorScheme.surfaceTint.withValues(
-                  alpha: (1.0 - expandProgress).clamp(0.0, 1.0),
-                ),
+                // 墨笺的 surfaceTint 是全透明黑:不能再拉高 alpha,否则
+                // 上滑后标题栏会叠一层 8% 的黑
+                surfaceTintColor: theme.colorScheme.surfaceTint.a == 0
+                    ? Colors.transparent
+                    : theme.colorScheme.surfaceTint.withValues(
+                        alpha: (1.0 - expandProgress).clamp(0.0, 1.0),
+                      ),
                 backgroundColor: theme.colorScheme.surface,
                 title: _buildAppBarTitle(
                   theme: theme,
@@ -1349,7 +1353,9 @@ class _TopicDetailPageState extends ConsumerState<TopicDetailPage>
       elevation: elevation,
       scrolledUnderElevation: elevation,
       shadowColor: Colors.transparent,
-      surfaceTintColor: theme.colorScheme.surfaceTint.withValues(alpha: 1),
+      surfaceTintColor: theme.colorScheme.surfaceTint.a == 0
+          ? Colors.transparent
+          : theme.colorScheme.surfaceTint.withValues(alpha: 1),
       onBack: widget.onEmbeddedBack!,
       onClose: widget.onEmbeddedClose!,
       title: _buildEmbeddedMobileWorkspaceTitle(theme, detail),
@@ -1950,12 +1956,12 @@ class _TopicDetailPageState extends ConsumerState<TopicDetailPage>
   bool? _readerFirstPostLiked(TopicDetail detail) {
     final me = ref.read(currentUserProvider).value;
     if (me == null) return null;
-    for (final post in detail.postStream.posts) {
-      if (post.postNumber != 1) continue;
-      if (post.username == me.username) return null;
-      return post.currentUserReaction != null;
-    }
-    return null;
+    final posts = detail.postStream.posts;
+    // 窗口按楼层排序:1 楼若在窗口里必是第一项,不遍历整段
+    if (posts.isEmpty || posts.first.postNumber != 1) return null;
+    final first = posts.first;
+    if (first.username == me.username) return null;
+    return first.currentUserReaction != null;
   }
 
   bool _readerLikeBusy = false;
@@ -1965,14 +1971,9 @@ class _TopicDetailPageState extends ConsumerState<TopicDetailPage>
     if (_readerLikeBusy) return;
     final detail = ref.read(topicDetailProvider(_params)).value;
     if (detail == null) return;
-    Post? first;
-    for (final post in detail.postStream.posts) {
-      if (post.postNumber == 1) {
-        first = post;
-        break;
-      }
-    }
-    if (first == null) return;
+    final posts = detail.postStream.posts;
+    if (posts.isEmpty || posts.first.postNumber != 1) return;
+    final first = posts.first;
     _readerLikeBusy = true;
     unawaited(HapticFeedback.lightImpact());
     try {
@@ -2021,9 +2022,12 @@ class _TopicDetailPageState extends ConsumerState<TopicDetailPage>
   ) {
     // Overlay 及其子树实际消费的全部低频输入;detail 对象本身不入签名
     // (它每次更新都是新实例),只取 Overlay 用到的字段。
-    // 墨笺阅读条/时间轴额外消费:首帖赞、话题书签、首末日期(都是低频)
-    final firstPostLiked = _readerFirstPostLiked(detail);
-    final bookmarked = _bookmarkEditTarget(detail) != null || detail.bookmarked;
+    // 墨笺阅读条/时间轴额外消费:首帖赞、话题书签、首末日期(都是低频);
+    // 经典不用,恒为常量,不进签名变化、也不做这两次遍历
+    final mojian = Theme.of(context).extension<MojianTokens>() != null;
+    final firstPostLiked = mojian ? _readerFirstPostLiked(detail) : null;
+    final bookmarked =
+        mojian && (_bookmarkEditTarget(detail) != null || detail.bookmarked);
     final signature = (
       isLoggedIn: isLoggedIn,
       totalCount: detail.postStream.stream.length,
@@ -2035,8 +2039,8 @@ class _TopicDetailPageState extends ConsumerState<TopicDetailPage>
       isLoading: _isSwitchingMode,
       firstPostLiked: firstPostLiked,
       bookmarked: bookmarked,
-      createdAt: detail.createdAt,
-      lastPostedAt: detail.lastPostedAt,
+      createdAt: mojian ? detail.createdAt : null,
+      lastPostedAt: mojian ? detail.lastPostedAt : null,
     );
     final cached = _overlayCache;
     if (cached != null && cached.signature == signature) {
@@ -2167,12 +2171,21 @@ class _TopicDetailPageState extends ConsumerState<TopicDetailPage>
           controller: _tocController,
           visible: panelVisible,
           onLeft: onLeft,
+          // 底部让出操作栏;墨笺阅读条形态下是常驻阅读条 + 升起的工具行
           maxHeight:
               MediaQuery.sizeOf(context).height -
               kToolbarHeight -
               MediaQuery.paddingOf(context).top -
               88 -
-              120,
+              (mojianMode == MojianReaderMode.bar
+                  ? math.max(
+                      120.0,
+                      MojianReaderBar.height +
+                          TopicBottomBar.dockedHeight +
+                          bottomPadding +
+                          12,
+                    )
+                  : 120),
           onToggleVisible: () => ref
               .read(topicTocVisibilityProvider.notifier)
               .toggle(panelVisible),

@@ -8,8 +8,11 @@ import '../../../l10n/s.dart';
 import '../../../models/category.dart';
 import '../../../models/topic.dart';
 import '../../../providers/discourse_providers.dart';
+import '../../../services/discourse_cache_manager.dart';
 import '../../../theme/mojian_theme.dart';
 import '../../../utils/font_awesome_helper.dart';
+import '../../../utils/tag_icon_list.dart';
+import '../../../utils/url_helper.dart';
 import '../../../widgets/topic/topic_summary_widget.dart';
 import '../../../widgets/common/emoji_text.dart';
 import '../../../utils/time_utils.dart';
@@ -69,7 +72,17 @@ class TopicDetailHeader extends ConsumerWidget {
     }
 
     final mj = theme.extension<MojianTokens>();
-    if (mj != null) return _buildMojian(context, ref, theme, mj, category);
+    if (mj != null) {
+      return _buildMojian(
+        context,
+        ref,
+        theme,
+        mj,
+        category,
+        faIcon: faIcon,
+        logoUrl: logoUrl,
+      );
+    }
 
     return Container(
       padding: EdgeInsets.fromLTRB(16, showTitle ? 20 : 12, 16, 16),
@@ -349,8 +362,10 @@ class TopicDetailHeader extends ConsumerWidget {
     WidgetRef ref,
     ThemeData theme,
     MojianTokens mj,
-    Category? category,
-  ) {
+    Category? category, {
+    FaIconData? faIcon,
+    String? logoUrl,
+  }) {
     final l10n = context.l10n;
     final wide = MediaQuery.sizeOf(context).width >= 600;
     final titleStyle = theme.textTheme.headlineSmall?.copyWith(
@@ -365,10 +380,38 @@ class TopicDetailHeader extends ConsumerWidget {
       color: mj.ink3,
       fontSize: 12.5,
     );
-    final tags = detail.tags ?? const <Tag>[];
+    // 私信不显示分类与标签,但「已解决」照常显示(与经典一致)
+    final pm = detail.isPrivateMessage;
+    final tags = pm ? const <Tag>[] : (detail.tags ?? const <Tag>[]);
+    final kickerCategory = pm ? null : category;
     final showKicker =
-        !detail.isPrivateMessage &&
-        (category != null || tags.isNotEmpty || detail.hasAcceptedAnswer);
+        kickerCategory != null || tags.isNotEmpty || detail.hasAcceptedAnswer;
+
+    // 分类标记:有图标/徽标用图标,私密分类用锁,否则方点(同经典的取舍顺序)
+    Widget categoryMark(Category c) {
+      final color = MojianTheme.categoryColor(c.color, theme.brightness);
+      final dot = DecoratedBox(
+        decoration: BoxDecoration(
+          color: color,
+          borderRadius: BorderRadius.circular(1.5),
+        ),
+        child: const SizedBox(width: 7, height: 7),
+      );
+      if (faIcon != null) return FaIcon(faIcon, size: 12, color: color);
+      if (logoUrl != null && logoUrl.isNotEmpty) {
+        return Image(
+          image: discourseImageProvider(UrlHelper.resolveUrlWithCdn(logoUrl)),
+          width: 13,
+          height: 13,
+          fit: BoxFit.contain,
+          errorBuilder: (_, _, _) => dot,
+        );
+      }
+      if (c.readRestricted) {
+        return Icon(Symbols.lock_rounded, size: 13, color: color);
+      }
+      return dot;
+    }
 
     Widget statItem(String number, String label) => Text.rich(
       TextSpan(
@@ -403,28 +446,16 @@ class TopicDetailHeader extends ConsumerWidget {
               runSpacing: 6,
               crossAxisAlignment: WrapCrossAlignment.center,
               children: [
-                if (category != null)
+                if (kickerCategory != null)
                   InkWell(
-                    onTap: () => _openCategory(context, category),
+                    onTap: () => _openCategory(context, kickerCategory),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        DecoratedBox(
-                          decoration: BoxDecoration(
-                            color: Color(
-                              int.tryParse(
-                                    'FF${category.color.replaceAll('#', '')}',
-                                    radix: 16,
-                                  ) ??
-                                  0xFF888888,
-                            ),
-                            borderRadius: BorderRadius.circular(1.5),
-                          ),
-                          child: const SizedBox(width: 7, height: 7),
-                        ),
+                        categoryMark(kickerCategory),
                         const SizedBox(width: 6),
                         Text(
-                          category.name,
+                          kickerCategory.name,
                           style: kickerStyle?.copyWith(
                             color: mj.ink2,
                             fontWeight: FontWeight.w500,
@@ -439,10 +470,24 @@ class TopicDetailHeader extends ConsumerWidget {
                     child: Text.rich(
                       TextSpan(
                         children: [
-                          TextSpan(
-                            text: '#',
-                            style: TextStyle(color: mj.ink4),
-                          ),
+                          // 站点给了图标的标签(公告、精华神帖等)带图标,其余用 #
+                          if (TagIconList.get(tag.name) case final info?)
+                            WidgetSpan(
+                              alignment: PlaceholderAlignment.middle,
+                              child: Padding(
+                                padding: const EdgeInsets.only(right: 4),
+                                child: FaIcon(
+                                  info.icon,
+                                  size: 11,
+                                  color: info.color,
+                                ),
+                              ),
+                            )
+                          else
+                            TextSpan(
+                              text: '#',
+                              style: TextStyle(color: mj.ink4),
+                            ),
                           TextSpan(text: tag.name),
                         ],
                       ),
