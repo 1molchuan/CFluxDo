@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:jovial_svg/jovial_svg.dart';
 
+import '../../theme/mojian_theme.dart';
+
 /// 浮动发光 logo。
 ///
 /// `assets/logo.svg` + 呼吸式上下浮动 + 主色发光圈。用于 onboarding / 登录页。
@@ -63,9 +65,14 @@ class _FloatingLogoState extends State<FloatingLogo>
               shape: BoxShape.circle,
               boxShadow: [
                 BoxShadow(
-                  color: theme.colorScheme.primary.withValues(
-                    alpha: isDark ? 0.3 : 0.2,
-                  ),
+                  // 墨笺:光晕只留极淡的一圈墨色
+                  color: theme.extension<MojianTokens>() != null
+                      ? theme.colorScheme.onSurface.withValues(
+                          alpha: isDark ? 0.08 : 0.05,
+                        )
+                      : theme.colorScheme.primary.withValues(
+                          alpha: isDark ? 0.3 : 0.2,
+                        ),
                   blurRadius: 60,
                   spreadRadius: 20,
                 ),

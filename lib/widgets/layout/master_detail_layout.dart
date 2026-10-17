@@ -6,6 +6,7 @@ import '../../utils/responsive.dart';
 import '../../utils/layout_lock.dart';
 import 'draggable_divider.dart';
 import 'pane_filmstrip.dart';
+import '../../theme/mojian_theme.dart';
 
 /// Master-Detail 双栏布局
 /// 平板/桌面上显示双栏，手机上只显示 master 或 detail
@@ -388,6 +389,45 @@ class MasterDetailEmptyState extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final mj = theme.extension<MojianTokens>();
+    if (mj != null) {
+      // 墨笺:一团洇开的淡墨代替图标,文案用宋体、字距拉开
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 120,
+              height: 120,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: RadialGradient(
+                  center: const Alignment(-0.16, -0.2),
+                  colors: [
+                    mj.ink.withValues(alpha: 0.13),
+                    mj.accent.withValues(alpha: 0.08),
+                    mj.paper.withValues(alpha: 0),
+                  ],
+                  stops: const [0, 0.5, 1],
+                ),
+              ),
+            ),
+            const SizedBox(height: 18),
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontFamily: MojianTokens.serifFamily,
+                fontWeight: FontWeight.w600,
+                fontSize: 17,
+                letterSpacing: 3,
+                color: mj.ink2,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
     return Center(
       child: Column(
         mainAxisSize: MainAxisSize.min,

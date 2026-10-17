@@ -35,6 +35,7 @@ import 'poll_builder_dialog.dart';
 import 'template_insert_dialog.dart';
 import 'package:common_ui/common_ui.dart';
 import '../../../../../l10n/s.dart';
+import '../../theme/mojian_theme.dart';
 
 /// Markdown 工具栏组件
 /// 提供格式化按钮、预览切换和图片上传功能（纯按钮行，不含面板和间距）
@@ -1128,12 +1129,18 @@ class MarkdownToolbarState extends State<MarkdownToolbar> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final pillColor =
-        theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.45);
+    final mj = theme.extension<MojianTokens>();
+    // 墨笺:工具栏平铺,顶边一条细线,两侧不要胶囊底色
+    final pillColor = mj != null
+        ? Colors.transparent
+        : theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.45);
     final isMobile = widget.onToggleTools != null;
 
     return Container(
-      color: theme.colorScheme.surface,
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        border: mj == null ? null : Border(top: BorderSide(color: mj.rule)),
+      ),
       child: Focus(
         canRequestFocus: false,
         descendantsAreFocusable: false,

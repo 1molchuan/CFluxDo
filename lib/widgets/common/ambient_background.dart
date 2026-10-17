@@ -2,6 +2,8 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../../theme/mojian_theme.dart';
+
 /// 极光环境背景。
 ///
 /// surface 底色 + 两个柔和模糊光斑(primary / secondary)缓慢游动, 暗色模式叠一层
@@ -30,6 +32,18 @@ class _AmbientBackgroundState extends State<AmbientBackground>
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // 墨笺是静止的晕染,不需要光斑游动的动画时钟
+    final mojian = Theme.of(context).extension<MojianTokens>() != null;
+    if (mojian && _controller.isAnimating) {
+      _controller.stop();
+    } else if (!mojian && !_controller.isAnimating) {
+      _controller.repeat();
+    }
+  }
+
+  @override
   void dispose() {
     _controller.dispose();
     super.dispose();
@@ -38,6 +52,8 @@ class _AmbientBackgroundState extends State<AmbientBackground>
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final mj = theme.extension<MojianTokens>();
+    if (mj != null) return _MojianWash(tokens: mj, child: widget.child);
     final isDark = theme.brightness == Brightness.dark;
     final primary = theme.colorScheme.primary;
     final secondary = theme.colorScheme.secondary;
@@ -72,6 +88,56 @@ class _AmbientBackgroundState extends State<AmbientBackground>
               child: ColoredBox(color: Colors.black.withValues(alpha: 0.2)),
             ),
           if (widget.child != null) Positioned.fill(child: widget.child!),
+        ],
+      ),
+    );
+  }
+}
+
+/// 墨笺的品牌页背景:纸色底上两团静止的晕染(左上淡墨、右下淡强调色),
+/// 像宣纸上洇开的墨迹;不做游动动画。
+class _MojianWash extends StatelessWidget {
+  const _MojianWash({required this.tokens, this.child});
+
+  final MojianTokens tokens;
+  final Widget? child;
+
+  @override
+  Widget build(BuildContext context) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    return DecoratedBox(
+      decoration: BoxDecoration(color: tokens.paper),
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: RadialGradient(
+                  center: const Alignment(-0.9, -0.85),
+                  radius: 0.9,
+                  colors: [
+                    tokens.ink.withValues(alpha: dark ? 0.07 : 0.05),
+                    tokens.ink.withValues(alpha: 0),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          Positioned.fill(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: RadialGradient(
+                  center: const Alignment(0.95, 0.9),
+                  radius: 0.8,
+                  colors: [
+                    tokens.accent.withValues(alpha: dark ? 0.1 : 0.07),
+                    tokens.accent.withValues(alpha: 0),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          if (child != null) Positioned.fill(child: child!),
         ],
       ),
     );

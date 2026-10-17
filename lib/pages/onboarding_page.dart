@@ -8,6 +8,7 @@ import '../widgets/common/ambient_background.dart';
 import '../widgets/common/floating_logo.dart';
 import 'login_page.dart';
 import 'network_settings_page/network_settings_page.dart';
+import '../theme/mojian_theme.dart';
 
 class OnboardingPage extends StatefulWidget {
   final VoidCallback onComplete;
@@ -175,7 +176,23 @@ class _OnboardingPageState extends State<OnboardingPage> with TickerProviderStat
             _AnimatedEntry(
               fadeAnimation: _fadeAnimations[3],
               slideAnimation: _slideAnimations[3],
-              child: FilledButton(
+              child: theme.extension<MojianTokens>() != null
+                  // 墨笺:墨色实心按钮,不要强调色底与发光阴影
+                  ? FilledButton(
+                      onPressed: () => _navigateToLogin(context),
+                      style: FilledButton.styleFrom(
+                        minimumSize: const Size(double.infinity, 56),
+                      ),
+                      child: Text(
+                        context.l10n.common_login,
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w500,
+                          letterSpacing: 1.0,
+                        ),
+                      ),
+                    )
+                  : FilledButton(
                 onPressed: () => _navigateToLogin(context),
                 style: FilledButton.styleFrom(
                   minimumSize: const Size(double.infinity, 56),

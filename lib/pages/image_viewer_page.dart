@@ -28,6 +28,7 @@ import '../widgets/common/hero_image.dart';
 import '../widgets/common/image_context_menu.dart';
 import 'package:m3e_ui/m3e_ui.dart';
 import '../l10n/s.dart';
+import '../theme/mojian_theme.dart';
 
 class ImageViewerPage extends ConsumerStatefulWidget {
   final String? imageUrl;
@@ -1339,12 +1340,26 @@ class _ImageViewerPageState extends ConsumerState<ImageViewerPage>
                                   color: Colors.black.withValues(alpha: 0.5),
                                   borderRadius: BorderRadius.circular(20),
                                 ),
+                                // 墨笺:页码用宋体等宽数字(看图仍是深色底)
                                 child: Text(
                                   "${currentIndex + 1} / ${images.length}",
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 14,
-                                  ),
+                                  style:
+                                      Theme.of(
+                                            context,
+                                          ).extension<MojianTokens>() ==
+                                          null
+                                      ? const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 14,
+                                        )
+                                      : const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 14,
+                                          fontFamily: MojianTokens.serifFamily,
+                                          fontFeatures: [
+                                            FontFeature.tabularFigures(),
+                                          ],
+                                        ),
                                 ),
                               ),
                             ),

@@ -21,6 +21,7 @@ import '../widgets/common/floating_logo.dart';
 import 'package:m3e_ui/m3e_ui.dart';
 import 'qr_login_scan_page.dart';
 import 'webview_login_page.dart';
+import '../theme/mojian_theme.dart';
 
 /// linux.do 原生登录页。
 ///
@@ -389,8 +390,31 @@ class _LoginPageState extends State<LoginPage>
     );
   }
 
-  /// 磨砂玻璃表单卡片
+  /// 磨砂玻璃表单卡片(墨笺:纸色细框,不要阴影与毛玻璃)
   Widget _buildFormCard(ThemeData theme, ColorScheme scheme) {
+    final mj = theme.extension<MojianTokens>();
+    if (mj != null) {
+      return Container(
+        padding: const EdgeInsets.fromLTRB(20, 20, 20, 20),
+        decoration: BoxDecoration(
+          color: mj.paper3,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: mj.rule),
+        ),
+        child: !_credentialsLoaded
+            ? const Padding(
+                padding: EdgeInsets.symmetric(vertical: 48),
+                child: Center(child: LoadingSpinner(size: 40)),
+              )
+            : LoginForm(
+                onSubmit: _handleSubmit,
+                onForgotPassword: () =>
+                    _loginWithWebView('https://linux.do/password-reset'),
+                savedUsername: _savedUsername,
+                savedPassword: _savedPassword,
+              ),
+      );
+    }
     return DecoratedBox(
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(24),

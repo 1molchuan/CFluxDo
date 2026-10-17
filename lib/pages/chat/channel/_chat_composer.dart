@@ -423,19 +423,22 @@ class _ChatComposerState extends ConsumerState<_ChatComposer> {
               : (_currentPanel == _ComposerPanel.none ? 0 : 8),
         ),
         child: DecoratedBox(
+          // 墨笺:浅纸底 + 细框,不要浮起的阴影
           decoration: BoxDecoration(
             color: theme.colorScheme.surfaceContainerHigh,
             borderRadius: BorderRadius.circular(24),
             border: Border.all(
               color: theme.colorScheme.outlineVariant.withValues(alpha: 0.4),
             ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.08),
-                blurRadius: 12,
-                offset: const Offset(0, 2),
-              ),
-            ],
+            boxShadow: theme.extension<MojianTokens>() != null
+                ? null
+                : [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.08),
+                      blurRadius: 12,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
           ),
           child: Padding(
             padding: const EdgeInsets.fromLTRB(10, 6, 6, 6),

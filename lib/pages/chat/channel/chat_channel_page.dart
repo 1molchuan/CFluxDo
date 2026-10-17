@@ -57,6 +57,7 @@ import 'chat_composer_controller.dart';
 import '../chat_search_page.dart';
 import 'package:common_ui/common_ui.dart';
 import 'chat_message_menu.dart';
+import '../../../theme/mojian_theme.dart';
 
 part '_chat_composer.dart';
 part '_chat_widgets.dart';

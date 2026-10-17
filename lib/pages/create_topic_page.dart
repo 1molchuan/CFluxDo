@@ -33,6 +33,7 @@ import 'package:fluxdo/services/local_notification_service.dart'
 import '../l10n/s.dart';
 import '../utils/dialog_utils.dart';
 import 'pending_posts_page.dart';
+import '../theme/mojian_theme.dart';
 
 class CreateTopicPage extends ConsumerStatefulWidget {
   final int? initialCategoryId;
@@ -573,9 +574,12 @@ class _CreateTopicPageState extends ConsumerState<CreateTopicPage> {
               contentPadding: EdgeInsets.zero,
               isDense: true,
             ),
+            // 墨笺:宋体标题本就够重,不要收紧字距
             style: theme.textTheme.headlineSmall?.copyWith(
               fontWeight: FontWeight.w900,
-              letterSpacing: -0.5,
+              letterSpacing: theme.extension<MojianTokens>() != null
+                  ? 0.3
+                  : -0.5,
             ),
             maxLines: null,
             maxLength: 200,

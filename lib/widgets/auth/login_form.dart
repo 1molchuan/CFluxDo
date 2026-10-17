@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:app_icons/app_icons.dart';
 
 import 'package:m3e_ui/m3e_ui.dart';
+import '../../theme/mojian_theme.dart';
 
 /// username/email + password 输入表单。提交逻辑 (调 DiscourseService 登录 +
 /// 处理 hcaptcha/2FA/跳转) 由父组件持有,form 本身只负责 UI 和数据校验。
@@ -87,6 +88,14 @@ class _LoginFormState extends State<LoginForm> {
     required IconData icon,
     Widget? suffixIcon,
   }) {
+    if (Theme.of(context).extension<MojianTokens>() != null) {
+      // 墨笺:沿用主题的下划线输入框,不要填色圆角块
+      return InputDecoration(
+        labelText: label,
+        prefixIcon: Icon(icon),
+        suffixIcon: suffixIcon,
+      );
+    }
     OutlineInputBorder border(Color color, double width) => OutlineInputBorder(
       borderRadius: BorderRadius.circular(14),
       borderSide: BorderSide(color: color, width: width),
@@ -107,6 +116,7 @@ class _LoginFormState extends State<LoginForm> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    final mojian = theme.extension<MojianTokens>() != null;
 
     return AutofillGroup(
       child: Column(
@@ -184,11 +194,14 @@ class _LoginFormState extends State<LoginForm> {
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(28),
               ),
-              elevation: 8,
+              elevation: mojian ? 0 : 8,
               shadowColor: scheme.primary.withValues(alpha: 0.4),
             ),
             child: _submitting
-                ? LoadingSpinner(size: 24, color: scheme.onPrimary)
+                ? LoadingSpinner(
+                    size: 24,
+                    color: mojian ? scheme.surface : scheme.onPrimary,
+                  )
                 : const Text(
                     '登录',
                     style: TextStyle(

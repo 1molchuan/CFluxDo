@@ -81,6 +81,7 @@ import '../media_upload_helper.dart';
 import '../../../services/toast_service.dart';
 import '../cursor_swipe_control.dart';
 import '../voice_recorder_sheet.dart';
+import '../../../theme/mojian_theme.dart';
 
 /// 孤岛渲染工厂:复用 generic callbacks 的全部 builder(emoji 缓存池/
 /// 图片管线/代码高亮…),编辑器里的岛与阅读端视觉一致。
@@ -3482,13 +3483,18 @@ class _RichToolbarState extends State<_RichToolbar> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final state = widget.state;
-    final pillColor = theme.colorScheme.surfaceContainerHighest.withValues(
-      alpha: 0.45,
-    );
+    final mj = theme.extension<MojianTokens>();
+    // 墨笺:工具栏平铺,顶边一条细线,两侧不要胶囊底色
+    final pillColor = mj != null
+        ? Colors.transparent
+        : theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.45);
     final isListItem = _sig.kindIndex == TextBlockKind.listItem.index;
 
     return Container(
-      color: theme.colorScheme.surface,
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        border: mj == null ? null : Border(top: BorderSide(color: mj.rule)),
+      ),
       child: Focus(
         canRequestFocus: false,
         descendantsAreFocusable: false,

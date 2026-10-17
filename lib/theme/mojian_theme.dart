@@ -454,12 +454,11 @@ class MojianTheme {
         ),
         unselectedLabelTextStyle: TextStyle(color: t.ink3),
       ),
+      // 只给缺省的 border(下划线):页面自己写了 border(圆角填色搜索框
+      // 之类)时整套覆盖,不会被主题的 enabledBorder 硬叠一道下划线
       inputDecorationTheme: InputDecorationThemeData(
-        enabledBorder: UnderlineInputBorder(
+        border: UnderlineInputBorder(
           borderSide: BorderSide(color: t.ruleStrong),
-        ),
-        focusedBorder: UnderlineInputBorder(
-          borderSide: BorderSide(color: t.ink, width: 1.5),
         ),
       ),
       dialogTheme: DialogThemeData(
