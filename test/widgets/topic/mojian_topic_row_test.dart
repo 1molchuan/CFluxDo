@@ -15,24 +15,29 @@ ThemeData _mojianTheme(Brightness b) => MojianTheme.build(
   primaryIconTheme: const IconThemeData(),
 );
 
-Topic _topic({int unread = 0, bool unseen = false, bool solved = false}) =>
-    Topic(
-      id: 4242,
-      title: '用了三个月 N100 小主机当家庭服务器，聊聊功耗、噪音和那些踩过的坑',
-      slug: 'n100',
-      postsCount: 129,
-      replyCount: 128,
-      views: 12640,
-      likeCount: 846,
-      categoryId: '4',
-      tags: const [
-        Tag(name: '硬件'),
-        Tag(name: 'NAS'),
-      ],
-      unread: unread,
-      unseen: unseen,
-      hasAcceptedAnswer: solved,
-    );
+Topic _topic({
+  int unread = 0,
+  bool unseen = false,
+  bool solved = false,
+  int? lastRead,
+}) => Topic(
+  id: 4242,
+  title: '用了三个月 N100 小主机当家庭服务器，聊聊功耗、噪音和那些踩过的坑',
+  slug: 'n100',
+  postsCount: 129,
+  replyCount: 128,
+  views: 12640,
+  likeCount: 846,
+  categoryId: '4',
+  tags: const [
+    Tag(name: '硬件'),
+    Tag(name: 'NAS'),
+  ],
+  unread: unread,
+  unseen: unseen,
+  hasAcceptedAnswer: solved,
+  lastReadPostNumber: lastRead,
+);
 
 final _category = Category(
   id: 4,
@@ -88,6 +93,13 @@ void main() {
         l.extraFills.where((f) => f.$1.width > 10 && f.$2 == accent),
         isEmpty,
       );
+    });
+
+    test('已读行退后:分类方点变淡', () {
+      final theme = _mojianTheme(Brightness.light);
+      final fresh = _layout(theme, _topic()).categoryDotColor!;
+      final read = _layout(theme, _topic(lastRead: 129)).categoryDotColor!;
+      expect(read.a, lessThan(fresh.a));
     });
 
     test('经典风格不受影响', () {

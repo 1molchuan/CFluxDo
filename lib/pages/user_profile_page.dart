@@ -1408,13 +1408,20 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage>
     final hasJoinedAt = _user?.createdAt != null;
     final hasInfo = hasBio || hasLocation || hasWebsite || hasJoinedAt;
 
+    final mj = theme.extension<MojianTokens>();
+    final plainBanner = mj != null && !hasBackground;
+    final barFg = plainBanner ? mj.ink : Colors.white;
     final banner = SizedBox(
       height: bannerHeight,
       child: Stack(
         fit: StackFit.expand,
         children: [
           // 个人主页可能长时间停留,装饰背景不常驻刷新(与竖版同口径)。
-          const GrainGradientBackground(animated: false),
+          // 墨笺没有头图时是一条素纸色横幅,不用彩色颗粒渐变
+          if (mj != null)
+            ColoredBox(color: mj.paper3)
+          else
+            const GrainGradientBackground(animated: false),
           if (hasBackground)
             Image(
               image: discourseImageProvider(UrlHelper.resolveUrlWithCdn(bgUrl)),
@@ -1433,7 +1440,8 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage>
               errorBuilder: (_, _, _) => const SizedBox.shrink(),
             ),
           // 轻压暗:保住悬浮按钮可读性,不吃头图本身。
-          Container(color: Colors.black.withValues(alpha: 0.2)),
+          if (mj == null || hasBackground)
+            Container(color: Colors.black.withValues(alpha: 0.2)),
         ],
       ),
     );
@@ -1673,17 +1681,20 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage>
             ),
           ),
           // 悬浮顶栏:返回 + 操作按钮,渐变黑纱保证压图可读。
+          // 墨笺没有头图时横幅是素纸,直接用墨色按钮、不加黑纱
           Positioned(
             top: 0,
             left: 0,
             right: 0,
             child: Container(
-              decoration: const BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [Colors.black45, Colors.transparent],
-                ),
+              decoration: BoxDecoration(
+                gradient: plainBanner
+                    ? null
+                    : const LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [Colors.black45, Colors.transparent],
+                      ),
               ),
               child: SafeArea(
                 bottom: false,
@@ -1693,16 +1704,16 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage>
                     vertical: 4,
                   ),
                   child: IconTheme(
-                    data: const IconThemeData(color: Colors.white),
+                    data: IconThemeData(color: barFg),
                     child: Row(
                       children: [
                         // 与竖版 AppBar 同一套返回键语义:嵌入预览位
                         // (onEmbeddedBack == null)不渲染任何返回键。
                         if (!widget.embeddedMode)
-                          const BackButton(color: Colors.white)
+                          BackButton(color: barFg)
                         else if (widget.onEmbeddedBack != null)
                           BackButton(
-                            color: Colors.white,
+                            color: barFg,
                             onPressed: widget.onEmbeddedBack,
                           ),
                         const Spacer(),
@@ -2055,11 +2066,16 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage>
                     left: 0,
                     right: 0,
                     height: expandedHeight * 0.42,
+                    // 头图上压着墨色文字,只能淡;展开时浓一些,收起时随 t 退到
+                    // 纸底,免得收起后的小标题压在照片上
                     child: ShaderMask(
-                      shaderCallback: (rect) => const LinearGradient(
+                      shaderCallback: (rect) => LinearGradient(
                         begin: Alignment.topCenter,
                         end: Alignment.bottomCenter,
-                        colors: [Color(0x66000000), Color(0x00000000)],
+                        colors: [
+                          Colors.black.withValues(alpha: 0.2 + 0.32 * t),
+                          Colors.black.withValues(alpha: 0),
+                        ],
                       ).createShader(rect),
                       blendMode: BlendMode.dstIn,
                       child: Image(

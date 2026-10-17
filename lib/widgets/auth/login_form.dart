@@ -198,9 +198,10 @@ class _LoginFormState extends State<LoginForm> {
               shadowColor: scheme.primary.withValues(alpha: 0.4),
             ),
             child: _submitting
+                // 提交中按钮是禁用态(墨笺下是浅墨底),转圈用墨色才看得见
                 ? LoadingSpinner(
                     size: 24,
-                    color: mojian ? scheme.surface : scheme.onPrimary,
+                    color: mojian ? scheme.onSurface : scheme.onPrimary,
                   )
                 : const Text(
                     '登录',

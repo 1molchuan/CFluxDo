@@ -50,8 +50,10 @@ TopicCardLayout obtainTopicItemLayout({
     emojiUrlOf: topicCardEmojiUrlResolver,
     statsAvailableWidth: statsAvailableWidth ?? (cardWidth - 64),
     messageStyle: messageStyle,
-    // 惰性取文案:只有墨笺行且有新回复时才用到,经典卡与无新回复的行不碰 l10n
-    newRepliesLabel: (count) => context.l10n.topic_cardNewReplies(count),
+    // 惰性取文案:只有墨笺行且有新回复时才用到。排版对象进全局缓存,之后
+    // 分钟心跳 / 改宽会重跑排版,所以闭包里不能抓列表项的 context(可能已
+    // 卸载),走全局 S.current
+    newRepliesLabel: (count) => S.current.topic_cardNewReplies(count),
   );
 }
 

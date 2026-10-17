@@ -119,7 +119,7 @@ class _CategoryShortcutItem extends ConsumerWidget {
     );
   }
 
-  /// 墨笺:宽侧栏是「分类色方点 + 名称」的紧凑行;窄侧栏保留分类图标
+  /// 墨笺:宽侧栏是「分类标记 + 名称」的紧凑行;窄侧栏保留分类图标
   Widget _buildMojian(BuildContext context, MojianTokens mj, bool selected) {
     final brightness = Theme.of(context).brightness;
     final dot = MojianTheme.categoryColor(category.color, brightness);
@@ -136,16 +136,24 @@ class _CategoryShortcutItem extends ConsumerWidget {
             child: extended
                 ? Row(
                     children: [
-                      const SizedBox(width: 14),
-                      Container(
-                        width: 8,
-                        height: 8,
-                        decoration: BoxDecoration(
-                          color: dot,
-                          borderRadius: BorderRadius.circular(2),
+                      const SizedBox(width: 12),
+                      // 分类有图标/徽标/锁就用它(与经典一致),否则墨笺方点
+                      SizedBox(
+                        width: 16,
+                        child: Center(
+                          child: _hasCategoryMark(category)
+                              ? _buildCategoryIcon(category, dot, 16)
+                              : Container(
+                                  width: 8,
+                                  height: 8,
+                                  decoration: BoxDecoration(
+                                    color: dot,
+                                    borderRadius: BorderRadius.circular(2),
+                                  ),
+                                ),
                         ),
                       ),
-                      const SizedBox(width: 12),
+                      const SizedBox(width: 10),
                       Expanded(
                         child: Text(
                           category.name,
@@ -177,6 +185,11 @@ Color _parseColor(String hex, Color fallback) {
     return fallback;
   }
 }
+
+bool _hasCategoryMark(Category category) =>
+    FontAwesomeHelper.getIcon(category.icon) != null ||
+    (category.uploadedLogo?.isNotEmpty ?? false) ||
+    category.readRestricted;
 
 Widget _buildCategoryIcon(Category category, Color color, double size) {
   final logoUrl = category.uploadedLogo;

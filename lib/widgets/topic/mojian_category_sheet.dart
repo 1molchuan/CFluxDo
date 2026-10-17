@@ -1,17 +1,24 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:app_icons/app_icons.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../l10n/s.dart';
 import '../../models/category.dart';
-import '../../providers/category_provider.dart';
+import '../../providers/discourse_providers.dart';
 import '../../providers/pinned_categories_provider.dart';
 import '../../theme/mojian_theme.dart';
 import '../../utils/dialog_utils.dart';
+import 'category_drawer.dart'
+    show CategoryDrawerHost, openCategorySubscriptionSheet;
+import 'category_tab_manager_sheet.dart' show PinnedCategoryEditPage;
 
-/// 墨笺首页「分类」面板:搜索框 + 收藏 / 其他两组网格,☆ 收藏或取消。
-/// 手机是底部抽屉,宽屏是居中对话框。选中哪个分类由 [onSelect] 交宿主决定
-/// (已收藏切首页对应 tab,未收藏进分类页 —— 与分类侧栏一致)。
+/// 墨笺首页「分类」面板:搜索框 + 收藏 / 其他两组网格,☆ 收藏或取消,
+/// 长按分类改订阅级别;顶部可进「编辑我的分类」(排序)与完整的分类侧栏
+/// (标签、父子分类树)。手机是底部抽屉,宽屏是居中对话框。选中哪个分类由
+/// [onSelect] 交宿主决定(已收藏切首页对应 tab,未收藏进分类页 —— 与分类
+/// 侧栏一致)。
 Future<void> showMojianCategorySheet(
   BuildContext context, {
   required int? currentCategoryId,
@@ -41,12 +48,22 @@ Future<void> showMojianCategorySheet(
   return showAppBottomSheet<void>(
     context: context,
     isScrollControlled: true,
-    builder: (ctx) => ConstrainedBox(
-      constraints: BoxConstraints(
-        maxHeight: MediaQuery.sizeOf(ctx).height * 0.86,
-      ),
-      child: build(ctx, dialog: false),
-    ),
+    // 底部面板不会自己让位键盘:搜索时整体抬到键盘上方,高度固定不随结果收缩
+    builder: (ctx) {
+      final insets = MediaQuery.viewInsetsOf(ctx).bottom;
+      final height = MediaQuery.sizeOf(ctx).height;
+      return Padding(
+        padding: EdgeInsets.only(bottom: insets),
+        child: SizedBox(
+          // 下限 240 不能超过上限:矮窗口(分屏/小窗)里上限本身就不到 240
+          height: (height * 0.86 - insets).clamp(
+            math.min(240.0, height * 0.86),
+            height * 0.86,
+          ),
+          child: build(ctx, dialog: false),
+        ),
+      );
+    },
   );
 }
 
@@ -101,6 +118,7 @@ class _MojianCategorySheetState extends ConsumerState<MojianCategorySheet> {
     final l10n = context.l10n;
     final pinnedIds = ref.watch(pinnedCategoriesProvider);
     final categoriesAsync = ref.watch(categoriesProvider);
+    final isLoggedIn = ref.watch(currentUserProvider).value != null;
     final hPad = widget.dialog ? 22.0 : 18.0;
 
     final header = Padding(
@@ -129,6 +147,28 @@ class _MojianCategorySheetState extends ConsumerState<MojianCategorySheet> {
                 ),
               ],
             ),
+          ),
+          if (pinnedIds.isNotEmpty)
+            IconButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => const PinnedCategoryEditPage(),
+                  ),
+                );
+              },
+              icon: Icon(Symbols.swap_vert_rounded, color: mj.ink2),
+              tooltip: l10n.category_editMyCategories,
+            ),
+          // 完整的分类侧栏:标签页签、父子分类树、长按菜单
+          IconButton(
+            onPressed: () {
+              Navigator.of(context).pop();
+              CategoryDrawerHost.open();
+            },
+            icon: Icon(Symbols.menu_open_rounded, color: mj.ink2),
+            tooltip: l10n.topics_browseCategories,
           ),
           IconButton(
             onPressed: () => Navigator.of(context).maybePop(),
@@ -256,6 +296,9 @@ class _MojianCategorySheetState extends ConsumerState<MojianCategorySheet> {
                       pinned: pinnedSet.contains(c.id),
                       selected: c.id == widget.currentCategoryId,
                       onTap: () => widget.onSelect(c),
+                      onLongPress: isLoggedIn
+                          ? () => openCategorySubscriptionSheet(context, c)
+                          : null,
                       onTogglePin: () {
                         final notifier = ref.read(
                           pinnedCategoriesProvider.notifier,
@@ -301,7 +344,7 @@ class _MojianCategorySheetState extends ConsumerState<MojianCategorySheet> {
     return Material(
       color: mj.paper3,
       child: Column(
-        mainAxisSize: MainAxisSize.min,
+        mainAxisSize: widget.dialog ? MainAxisSize.min : MainAxisSize.max,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           if (!widget.dialog)
@@ -334,6 +377,7 @@ class _CategoryTile extends StatelessWidget {
     required this.selected,
     required this.onTap,
     required this.onTogglePin,
+    this.onLongPress,
   });
 
   final Category category;
@@ -343,6 +387,9 @@ class _CategoryTile extends StatelessWidget {
   final bool selected;
   final VoidCallback onTap;
   final VoidCallback onTogglePin;
+
+  /// 长按:订阅级别(登录后)
+  final VoidCallback? onLongPress;
 
   @override
   Widget build(BuildContext context) {
@@ -363,6 +410,7 @@ class _CategoryTile extends StatelessWidget {
       ),
       child: InkWell(
         onTap: onTap,
+        onLongPress: onLongPress,
         child: IntrinsicHeight(
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -376,6 +424,15 @@ class _CategoryTile extends StatelessWidget {
                     children: [
                       Row(
                         children: [
+                          // 受限分类(仅部分人可见)标一把锁,与侧栏一致
+                          if (category.readRestricted) ...[
+                            Icon(
+                              Symbols.lock_rounded,
+                              size: 13,
+                              color: mj.ink3,
+                            ),
+                            const SizedBox(width: 4),
+                          ],
                           Expanded(
                             child: Text(
                               category.name,

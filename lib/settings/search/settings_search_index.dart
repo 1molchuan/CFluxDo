@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:app_icons/app_icons.dart';
 
 import '../../l10n/s.dart';
@@ -39,7 +40,13 @@ class SettingsSearchResult {
 }
 
 /// 构建全局搜索索引
-List<SettingsSearchResult> buildSearchIndex(BuildContext context) {
+///
+/// 与页面渲染同一套可见性：整组 [SettingsGroup.visibleWhen] 与单项
+/// [SettingsModel.isVisible] 为假的不进索引，免得搜到点进去却找不到的项。
+List<SettingsSearchResult> buildSearchIndex(
+  BuildContext context,
+  WidgetRef ref,
+) {
   final l10n = context.l10n;
 
   List<SettingsSearchResult> fromGroups(
@@ -50,18 +57,18 @@ List<SettingsSearchResult> buildSearchIndex(BuildContext context) {
     required Widget Function({String? highlightId}) pageBuilder,
   }) {
     return groups
+        .where((g) => g.isVisible(ref))
         .expand((g) => g.items)
-        .where((item) {
-          if (item is PlatformConditionalModel) return item.shouldShow;
-          return true;
-        })
-        .map((item) => SettingsSearchResult(
-              model: item is PlatformConditionalModel ? item.inner : item,
-              categoryName: categoryName,
-              categoryIcon: categoryIcon,
-              categoryColor: categoryColor,
-              pageBuilder: pageBuilder,
-            ))
+        .where((item) => item.isVisible(ref))
+        .map(
+          (item) => SettingsSearchResult(
+            model: item is PlatformConditionalModel ? item.inner : item,
+            categoryName: categoryName,
+            categoryIcon: categoryIcon,
+            categoryColor: categoryColor,
+            pageBuilder: pageBuilder,
+          ),
+        )
         .toList();
   }
 

@@ -15,6 +15,8 @@ import 'package:m3e_ui/m3e_ui.dart';
 import '../widgets/update_dialog.dart';
 import 'app_logs_page.dart';
 import 'perf_diagnostics_page.dart';
+import '../theme/mojian_theme.dart';
+import '../widgets/common/mojian_section_label.dart';
 
 class AboutPage extends StatefulWidget {
   const AboutPage({super.key});
@@ -378,6 +380,12 @@ class _AboutPageState extends State<AboutPage> {
   }
 
   Widget _buildSectionTitle(BuildContext context, String title) {
+    if (Theme.of(context).extension<MojianTokens>() != null) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+        child: MojianSectionLabel(title),
+      );
+    }
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
       child: Text(

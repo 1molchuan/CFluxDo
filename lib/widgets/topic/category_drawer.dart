@@ -435,37 +435,7 @@ class _CategoryDrawerState extends ConsumerState<CategoryDrawer> {
   /// 分类订阅设置：拉起级别面板（乐观更新 + 失败回退）。
   /// 侧栏已全局化（宿主是 AdaptiveScaffold），订阅逻辑自持。
   void _openSubscriptionSheet(Category category) {
-    final overrides = ref.read(categoryNotificationOverridesProvider);
-    final effectiveLevel = overrides[category.id] ?? category.notificationLevel;
-    final level = CategoryNotificationLevel.fromValue(effectiveLevel);
-    showCategoryNotificationLevelSheet(context, level, (newLevel) async {
-      final oldLevel = effectiveLevel;
-      // 乐观更新
-      ref.read(categoryNotificationOverridesProvider.notifier).state = {
-        ...ref.read(categoryNotificationOverridesProvider),
-        category.id: newLevel.value,
-      };
-      try {
-        final service = ref.read(discourseServiceProvider);
-        await service.setCategoryNotificationLevel(category.id, newLevel.value);
-      } catch (_) {
-        // 失败时回退
-        if (mounted) {
-          final current = ref.read(categoryNotificationOverridesProvider);
-          if (oldLevel != null) {
-            ref.read(categoryNotificationOverridesProvider.notifier).state = {
-              ...current,
-              category.id: oldLevel,
-            };
-          } else {
-            ref
-                .read(categoryNotificationOverridesProvider.notifier)
-                .state = Map.from(current)
-              ..remove(category.id);
-          }
-        }
-      }
-    });
+    openCategorySubscriptionSheet(context, category);
   }
 
   @override
@@ -1306,4 +1276,37 @@ Widget _colorDot(Color color, double size) {
     height: size,
     decoration: BoxDecoration(color: color, shape: BoxShape.circle),
   );
+}
+
+/// 分类订阅级别面板（侧栏长按菜单、墨笺分类面板长按共用）：乐观更新本地
+/// 覆盖表，请求失败回退。
+///
+/// 读写都走 [ProviderContainer]（不收 WidgetRef）：墨笺分类面板可能在请求
+/// 返回前就关掉了（比如接着点了某个分类），此时 ref 已随面板销毁，失败也要
+/// 能把乐观值退回去。
+void openCategorySubscriptionSheet(BuildContext context, Category category) {
+  final container = ProviderScope.containerOf(context, listen: false);
+  final overrides = container.read(categoryNotificationOverridesProvider);
+  final effectiveLevel = overrides[category.id] ?? category.notificationLevel;
+  final level = CategoryNotificationLevel.fromValue(effectiveLevel);
+  showCategoryNotificationLevelSheet(context, level, (newLevel) async {
+    final oldLevel = effectiveLevel;
+    final notifier = container.read(
+      categoryNotificationOverridesProvider.notifier,
+    );
+    // 乐观更新
+    notifier.state = {...notifier.state, category.id: newLevel.value};
+    try {
+      final service = container.read(discourseServiceProvider);
+      await service.setCategoryNotificationLevel(category.id, newLevel.value);
+    } catch (_) {
+      // 失败时回退
+      final current = notifier.state;
+      if (oldLevel != null) {
+        notifier.state = {...current, category.id: oldLevel};
+      } else {
+        notifier.state = Map.from(current)..remove(category.id);
+      }
+    }
+  });
 }

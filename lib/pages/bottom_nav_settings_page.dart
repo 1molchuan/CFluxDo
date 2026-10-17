@@ -22,6 +22,8 @@ import '../settings/settings_renderer.dart';
 import '../utils/dialog_utils.dart';
 import '../utils/responsive.dart';
 import 'package:m3e_ui/m3e_ui.dart';
+import '../theme/mojian_theme.dart';
+import '../widgets/common/mojian_section_label.dart';
 
 /// 底栏设置页
 ///
@@ -312,11 +314,15 @@ class _SectionHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final mojian = theme.extension<MojianTokens>() != null;
     return Padding(
       padding: const EdgeInsets.fromLTRB(24, 8, 24, 6),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          if (mojian)
+            MojianSectionLabel(title)
+          else
           Text(
             title,
             style: theme.textTheme.titleSmall?.copyWith(

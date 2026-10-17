@@ -794,7 +794,7 @@ class TopicCardLayout {
     )
       ..pushStyle(_tStyle(
         messageStyle ? baseText : labelSmall,
-        color: mjRow ? mj.ink2 : authorColor,
+        color: mjRow ? (isFullyRead ? mj.ink3 : mj.ink2) : authorColor,
         fontSize: authorFontSize,
         weight: mjRow ? FontWeight.w400 : authorWeight,
       ))
@@ -812,9 +812,10 @@ class TopicCardLayout {
     final effCategory = category; // 分类是骨架字段,恒定显示
     final effTags = style.showTags ? tags : const <Tag>[];
     if (!messageStyle && (effCategory != null || effTags.isNotEmpty)) {
-      final dimF = isFullyRead && !mjRow ? 0.55 : 1.0;
+      // 已读行整体退后:经典降透明度;墨笺分类名转 ink3、方点淡一档
+      final dimF = isFullyRead ? (mjRow ? 0.6 : 0.55) : 1.0;
       final lineColor = mjRow
-          ? mj.ink2
+          ? (isFullyRead ? mj.ink3 : mj.ink2)
           : metaColor.withValues(alpha: metaColor.a * dimF);
       final b = ui.ParagraphBuilder(
         _pStyle(fontSize: labelSmall.fontSize ?? 11, maxLines: 1),
@@ -1301,8 +1302,13 @@ class TopicCardLayout {
     final mj = theme.extension<MojianTokens>();
     var base = mj?.ink3 ?? scheme.onSurfaceVariant.withValues(alpha: 0.75);
     if (isFullyRead && mj == null) base = base.withValues(alpha: base.a * 0.55);
-    // 墨笺:热度统一用强调色,不用橙色阶
-    var heat = heatColor == null ? base : (mj?.accent ?? heatColor);
+    // 墨笺:热度不用橙色阶,改为强调色的三档浓淡(最低档偏墨灰),已读整体退半档
+    var heat = heatColor == null ? base : (mj == null ? heatColor : base);
+    if (heatColor != null && mj != null) {
+      final tier = _heatColors.indexOf(heatColor);
+      final mix = isFullyRead ? const [0.25, 0.5, 0.7] : const [0.5, 0.8, 1.0];
+      heat = Color.lerp(base, mj.accent, mix[tier < 0 ? 2 : tier])!;
+    }
     if (heatColor != null && isFullyRead && mj == null) {
       heat = heatColor.withValues(alpha: heatColor.a * 0.55);
     }
@@ -1340,12 +1346,19 @@ class TopicCardLayout {
     }
   }
 
+  /// 回复热度色阶,由低到高
+  static const _heatColors = [
+    Color(0xFF9B764F),
+    Color(0xFFCF7721),
+    Color(0xFFFE7A15),
+  ];
+
   static Color? _replyHeatColor(Topic topic) {
     if (topic.postsCount < 10) return null;
     final ratio = topic.likeCount / topic.postsCount;
-    if (ratio > 2.0) return const Color(0xFFFE7A15);
-    if (ratio > 1.0) return const Color(0xFFCF7721);
-    if (ratio > 0.5) return const Color(0xFF9B764F);
+    if (ratio > 2.0) return _heatColors[2];
+    if (ratio > 1.0) return _heatColors[1];
+    if (ratio > 0.5) return _heatColors[0];
     return null;
   }
 

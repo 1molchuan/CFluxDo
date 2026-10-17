@@ -1020,7 +1020,16 @@ class _SearchPageState extends ConsumerState<SearchPage> {
                   onPressed: _isClearingRecentSearches
                       ? null
                       : _clearRecentSearches,
-                  child: Text(context.l10n.common_clear),
+                  child: _isClearingRecentSearches
+                      ? SizedBox(
+                          width: 12,
+                          height: 12,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        )
+                      : Text(context.l10n.common_clear),
                 ),
               ),
             )

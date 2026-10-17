@@ -262,7 +262,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
 
   /// 搜索结果（自动从数据声明派生）
   Widget _buildSearchResults(ThemeData theme) {
-    final allResults = buildSearchIndex(context);
+    final allResults = buildSearchIndex(context, ref);
     final q = _query.toLowerCase();
     final filtered = allResults.where((r) => r.model.matchesQuery(q)).toList();
 

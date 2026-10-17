@@ -12,6 +12,7 @@ import '../utils/responsive.dart';
 import '../widgets/topic/painted_topic_card.dart';
 import '../widgets/topic/topic_card_layout.dart';
 import '../theme/mojian_theme.dart';
+import '../widgets/common/mojian_section_label.dart';
 
 /// 话题卡片样式设置页
 ///
@@ -349,6 +350,9 @@ class _TopicCardStyleSettingsPageState
   }
 
   Widget _buildSectionHeader(ThemeData theme, String title, IconData icon) {
+    if (theme.extension<MojianTokens>() != null) {
+      return MojianSectionLabel(title);
+    }
     return Row(
       children: [
         Icon(icon, size: 18, color: theme.colorScheme.primary),

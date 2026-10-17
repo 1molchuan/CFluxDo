@@ -391,7 +391,7 @@ class MasterDetailEmptyState extends StatelessWidget {
     final theme = Theme.of(context);
     final mj = theme.extension<MojianTokens>();
     if (mj != null) {
-      // 墨笺:一团洇开的淡墨代替图标,文案用宋体、字距拉开
+      // 墨笺:一团洇开的淡墨托着淡墨色图标,文案用宋体、字距拉开
       return Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -410,6 +410,12 @@ class MasterDetailEmptyState extends StatelessWidget {
                   ],
                   stops: const [0, 0.5, 1],
                 ),
+              ),
+              alignment: Alignment.center,
+              child: Icon(
+                icon,
+                size: iconSize * 0.6,
+                color: mj.ink3.withValues(alpha: 0.7),
               ),
             ),
             const SizedBox(height: 18),

@@ -795,16 +795,21 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                 child: InkWell(
                   onTap: actions[i].onTap,
                   child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    padding: const EdgeInsets.symmetric(
+                      vertical: 14,
+                      horizontal: 4,
+                    ),
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Icon(actions[i].icon, size: 22, color: mj.ink2),
                         const SizedBox(height: 6),
+                        // 与经典宫格一致:长标签折两行,不截断
                         Text(
                           actions[i].title,
-                          maxLines: 1,
+                          maxLines: 2,
                           overflow: TextOverflow.ellipsis,
+                          textAlign: TextAlign.center,
                           style: TextStyle(fontSize: 12, color: mj.ink2),
                         ),
                       ],

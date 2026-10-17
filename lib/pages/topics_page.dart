@@ -2557,21 +2557,25 @@ class _MojianCategoryRow extends StatelessWidget {
   static const _gap = 8.0;
   static const _fontSize = 12.5;
 
-  /// 文字宽度缓存(按字号缩放分组);标签切换动画每帧重建,不重复排版
-  static final Map<(String, double), double> _widthCache = {};
+  /// 文字宽度缓存(按字体与缩放后的字号分组);标签切换动画每帧重建,不重复排版
+  static final Map<(String, String?, double), double> _widthCache = {};
 
-  static double _textWidth(String text, TextScaler scaler) {
-    final key = (text, scaler.scale(_fontSize));
+  /// 按实际渲染字样测宽:合并 DefaultTextStyle(用户选的正文字体、字距),
+  /// 否则测出来的宽度与真正排出来的不一致,装填会估小
+  static double _textWidth(String text, TextStyle base, TextScaler scaler) {
+    final key = (text, base.fontFamily, scaler.scale(_fontSize));
     final cached = _widthCache[key];
     if (cached != null) return cached;
     if (_widthCache.length > 256) _widthCache.clear();
     final painter = TextPainter(
       text: TextSpan(
         text: text,
-        style: const TextStyle(
-          fontSize: _fontSize,
-          height: 1.0,
-          fontWeight: FontWeight.w600,
+        style: base.merge(
+          const TextStyle(
+            fontSize: _fontSize,
+            height: 1.0,
+            fontWeight: FontWeight.w600,
+          ),
         ),
       ),
       textDirection: TextDirection.ltr,
@@ -2587,14 +2591,16 @@ class _MojianCategoryRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final l10n = context.l10n;
     final scaler = MediaQuery.textScalerOf(context);
+    final base = DefaultTextStyle.of(context).style;
     final labels = <String>[
       S.current.common_all,
       for (final id in pinnedIds) categoryMap?[id]?.name ?? '...',
     ];
     // 药丸宽 = 文字 + 左右内边距 12×2 + 描边;分类药丸多一个 7px 方点 + 6 间距
     double pillWidth(int i) =>
-        _textWidth(labels[i], scaler) + 26 + (i == 0 ? 0 : 13);
-    final moreWidth = _textWidth(l10n.category_categories, scaler) + 26 + 21;
+        _textWidth(labels[i], base, scaler) + 26 + (i == 0 ? 0 : 13);
+    final moreWidth =
+        _textWidth(l10n.category_categories, base, scaler) + 26 + 21;
 
     return LayoutBuilder(
       builder: (context, constraints) => AnimatedBuilder(
@@ -2622,14 +2628,13 @@ class _MojianCategoryRow extends StatelessWidget {
             shown.add(i);
           }
           final order = shown.toList()..sort();
-          return Padding(
-            padding: const EdgeInsets.symmetric(horizontal: _hPad),
-            child: Row(
-              children: [
-                for (final i in order)
-                  Padding(
+          // 连「全部」+ 当前分类都放不下(超长分类名 / 大字号 / 窄屏):
+          // 当前分类药丸让出空间、名字省略,行尾「分类」按钮始终可点
+          final tight = used > avail;
+          Widget pillAt(int i) => Padding(
                     padding: const EdgeInsets.only(right: _gap),
                     child: _MojianPill(
+                      ellipsize: tight && i == selected,
                       label: labels[i],
                       selected: i == selected,
                       dotColor: i == 0
@@ -2648,13 +2653,25 @@ class _MojianCategoryRow extends StatelessWidget {
                         }
                       },
                     ),
+                  );
+          return Padding(
+            padding: const EdgeInsets.symmetric(horizontal: _hPad),
+            child: Row(
+              children: [
+                for (final i in order)
+                  if (tight && i == selected)
+                    Flexible(child: pillAt(i))
+                  else
+                    pillAt(i),
+                if (!tight) const Spacer(),
+                Tooltip(
+                  message: l10n.topics_browseCategories,
+                  child: _MojianPill(
+                    label: l10n.category_categories,
+                    selected: false,
+                    isAction: true,
+                    onTap: onOpenSheet,
                   ),
-                const Spacer(),
-                _MojianPill(
-                  label: l10n.category_categories,
-                  selected: false,
-                  isAction: true,
-                  onTap: onOpenSheet,
                 ),
               ],
             ),
@@ -2674,7 +2691,11 @@ class _MojianPill extends StatelessWidget {
     this.isAction = false,
     this.labelKey,
     this.labelOpacity = 1.0,
+    this.ellipsize = false,
   });
+
+  /// 放不下时名字单行省略(外层须给有界宽度,如 Flexible)
+  final bool ellipsize;
 
   final String label;
   final bool selected;
@@ -2691,6 +2712,22 @@ class _MojianPill extends StatelessWidget {
     final theme = Theme.of(context);
     final mj = theme.extension<MojianTokens>()!;
     final fg = selected ? mj.paper : mj.ink2;
+    final labelText = Opacity(
+      opacity: labelOpacity,
+      child: Text(
+        label,
+        key: labelKey,
+        maxLines: 1,
+        softWrap: false,
+        overflow: ellipsize ? TextOverflow.ellipsis : TextOverflow.visible,
+        style: TextStyle(
+          fontSize: _MojianCategoryRow._fontSize,
+          height: 1.0,
+          fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+          color: fg,
+        ),
+      ),
+    );
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 5),
       child: SizedBox(
@@ -2735,19 +2772,9 @@ class _MojianPill extends StatelessWidget {
                   ),
                   const SizedBox(width: 6),
                 ],
-                Opacity(
-                  opacity: labelOpacity,
-                  child: Text(
-                    label,
-                    key: labelKey,
-                    style: TextStyle(
-                      fontSize: _MojianCategoryRow._fontSize,
-                      height: 1.0,
-                      fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
-                      color: fg,
-                    ),
-                  ),
-                ),
+                // 只有外层给了有界宽度(ellipsize)时才能用 Flexible,
+                // 否则无界宽度下的 flex 子项会触发 RenderFlex 断言
+                if (ellipsize) Flexible(child: labelText) else labelText,
               ],
             ),
           ),

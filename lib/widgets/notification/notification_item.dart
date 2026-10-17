@@ -266,9 +266,10 @@ class NotificationItem extends StatelessWidget {
                           ),
                         ],
                       ),
+                // 已读的类型角标退成灰(墨笺用 ink3),未读才带类型色
                 child: _buildBadgeIcon(
-                  notification.read && mj == null
-                      ? colorScheme.onSurfaceVariant
+                  notification.read
+                      ? (mj?.ink3 ?? colorScheme.onSurfaceVariant)
                       : iconColor,
                 ),
               ),
