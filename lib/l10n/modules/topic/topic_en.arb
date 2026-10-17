@@ -173,5 +173,8 @@
   "topic_keywordFilter_hiddenCount": "{count} topics hidden",
   "topic_keywordFilter_manage": "Manage",
   "topic_cardNewReplies": "{count} new",
-  "topicDetail_likesLabel": "likes"
+  "topicDetail_likesLabel": "likes",
+  "topicDetail_writeReply": "Write a reply…",
+  "topicDetail_likeTopic": "Like this topic",
+  "topicDetail_bookmarkTopic": "Bookmark"
 }

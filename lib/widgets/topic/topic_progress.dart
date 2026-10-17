@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:app_icons/app_icons.dart';
 import 'package:flutter/services.dart';
+import '../../theme/mojian_theme.dart';
 import '../../utils/dialog_utils.dart';
 import '../../../../../l10n/s.dart';
 
@@ -234,6 +235,8 @@ class _TopicTimelineSheetState extends State<TopicTimelineSheet> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    // 墨笺:纸色底、细线轨道 + 强调色进度、空心圆钮,数字用宋体墨色
+    final mj = theme.extension<MojianTokens>();
     final percent = _totalCount > 1
         ? (_selectedIndex - 1) / (_totalCount - 1)
         : 0.0;
@@ -251,8 +254,10 @@ class _TopicTimelineSheetState extends State<TopicTimelineSheet> {
       child: Container(
         height: contentHeight,
         decoration: BoxDecoration(
-          color: theme.colorScheme.surface,
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+          color: mj?.paper3 ?? theme.colorScheme.surface,
+          borderRadius: BorderRadius.vertical(
+            top: Radius.circular(mj == null ? 28 : 20),
+          ),
         ),
         child: SafeArea(
         child: Column(
@@ -273,6 +278,7 @@ class _TopicTimelineSheetState extends State<TopicTimelineSheet> {
                   widget.title!,
                   style: theme.textTheme.titleMedium?.copyWith(
                     fontWeight: FontWeight.w600,
+                    fontFamily: mj == null ? null : MojianTokens.serifFamily,
                   ),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
@@ -313,8 +319,8 @@ class _TopicTimelineSheetState extends State<TopicTimelineSheet> {
                                       FilteringTextInputFormatter.digitsOnly,
                                     ],
                                     style: theme.textTheme.displayMedium?.copyWith(
-                                      color: theme.colorScheme.primary,
-                                      fontWeight: FontWeight.w900,
+                                      color: mj?.ink ?? theme.colorScheme.primary,
+                                      fontWeight: mj == null ? FontWeight.w900 : FontWeight.w700,
                                     ),
                                     decoration: InputDecoration(
                                       isDense: true,
@@ -355,8 +361,8 @@ class _TopicTimelineSheetState extends State<TopicTimelineSheet> {
                                   Text(
                                     '$_selectedIndex',
                                     style: theme.textTheme.displayMedium?.copyWith(
-                                      color: theme.colorScheme.primary,
-                                      fontWeight: FontWeight.w900,
+                                      color: mj?.ink ?? theme.colorScheme.primary,
+                                      fontWeight: mj == null ? FontWeight.w900 : FontWeight.w700,
                                     ),
                                   ),
                                   const SizedBox(width: 8),
@@ -431,7 +437,9 @@ class _TopicTimelineSheetState extends State<TopicTimelineSheet> {
                         builder: (context, constraints) {
                           const padding = 32.0;
                           final trackHeight = constraints.maxHeight - padding * 2;
-                          final handleSize = _isDragging ? 56.0 : 48.0;
+                          final handleSize = mj != null
+                              ? (_isDragging ? 26.0 : 22.0)
+                              : (_isDragging ? 56.0 : 48.0);
                           final scrollerTop = padding + (percent * trackHeight) - (handleSize / 2);
 
                           return GestureDetector(
@@ -445,26 +453,26 @@ class _TopicTimelineSheetState extends State<TopicTimelineSheet> {
                               children: [
                                 // 轨道背景
                                 Positioned(
-                                  right: 20,
+                                  right: mj == null ? 20 : 22,
                                   top: padding,
                                   bottom: padding,
                                   child: Container(
-                                    width: 6,
+                                    width: mj == null ? 6 : 1,
                                     decoration: BoxDecoration(
-                                      color: theme.colorScheme.surfaceContainerHighest,
+                                      color: mj?.ruleStrong ?? theme.colorScheme.surfaceContainerHighest,
                                       borderRadius: BorderRadius.circular(3),
                                     ),
                                   ),
                                 ),
                                 // 激活进度
                                 Positioned(
-                                  right: 20,
+                                  right: mj == null ? 20 : 21,
                                   top: padding,
                                   height: percent * trackHeight,
                                   child: Container(
-                                    width: 6,
+                                    width: mj == null ? 6 : 3,
                                     decoration: BoxDecoration(
-                                      color: theme.colorScheme.primary.withValues(alpha:0.5),
+                                      color: mj?.accent ?? theme.colorScheme.primary.withValues(alpha:0.5),
                                       borderRadius: BorderRadius.circular(3),
                                     ),
                                   ),
@@ -485,9 +493,11 @@ class _TopicTimelineSheetState extends State<TopicTimelineSheet> {
                                 AnimatedPositioned(
                                   duration: _isDragging ? Duration.zero : const Duration(milliseconds: 200),
                                   curve: Curves.easeOutCubic,
-                                  right: 0,
+                                  right: mj == null ? 0 : 22 - handleSize / 2 + 0.5,
                                   top: scrollerTop,
-                                  child: _buildHandle(theme),
+                                  child: mj == null
+                                      ? _buildHandle(theme)
+                                      : _buildMojianHandle(mj, handleSize),
                                 ),
                               ],
                             ),
@@ -519,7 +529,9 @@ class _TopicTimelineSheetState extends State<TopicTimelineSheet> {
                       onPressed: _commitJump,
                       style: FilledButton.styleFrom(
                         padding: const EdgeInsets.symmetric(vertical: 16),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                        shape: mj != null
+                            ? const StadiumBorder()
+                            : RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                       ),
                       child: Text(S.current.topic_jump, style: const TextStyle(fontWeight: FontWeight.w600)),
                     ),
@@ -552,6 +564,20 @@ class _TopicTimelineSheetState extends State<TopicTimelineSheet> {
             spreadRadius: 1,
           ),
         ],
+      ),
+    );
+  }
+
+  /// 墨笺圆钮:纸色空心圆 + 强调色描边,拖动时略放大
+  Widget _buildMojianHandle(MojianTokens mj, double size) {
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 160),
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        color: mj.paper,
+        shape: BoxShape.circle,
+        border: Border.all(color: mj.accent, width: 2.5),
       ),
     );
   }

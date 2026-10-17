@@ -4,12 +4,16 @@ import 'package:app_icons/app_icons.dart';
 import '../../../models/topic.dart';
 import '../../../providers/preferences_provider.dart';
 import '../../../providers/topic_detail/topic_view_mode.dart';
+import '../../../theme/mojian_theme.dart';
+import '../../../utils/responsive.dart';
 import '../../../widgets/topic/topic_progress.dart';
+import 'mojian_reader_chrome.dart';
 import 'topic_bottom_bar.dart';
 import 'topic_progress_gestures.dart';
 
 /// 话题详情页浮层
-/// 包含进度栏、底部操作栏和悬浮回复按钮
+/// 包含进度栏、底部操作栏和悬浮回复按钮;墨笺下换成阅读条(窄栏)或
+/// 时间轴(宽栏),见 [MojianReaderBar] / [MojianTimeline]。
 ///
 /// 滚动中高频变化的状态一律走 ValueListenable 细粒度下沉,不要提升为
 /// 本组件的构造参数(那会整棵重建底栏 + FAB,实测单次 6~7ms):
@@ -40,6 +44,16 @@ class TopicDetailOverlay extends StatelessWidget {
   final VoidCallback? onCancelFilter;
   final VoidCallback? onShowNestedView;
 
+  // —— 以下只有墨笺的阅读条/时间轴用 ——
+  /// 首帖是否已赞;null = 不显示赞(首帖不在窗口里 / 自己的帖子)
+  final bool? firstPostLiked;
+  final bool bookmarked;
+  final VoidCallback? onLikeFirstPost;
+  final VoidCallback? onBookmark;
+
+  /// 时间轴拖动/点击后跳到第 n 个(1 起)stream 位置
+  final ValueChanged<int>? onSeekIndex;
+
   const TopicDetailOverlay({
     super.key,
     required this.showBottomBarListenable,
@@ -64,11 +78,61 @@ class TopicDetailOverlay extends StatelessWidget {
     this.onShowTopLevelReplies,
     this.onCancelFilter,
     this.onShowNestedView,
+    this.firstPostLiked,
+    this.bookmarked = false,
+    this.onLikeFirstPost,
+    this.onBookmark,
+    this.onSeekIndex,
   });
+
+  TopicBottomBar _bottomBar({bool docked = false}) => TopicBottomBar(
+    onScrollToTop: onScrollToTop,
+    onShare: onShare,
+    onShareAsImage: onShareAsImage,
+    onExport: onExport,
+    onOpenInBrowser: onOpenInBrowser,
+    hasSummary: detail.hasSummary,
+    isPostVoting: detail.isPostVoting,
+    viewMode: viewMode,
+    isNestedMode: isNestedMode,
+    isLoading: isLoading,
+    isPrivateMessage: detail.isPrivateMessage,
+    onShowTopReplies: onShowTopReplies,
+    onShowByActivity: onShowByActivity,
+    onShowAuthorOnly: onShowAuthorOnly,
+    onShowTopLevelReplies: onShowTopLevelReplies,
+    onCancelFilter: onCancelFilter,
+    onShowNestedView: onShowNestedView,
+    docked: docked,
+  );
+
+  Widget _replyFab(double bottomPadding) => ValueListenableBuilder<bool>(
+    valueListenable: showBottomBarListenable,
+    child: FloatingActionButton(
+      heroTag: 'replyTopic',
+      onPressed: onReply,
+      child: const Icon(Symbols.reply_rounded),
+    ),
+    builder: (context, showBottomBar, child) => AnimatedPositioned(
+      key: const ValueKey('fab_reply'),
+      duration: const Duration(milliseconds: 200),
+      right: 16,
+      bottom: showBottomBar
+          ? bottomPadding + (80 - bottomPadding - 56) / 2
+          : 16 + bottomPadding,
+      child: child!,
+    ),
+  );
 
   @override
   Widget build(BuildContext context) {
     final bottomPadding = MediaQuery.of(context).padding.bottom;
+    if (Theme.of(context).extension<MojianTokens>() != null) {
+      return LayoutBuilder(
+        builder: (context, constraints) =>
+            _buildMojian(context, constraints, bottomPadding),
+      );
+    }
 
     // 三块内容都不依赖 showBottomBar,只有 AnimatedPositioned 的 bottom
     // 依赖 —— 用 VLB 的 child 参数把内容缓存住,滚动方向切换(底栏
@@ -118,25 +182,7 @@ class TopicDetailOverlay extends StatelessWidget {
         // 底部操作栏
         ValueListenableBuilder<bool>(
           valueListenable: showBottomBarListenable,
-          child: TopicBottomBar(
-            onScrollToTop: onScrollToTop,
-            onShare: onShare,
-            onShareAsImage: onShareAsImage,
-            onExport: onExport,
-            onOpenInBrowser: onOpenInBrowser,
-            hasSummary: detail.hasSummary,
-            isPostVoting: detail.isPostVoting,
-            viewMode: viewMode,
-            isNestedMode: isNestedMode,
-            isLoading: isLoading,
-            isPrivateMessage: detail.isPrivateMessage,
-            onShowTopReplies: onShowTopReplies,
-            onShowByActivity: onShowByActivity,
-            onShowAuthorOnly: onShowAuthorOnly,
-            onShowTopLevelReplies: onShowTopLevelReplies,
-            onCancelFilter: onCancelFilter,
-            onShowNestedView: onShowNestedView,
-          ),
+          child: _bottomBar(),
           builder: (context, showBottomBar, child) => AnimatedPositioned(
             key: const ValueKey('bottom_bar'),
             duration: const Duration(milliseconds: 200),
@@ -147,24 +193,98 @@ class TopicDetailOverlay extends StatelessWidget {
           ),
         ),
         // 悬浮回复按钮
-        if (isLoggedIn)
+        if (isLoggedIn) _replyFab(bottomPadding),
+      ],
+    );
+  }
+
+  /// 墨笺:窄栏 = 常驻阅读条,工具行(回到顶部/筛选/分享/浏览器)在上滑时
+  /// 从阅读条背后升起;宽栏 = 正文右侧时间轴,工具行仍从底边滑入。
+  Widget _buildMojian(
+    BuildContext context,
+    BoxConstraints constraints,
+    double bottomPadding,
+  ) {
+    final mode = mojianReaderModeFor(context, constraints.maxWidth);
+    if (mode == MojianReaderMode.bar) {
+      final barHeight = MojianReaderBar.height + bottomPadding;
+      return Stack(
+        children: [
           ValueListenableBuilder<bool>(
             valueListenable: showBottomBarListenable,
-            child: FloatingActionButton(
-              heroTag: 'replyTopic',
-              onPressed: onReply,
-              child: const Icon(Symbols.reply_rounded),
-            ),
+            child: _bottomBar(docked: true),
             builder: (context, showBottomBar, child) => AnimatedPositioned(
-              key: const ValueKey('fab_reply'),
+              key: const ValueKey('bottom_bar'),
               duration: const Duration(milliseconds: 200),
-              right: 16,
+              left: 0,
+              right: 0,
               bottom: showBottomBar
-                  ? bottomPadding + (80 - bottomPadding - 56) / 2
-                  : 16 + bottomPadding,
+                  ? barHeight
+                  : barHeight - TopicBottomBar.dockedHeight,
               child: child!,
             ),
           ),
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: MojianReaderBar(
+              streamIndexListenable: streamIndexListenable,
+              totalCount: totalCount,
+              isLoggedIn: isLoggedIn,
+              showFloor: !isNestedMode,
+              liked: firstPostLiked,
+              bookmarked: bookmarked,
+              onReply: onReply,
+              onLike: onLikeFirstPost ?? () {},
+              onBookmark: onBookmark ?? () {},
+              onProgressTap: onProgressTap,
+              onProgressGesture: onProgressGesture,
+            ),
+          ),
+        ],
+      );
+    }
+
+    final width = constraints.maxWidth;
+    final contentWidth = width < Breakpoints.maxContentWidth
+        ? width
+        : Breakpoints.maxContentWidth;
+    // 轨道高度随可用高度伸缩:扣掉顶距、日期、两个按钮与底部工具行
+    final trackHeight = (constraints.maxHeight - 380).clamp(120.0, 280.0);
+    return Stack(
+      children: [
+        ValueListenableBuilder<bool>(
+          valueListenable: showBottomBarListenable,
+          child: _bottomBar(),
+          builder: (context, showBottomBar, child) => AnimatedPositioned(
+            key: const ValueKey('bottom_bar'),
+            duration: const Duration(milliseconds: 200),
+            left: 0,
+            right: 0,
+            bottom: showBottomBar ? 0 : -80,
+            child: child!,
+          ),
+        ),
+        if (!isNestedMode)
+          Positioned(
+            left: (width + contentWidth) / 2 + kMojianTimelineGap,
+            top: 96,
+            child: MojianTimeline(
+              streamIndexListenable: streamIndexListenable,
+              totalCount: totalCount,
+              startDate: detail.createdAt,
+              endDate: detail.lastPostedAt,
+              isLoggedIn: isLoggedIn,
+              bookmarked: bookmarked,
+              trackHeight: trackHeight,
+              onSeekIndex: onSeekIndex ?? (_) {},
+              onReply: onReply,
+              onBookmark: onBookmark ?? () {},
+            ),
+          )
+        else if (isLoggedIn)
+          _replyFab(bottomPadding),
       ],
     );
   }

@@ -287,5 +287,8 @@
       }
     }
   },
-  "topicDetail_likesLabel": "讚"
+  "topicDetail_likesLabel": "讚",
+  "topicDetail_writeReply": "寫回覆…",
+  "topicDetail_likeTopic": "讚好這個話題",
+  "topicDetail_bookmarkTopic": "書籤"
 }

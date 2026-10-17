@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:app_icons/app_icons.dart';
 import '../../../l10n/s.dart';
 import '../../../providers/topic_detail/topic_view_mode.dart';
+import '../../../theme/mojian_theme.dart';
 import 'package:common_ui/common_ui.dart';
 
 /// 话题详情页底部操作栏
@@ -24,6 +25,12 @@ class TopicBottomBar extends StatelessWidget {
   final VoidCallback? onShowNestedView;
   final bool isPrivateMessage;
 
+  /// 墨笺窄栏:叠在常驻阅读条上方,只占一行、不带底部安全区
+  final bool docked;
+
+  /// [docked] 时的高度
+  static const double dockedHeight = 44;
+
   const TopicBottomBar({
     super.key,
     this.onScrollToTop,
@@ -43,6 +50,7 @@ class TopicBottomBar extends StatelessWidget {
     this.onShowTopLevelReplies,
     this.onCancelFilter,
     this.onShowNestedView,
+    this.docked = false,
   });
 
   bool get _hasActiveFilter => viewMode.isFiltered || isNestedMode;
@@ -51,12 +59,14 @@ class TopicBottomBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final bottomPadding = MediaQuery.of(context).padding.bottom;
+    final mj = theme.extension<MojianTokens>();
 
     return Container(
-      height: 80,
-      padding: EdgeInsets.only(bottom: bottomPadding),
+      height: docked ? dockedHeight : 80,
+      padding: EdgeInsets.only(bottom: docked ? 0 : bottomPadding),
       decoration: BoxDecoration(
         color: theme.colorScheme.surface,
+        border: mj == null ? null : Border(top: BorderSide(color: mj.rule)),
       ),
       child: Row(
         children: [

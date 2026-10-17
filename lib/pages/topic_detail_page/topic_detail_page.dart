@@ -33,6 +33,7 @@ import '../../utils/responsive.dart';
 import '../../utils/share_utils.dart';
 import '../../providers/preferences_provider.dart';
 import '../../providers/theme_provider.dart';
+import '../../theme/mojian_theme.dart';
 import '../reading_settings_page.dart';
 import '../../providers/selected_topic_provider.dart';
 import '../../providers/discourse_providers.dart';
@@ -63,6 +64,8 @@ import 'controllers/topic_detail_controller.dart';
 import 'controllers/topic_toc_controller.dart';
 import 'widgets/nested_post_list.dart';
 import 'widgets/invite_private_message_dialog.dart';
+import 'widgets/mojian_reader_chrome.dart';
+import 'widgets/topic_bottom_bar.dart';
 import 'widgets/topic_detail_overlay.dart';
 import 'widgets/topic_post_list.dart';
 import 'widgets/topic_toc_panel.dart';
@@ -1942,6 +1945,72 @@ class _TopicDetailPageState extends ConsumerState<TopicDetailPage>
     _handleProgressGesture(action, detail, notifier);
   }
 
+  /// 墨笺阅读条的「赞」状态:首帖已赞与否;首帖不在当前窗口(深链跳进来)、
+  /// 是自己的帖子或未登录时返回 null(阅读条不显示赞)。
+  bool? _readerFirstPostLiked(TopicDetail detail) {
+    final me = ref.read(currentUserProvider).value;
+    if (me == null) return null;
+    for (final post in detail.postStream.posts) {
+      if (post.postNumber != 1) continue;
+      if (post.username == me.username) return null;
+      return post.currentUserReaction != null;
+    }
+    return null;
+  }
+
+  bool _readerLikeBusy = false;
+
+  /// 阅读条「赞」:切换首帖的赞(已用其他表情回应则撤销该回应,与楼层页脚一致)
+  Future<void> _likeFirstPostForCurrent() async {
+    if (_readerLikeBusy) return;
+    final detail = ref.read(topicDetailProvider(_params)).value;
+    if (detail == null) return;
+    Post? first;
+    for (final post in detail.postStream.posts) {
+      if (post.postNumber == 1) {
+        first = post;
+        break;
+      }
+    }
+    if (first == null) return;
+    _readerLikeBusy = true;
+    unawaited(HapticFeedback.lightImpact());
+    try {
+      await _togglePostLike(first);
+    } finally {
+      _readerLikeBusy = false;
+    }
+  }
+
+  /// 阅读条 / 时间轴的「书签」:与更多菜单同一入口(先加书签再弹编辑面板)
+  void _bookmarkFromReaderChrome() {
+    final notifier = ref.read(topicDetailProvider(_params).notifier);
+    final traceId = createBookmarkEditTraceId();
+    writeBookmarkEditTrace(
+      phase: 'reader_chrome_tapped',
+      traceId: traceId,
+      source: 'topic_detail_reader_chrome',
+      message: '墨笺阅读条/时间轴触发编辑书签',
+      topicId: widget.topicId,
+    );
+    unawaited(
+      _handleBookmark(
+        notifier,
+        traceId: traceId,
+        source: 'topic_detail_reader_chrome',
+      ),
+    );
+  }
+
+  /// 时间轴拖动/点击:按 stream 序号(1 起)取帖子 ID 跳转
+  void _seekStreamIndexForCurrent(int index) {
+    final detail = ref.read(topicDetailProvider(_params)).value;
+    if (detail == null) return;
+    final stream = detail.postStream.stream;
+    if (index < 1 || index > stream.length) return;
+    unawaited(_jumpToPostByIdInTopic(stream[index - 1]));
+  }
+
   /// [TopicDetailOverlay] 的实例缓存(输入签名比对):见调用处注释。
   ({Object signature, Widget widget})? _overlayCache;
 
@@ -1952,6 +2021,9 @@ class _TopicDetailPageState extends ConsumerState<TopicDetailPage>
   ) {
     // Overlay 及其子树实际消费的全部低频输入;detail 对象本身不入签名
     // (它每次更新都是新实例),只取 Overlay 用到的字段。
+    // 墨笺阅读条/时间轴额外消费:首帖赞、话题书签、首末日期(都是低频)
+    final firstPostLiked = _readerFirstPostLiked(detail);
+    final bookmarked = _bookmarkEditTarget(detail) != null || detail.bookmarked;
     final signature = (
       isLoggedIn: isLoggedIn,
       totalCount: detail.postStream.stream.length,
@@ -1961,6 +2033,10 @@ class _TopicDetailPageState extends ConsumerState<TopicDetailPage>
       viewMode: notifier.viewMode,
       isNestedMode: _isNestedView,
       isLoading: _isSwitchingMode,
+      firstPostLiked: firstPostLiked,
+      bookmarked: bookmarked,
+      createdAt: detail.createdAt,
+      lastPostedAt: detail.lastPostedAt,
     );
     final cached = _overlayCache;
     if (cached != null && cached.signature == signature) {
@@ -1989,6 +2065,11 @@ class _TopicDetailPageState extends ConsumerState<TopicDetailPage>
       onShowTopLevelReplies: _handleShowTopLevelReplies,
       onCancelFilter: _handleCancelFilter,
       onShowNestedView: _toggleNestedView,
+      firstPostLiked: firstPostLiked,
+      bookmarked: bookmarked,
+      onLikeFirstPost: _likeFirstPostForCurrent,
+      onBookmark: _bookmarkFromReaderChrome,
+      onSeekIndex: _seekStreamIndexForCurrent,
     );
     _overlayCache = (signature: signature, widget: overlay);
     return overlay;
@@ -2005,8 +2086,17 @@ class _TopicDetailPageState extends ConsumerState<TopicDetailPage>
       Breakpoints.maxContentWidth +
       2 * (TopicTocSidePanel.expandedWidth + 12 + 16);
 
-  Widget _buildTocLayer(BuildContext context, bool panelVisible) {
+  /// [width] 只在墨笺下传(阅读区实际宽度):据此与阅读条/时间轴对齐摆位 ——
+  /// 浮动按钮叠在阅读条上方;时间轴占了右侧留白时,面板改放左侧留白。
+  Widget _buildTocLayer(
+    BuildContext context,
+    bool panelVisible, {
+    double? width,
+  }) {
     final bottomPadding = MediaQuery.of(context).padding.bottom;
+    final mojianMode = width == null
+        ? null
+        : mojianReaderModeFor(context, width);
     // 显隐门控(对齐 DiscoTOC:仅当前阅读位置是 1 楼时可见,
     // 滚过 1 楼即隐、回到 1 楼复显;点击跳转途中 isJumping 冻结防闪隐)。
     // hasToc 由 _tocController 通知,eyeline 位置走 viewportPostNumberNotifier。
@@ -2034,15 +2124,28 @@ class _TopicDetailPageState extends ConsumerState<TopicDetailPage>
       return ValueListenableBuilder<bool>(
         valueListenable: _controller.showBottomBarNotifier,
         builder: (context, showBottomBar, _) {
-          // 回复 FAB 的底部定位公式(见 TopicDetailOverlay),TOC 叠其上
-          final replyBottom = showBottomBar
-              ? bottomPadding + (80 - bottomPadding - 56) / 2
-              : 16 + bottomPadding;
+          // 回复 FAB 的底部定位公式(见 TopicDetailOverlay),TOC 叠其上;
+          // 墨笺阅读条形态没有回复 FAB,叠在阅读条(及升起的工具行)上方
+          final double bottom;
+          if (mojianMode == MojianReaderMode.bar) {
+            bottom =
+                MojianReaderBar.height +
+                bottomPadding +
+                (showBottomBar ? TopicBottomBar.dockedHeight : 0) +
+                12;
+          } else if (mojianMode == MojianReaderMode.timeline) {
+            bottom = (showBottomBar ? 80 : 16 + bottomPadding) + 12;
+          } else {
+            final replyBottom = showBottomBar
+                ? bottomPadding + (80 - bottomPadding - 56) / 2
+                : 16 + bottomPadding;
+            bottom = replyBottom + 56 + 12;
+          }
           return AnimatedPositioned(
             key: const ValueKey('toc_fab'),
             duration: const Duration(milliseconds: 200),
             right: 16,
-            bottom: replyBottom + 56 + 12,
+            bottom: bottom,
             child: gateVisibility(
               child: TopicTocFab(
                 controller: _tocController,
@@ -2053,14 +2156,17 @@ class _TopicDetailPageState extends ConsumerState<TopicDetailPage>
         },
       );
     }
+    final onLeft = mojianMode == MojianReaderMode.timeline;
     return Positioned(
-      right: 12,
+      right: onLeft ? null : 12,
+      left: onLeft ? 12 : null,
       top: 88,
       // 不定 bottom:高度随目录内容自适应,上限扣除顶距与底部操作栏区
       child: gateVisibility(
         child: TopicTocSidePanel(
           controller: _tocController,
           visible: panelVisible,
+          onLeft: onLeft,
           maxHeight:
               MediaQuery.sizeOf(context).height -
               kToolbarHeight -
@@ -2788,7 +2894,23 @@ class _TopicDetailPageState extends ConsumerState<TopicDetailPage>
         // 话题目录(TOC):宽屏右侧常驻面板,窄屏浮动按钮(叠回复 FAB 上方)。
         // 嵌套视图自有滚动体系,不挂(对齐段映射只对平铺流有效)。
         if (detail != null && !isSearchMode && !_isNestedView)
-          _buildTocLayer(context, tocPanelVisible),
+          if (Theme.of(context).extension<MojianTokens>() != null)
+            // 墨笺:目录层要按阅读区实际宽度与阅读条/时间轴同口径摆位
+            Positioned.fill(
+              child: LayoutBuilder(
+                builder: (context, constraints) => Stack(
+                  children: [
+                    _buildTocLayer(
+                      context,
+                      tocPanelVisible,
+                      width: constraints.maxWidth,
+                    ),
+                  ],
+                ),
+              ),
+            )
+          else
+            _buildTocLayer(context, tocPanelVisible),
 
         // Expanded Header 相关组件（使用 ValueListenableBuilder 隔离状态变化）
         if (!isSearchMode)

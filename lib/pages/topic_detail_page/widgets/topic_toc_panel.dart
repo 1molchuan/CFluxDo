@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:fluxdo_render/fluxdo_render.dart';
 
 import '../../../l10n/s.dart';
+import '../../../theme/mojian_theme.dart';
 import '../../../utils/dialog_utils.dart';
 import '../controllers/topic_toc_controller.dart';
 
@@ -20,10 +21,14 @@ class TopicTocSidePanel extends StatelessWidget {
     required this.onToggleVisible,
     required this.onEntryTap,
     required this.maxHeight,
+    this.onLeft = false,
   });
 
   final TopicTocController controller;
   final bool visible;
+
+  /// 放在正文左侧留白(墨笺宽栏:右侧被时间轴占用),收起箭头朝左
+  final bool onLeft;
   final VoidCallback onToggleVisible;
   final ValueChanged<TocEntry> onEntryTap;
 
@@ -35,6 +40,8 @@ class TopicTocSidePanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    // 墨笺:平铺细框、纸色底,不要浮起的阴影卡片
+    final mj = theme.extension<MojianTokens>();
     return AnimatedContainer(
       duration: const Duration(milliseconds: 200),
       curve: Curves.easeOut,
@@ -42,9 +49,13 @@ class TopicTocSidePanel extends StatelessWidget {
       constraints: BoxConstraints(maxHeight: maxHeight),
       child: Card(
         margin: EdgeInsets.zero,
-        elevation: 1,
+        elevation: mj == null ? 1 : 0,
+        color: mj?.paper,
         clipBehavior: Clip.antiAlias,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(mj == null ? 14 : 8),
+          side: mj == null ? BorderSide.none : BorderSide(color: mj.rule),
+        ),
         child: visible
             ? OverflowBox(
                 // 展开内容恒按 expandedWidth 布局:宽度动画(44↔240)途中
@@ -64,7 +75,10 @@ class TopicTocSidePanel extends StatelessWidget {
                       title: context.l10n.topicDetail_toc,
                       entryCount: controller.tocData?.flat.length ?? 0,
                       trailing: IconButton(
-                        icon: const Icon(Icons.chevron_right, size: 20),
+                        icon: Icon(
+                          onLeft ? Icons.chevron_left : Icons.chevron_right,
+                          size: 20,
+                        ),
                         tooltip: context.l10n.topicDetail_tocCollapse,
                         visualDensity: VisualDensity.compact,
                         onPressed: onToggleVisible,

@@ -1828,6 +1828,7 @@ class TopicDetail {
   final int views;
   final int likeCount;
   final DateTime? createdAt;
+  final DateTime? lastPostedAt; // 最后一帖时间(墨笺时间轴底端)
   final bool visible;
   final int? lastReadPostNumber; // 最后阅读的帖子编号（从 API 获取）
   final int highestPostNumber; // 最高帖子编号（含小动作楼层，标记未读回退用）
@@ -1946,6 +1947,7 @@ class TopicDetail {
     this.views = 0,
     this.likeCount = 0,
     this.createdAt,
+    this.lastPostedAt,
     this.visible = true,
     this.lastReadPostNumber,
     this.highestPostNumber = 0,
@@ -2144,6 +2146,7 @@ class TopicDetail {
       views: json['views'] as int? ?? 0,
       likeCount: json['like_count'] as int? ?? 0,
       createdAt: TimeUtils.parseUtcTime(json['created_at'] as String?),
+      lastPostedAt: TimeUtils.parseUtcTime(json['last_posted_at'] as String?),
       visible: json['visible'] as bool? ?? true,
       lastReadPostNumber: json['last_read_post_number'] as int?,
       highestPostNumber: json['highest_post_number'] as int? ?? 0,
@@ -2278,6 +2281,7 @@ class TopicDetail {
     int? views,
     int? likeCount,
     DateTime? createdAt,
+    DateTime? lastPostedAt,
     bool? visible,
     int? lastReadPostNumber,
     int? highestPostNumber,
@@ -2329,6 +2333,7 @@ class TopicDetail {
       views: views ?? this.views,
       likeCount: likeCount ?? this.likeCount,
       createdAt: createdAt ?? this.createdAt,
+      lastPostedAt: lastPostedAt ?? this.lastPostedAt,
       visible: visible ?? this.visible,
       lastReadPostNumber: lastReadPostNumber ?? this.lastReadPostNumber,
       highestPostNumber: highestPostNumber ?? this.highestPostNumber,
