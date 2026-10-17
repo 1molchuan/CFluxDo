@@ -22,6 +22,8 @@ import 'notion_settings_page.dart';
 import 'preferences_page.dart';
 import 'reading_settings_page.dart';
 import 'shortcut_settings_page.dart';
+import '../theme/mojian_theme.dart';
+import '../widgets/common/mojian_menu_row.dart';
 
 class SettingsPage extends ConsumerStatefulWidget {
   static const double parallelMasterWidth = PaneBreakpoints.settingsMasterWidth;
@@ -417,6 +419,10 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
   }) {
     final theme = Theme.of(context);
     final finalIconColor = iconColor ?? theme.colorScheme.primary;
+    final mj = theme.extension<MojianTokens>();
+    if (mj != null) {
+      return MojianMenuRow(icon: icon, title: title, onTap: onTap);
+    }
 
     return InkWell(
       onTap: onTap,

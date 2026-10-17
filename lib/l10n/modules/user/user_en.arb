@@ -196,5 +196,7 @@
   "user_trustLevel2": "L2 Member",
   "user_trustLevel3": "L3 Regular",
   "user_trustLevel4": "L4 Leader",
-  "user_trustLevelUnknown": "Level {level}"
+  "user_trustLevelUnknown": "Level {level}",
+  "profile_sectionCommunity": "Community",
+  "profile_sectionTools": "Tools & settings"
 }

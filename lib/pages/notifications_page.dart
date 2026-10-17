@@ -12,6 +12,8 @@ import '../widgets/common/error_view.dart';
 import '../widgets/common/paged_list_footer.dart';
 import '../l10n/s.dart';
 import '../utils/blocked_user_filter.dart';
+import '../utils/time_utils.dart';
+import '../theme/mojian_theme.dart';
 
 /// 通知历史列表页面（独立分页，不受 messageBus 干扰）
 class NotificationsPage extends ConsumerStatefulWidget {
@@ -68,11 +70,13 @@ class _NotificationsPageState extends ConsumerState<NotificationsPage> {
     final systemAvatarTemplate = ref
         .watch(systemUserAvatarTemplateProvider)
         .value;
+    // 墨笺:标题靠左(宋体随主题),列表按天分组,每组上方一条宋体日期细线
+    final mj = Theme.of(context).extension<MojianTokens>();
 
     return Scaffold(
       appBar: AppBar(
         title: Text(context.l10n.common_notification),
-        centerTitle: true,
+        centerTitle: mj == null,
         actions: [
           IconButton(
             icon: const Icon(Symbols.done_all_rounded),
@@ -115,15 +119,21 @@ class _NotificationsPageState extends ConsumerState<NotificationsPage> {
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    const Icon(
+                    Icon(
                       Symbols.notifications_rounded,
                       size: 64,
-                      color: Colors.grey,
+                      color: mj?.ink4 ?? Colors.grey,
                     ),
                     const SizedBox(height: 16),
                     Text(
                       context.l10n.notification_empty,
-                      style: const TextStyle(color: Colors.grey),
+                      style: mj == null
+                          ? const TextStyle(color: Colors.grey)
+                          : TextStyle(
+                              fontFamily: MojianTokens.serifFamily,
+                              fontSize: 16,
+                              color: mj.ink2,
+                            ),
                     ),
                   ],
                 ),
@@ -144,7 +154,7 @@ class _NotificationsPageState extends ConsumerState<NotificationsPage> {
                   );
                 }
                 final notification = visibleNotifications[index];
-                return NotificationItem(
+                final item = NotificationItem(
                   notification: notification,
                   systemAvatarTemplate: systemAvatarTemplate,
                   // siblings = 当前已加载列表,大屏弹窗内可上一条/下一条
@@ -155,6 +165,22 @@ class _NotificationsPageState extends ConsumerState<NotificationsPage> {
                     siblings: visibleNotifications,
                   ),
                 );
+                if (mj == null) return item;
+                final day = TimeUtils.formatSmartDate(notification.createdAt);
+                final isFirstOfDay =
+                    index == 0 ||
+                    TimeUtils.formatSmartDate(
+                          visibleNotifications[index - 1].createdAt,
+                        ) !=
+                        day;
+                if (!isFirstOfDay) return item;
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    _MojianDayHead(label: day, tokens: mj),
+                    item,
+                  ],
+                );
               },
             );
           },
@@ -162,6 +188,37 @@ class _NotificationsPageState extends ConsumerState<NotificationsPage> {
           error: (error, stack) =>
               ErrorView(error: error, stackTrace: stack, onRetry: _onRefresh),
         ),
+      ),
+    );
+  }
+}
+
+/// 墨笺通知列表的日期分组头:宋体小字 + 向右延伸的细线
+class _MojianDayHead extends StatelessWidget {
+  const _MojianDayHead({required this.label, required this.tokens});
+
+  final String label;
+  final MojianTokens tokens;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 20, 16, 4),
+      child: Row(
+        children: [
+          Text(
+            label,
+            style: TextStyle(
+              fontFamily: MojianTokens.serifFamily,
+              fontWeight: FontWeight.w600,
+              fontSize: 12.5,
+              letterSpacing: 2.4,
+              color: tokens.ink3,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(child: Container(height: 1, color: tokens.rule)),
+        ],
       ),
     );
   }

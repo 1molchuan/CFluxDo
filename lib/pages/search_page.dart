@@ -32,6 +32,9 @@ import '../utils/discourse_url_parser.dart';
 import '../widgets/common/search_capsule.dart';
 import '../utils/link_launcher.dart';
 import 'settings_page.dart';
+import '../theme/mojian_theme.dart';
+import '../widgets/common/mojian_section_label.dart';
+import '../widgets/topic/topic_card.dart' show mojianCardDecoration;
 
 /// 搜索框中的站内直达链接标准化。支持完整 URL、`linux.do/...` 和相对路径；
 /// 普通关键词原样返回，后续由 [isInternalUrlString] 判定后继续普通搜索。
@@ -1008,41 +1011,55 @@ class _SearchPageState extends ConsumerState<SearchPage> {
         padding: const EdgeInsets.all(16),
         children: [
           // 最近搜索标题行
-          Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  context.l10n.search_recentSearches,
-                  style: theme.textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.w500,
-                    color: theme.colorScheme.onSurfaceVariant,
-                  ),
-                ),
-                GestureDetector(
-                  onTap: _isClearingRecentSearches
+          if (theme.extension<MojianTokens>() != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(8, 4, 0, 8),
+              child: MojianSectionLabel(
+                context.l10n.search_recentSearches,
+                trailing: TextButton(
+                  onPressed: _isClearingRecentSearches
                       ? null
                       : _clearRecentSearches,
-                  child: _isClearingRecentSearches
-                      ? SizedBox(
-                          width: 12,
-                          height: 12,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: theme.colorScheme.primary,
-                          ),
-                        )
-                      : Text(
-                          context.l10n.common_clear,
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: theme.colorScheme.primary,
-                          ),
-                        ),
+                  child: Text(context.l10n.common_clear),
                 ),
-              ],
+              ),
+            )
+          else
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    context.l10n.search_recentSearches,
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w500,
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  GestureDetector(
+                    onTap: _isClearingRecentSearches
+                        ? null
+                        : _clearRecentSearches,
+                    child: _isClearingRecentSearches
+                        ? SizedBox(
+                            width: 12,
+                            height: 12,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: theme.colorScheme.primary,
+                            ),
+                          )
+                        : Text(
+                            context.l10n.common_clear,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.primary,
+                            ),
+                          ),
+                  ),
+                ],
+              ),
             ),
-          ),
           // 搜索记录列表
           ..._recentSearches.map(
             (query) => _buildRecentSearchItem(query, theme),
@@ -1368,6 +1385,16 @@ class _SearchPageState extends ConsumerState<SearchPage> {
 
   Widget _buildSectionHeader(String title, int count, bool hasMore) {
     final theme = Theme.of(context);
+    final mj = theme.extension<MojianTokens>();
+    if (mj != null) {
+      return MojianSectionLabel(
+        title,
+        trailing: Text(
+          hasMore ? '$count+' : '$count',
+          style: TextStyle(fontSize: 12, color: mj.ink3),
+        ),
+      );
+    }
     return Row(
       children: [
         Text(
@@ -1398,53 +1425,61 @@ class _SearchUserCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-
+    final mj = theme.extension<MojianTokens>();
+    final content = InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Row(
+          children: [
+            SmartAvatar(
+              imageUrl: user.getAvatarUrl().isNotEmpty
+                  ? user.getAvatarUrl(size: 80)
+                  : null,
+              radius: 20,
+              fallbackText: user.username,
+              backgroundColor: theme.colorScheme.secondaryContainer,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    user.username,
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  if (user.name != null && user.name!.isNotEmpty)
+                    Text(
+                      user.name!,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            Icon(
+              Symbols.chevron_right_rounded,
+              color: theme.colorScheme.outline,
+            ),
+          ],
+        ),
+      ),
+    );
+    // 墨笺:平铺行 + 发丝线分隔,不要卡片
+    if (mj != null) {
+      return DecoratedBox(
+        decoration: mojianCardDecoration(theme, isSelected: false)!,
+        child: content,
+      );
+    }
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
       clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Row(
-            children: [
-              SmartAvatar(
-                imageUrl: user.getAvatarUrl().isNotEmpty
-                    ? user.getAvatarUrl(size: 80)
-                    : null,
-                radius: 20,
-                fallbackText: user.username,
-                backgroundColor: theme.colorScheme.secondaryContainer,
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      user.username,
-                      style: theme.textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                    if (user.name != null && user.name!.isNotEmpty)
-                      Text(
-                        user.name!,
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: theme.colorScheme.onSurfaceVariant,
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-              Icon(
-                Symbols.chevron_right_rounded,
-                color: theme.colorScheme.outline,
-              ),
-            ],
-          ),
-        ),
-      ),
+      child: content,
     );
   }
 }

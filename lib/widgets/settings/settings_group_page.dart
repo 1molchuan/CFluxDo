@@ -5,6 +5,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../settings/settings_model.dart';
 import '../../settings/settings_renderer.dart';
 import 'package:m3e_ui/m3e_ui.dart';
+import '../../theme/mojian_theme.dart';
+import '../common/mojian_section_label.dart';
 
 /// 通用数据驱动设置页
 ///
@@ -148,6 +150,9 @@ class _SettingsGroupPageState extends ConsumerState<SettingsGroupPage> {
   }
 
   Widget _buildSectionHeader(ThemeData theme, String title, IconData icon) {
+    if (theme.extension<MojianTokens>() != null) {
+      return MojianSectionLabel(title);
+    }
     return Row(
       children: [
         Icon(icon, size: 18, color: theme.colorScheme.primary),

@@ -53,6 +53,9 @@ import '../services/log/log_writer.dart';
 import '../services/network/doh/accel_doh_auth_service.dart';
 import '../providers/theme_provider.dart';
 import '../widgets/layout/master_detail_layout.dart';
+import '../theme/mojian_theme.dart';
+import '../widgets/common/mojian_menu_row.dart';
+import '../widgets/common/mojian_section_label.dart';
 
 /// 个人页面
 class ProfilePage extends ConsumerStatefulWidget {
@@ -728,6 +731,9 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
       ),
     ];
 
+    final mj = theme.extension<MojianTokens>();
+    if (mj != null) return _buildMojianContentStrip(mj, actions);
+
     return Card(
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(20),
@@ -769,6 +775,59 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
     );
   }
 
+  /// 墨笺:四个常用入口排成一条细线框住的横栏,竖细线分隔,线形图标 + 小字
+  Widget _buildMojianContentStrip(
+    MojianTokens mj,
+    List<({IconData icon, Color iconColor, String title, VoidCallback onTap})>
+    actions,
+  ) {
+    return Container(
+      decoration: BoxDecoration(
+        border: Border.symmetric(horizontal: BorderSide(color: mj.rule)),
+      ),
+      child: IntrinsicHeight(
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            for (var i = 0; i < actions.length; i++) ...[
+              if (i > 0) VerticalDivider(width: 1, color: mj.rule),
+              Expanded(
+                child: InkWell(
+                  onTap: actions[i].onTap,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(actions[i].icon, size: 22, color: mj.ink2),
+                        const SizedBox(height: 6),
+                        Text(
+                          actions[i].title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(fontSize: 12, color: mj.ink2),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 墨笺下菜单组上方的宋体小标题;经典不加
+  Widget _sectionLabel(ThemeData theme, String text) {
+    if (theme.extension<MojianTokens>() == null) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(left: 6, bottom: 8),
+      child: MojianSectionLabel(text),
+    );
+  }
+
   Widget _buildCompactActionItem(ThemeData theme, IconData icon, Color iconColor, String title, VoidCallback onTap) {
     return InkWell(
       onTap: onTap,
@@ -807,6 +866,16 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
   }
 
   Widget _buildCommunityCard(ThemeData theme, {required bool canAccessInviteLinks}) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _sectionLabel(theme, context.l10n.profile_sectionCommunity),
+        _buildCommunityGroup(canAccessInviteLinks: canAccessInviteLinks),
+      ],
+    );
+  }
+
+  Widget _buildCommunityGroup({required bool canAccessInviteLinks}) {
     return SegmentedCardGroup(
       children: [
         _buildOptionTile(
@@ -869,6 +938,16 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
   }
 
   Widget _buildSystemAndToolsCard(ThemeData theme) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _sectionLabel(theme, context.l10n.profile_sectionTools),
+        _buildSystemAndToolsGroup(),
+      ],
+    );
+  }
+
+  Widget _buildSystemAndToolsGroup() {
     return SegmentedCardGroup(
       children: [
         _buildOptionTile(
@@ -913,6 +992,9 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
   }) {
     final theme = Theme.of(context);
     final finalIconColor = iconColor ?? theme.colorScheme.primary;
+    if (theme.extension<MojianTokens>() != null) {
+      return MojianMenuRow(icon: icon, title: title, onTap: onTap);
+    }
 
     return InkWell(
       onTap: onTap,
@@ -991,6 +1073,7 @@ class _ProfileHeader extends ConsumerWidget {
     final username = ref.watch(currentUserProvider.select((value) => value.value?.username));
     final isLoggedIn = ref.watch(currentUserProvider.select((value) => value.value != null));
     final canNavigate = username != null && username.isNotEmpty;
+    final isMojian = Theme.of(context).extension<MojianTokens>() != null;
 
     return GestureDetector(
       onTap: canNavigate
@@ -1016,8 +1099,10 @@ class _ProfileHeader extends ConsumerWidget {
                   onTap: () => showQrLoginSheet(context, username: username),
                   child: CircleAvatar(
                     radius: 16,
-                    backgroundColor:
-                        Theme.of(context).colorScheme.surfaceContainerHighest,
+                    // 墨笺:不要灰色圆底,只留线形图标
+                    backgroundColor: isMojian
+                        ? Colors.transparent
+                        : Theme.of(context).colorScheme.surfaceContainerHighest,
                     child: Icon(
                       Symbols.qr_code_rounded,
                       size: 16,
@@ -1029,7 +1114,9 @@ class _ProfileHeader extends ConsumerWidget {
               const SizedBox(width: 8),
               CircleAvatar(
                 radius: 16,
-                backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
+                backgroundColor: isMojian
+                    ? Colors.transparent
+                    : Theme.of(context).colorScheme.surfaceContainerHighest,
                 child: Icon(
                   Symbols.arrow_forward_ios_rounded,
                   size: 14,
@@ -1087,6 +1174,7 @@ class _ProfileInfoSection extends ConsumerWidget {
     final trustLevel = ref.watch(currentUserProvider.select((value) => value.value?.trustLevel));
     final status = ref.watch(currentUserProvider.select((value) => value.value?.status));
     final isLoggedIn = ref.watch(currentUserProvider.select((value) => value.value != null));
+    final mj = theme.extension<MojianTokens>();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1116,14 +1204,20 @@ class _ProfileInfoSection extends ConsumerWidget {
             children: [
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                decoration: BoxDecoration(
-                  color: theme.colorScheme.secondaryContainer,
-                  borderRadius: BorderRadius.circular(6),
-                ),
+                // 墨笺:描边小签,不填底
+                decoration: mj != null
+                    ? BoxDecoration(
+                        border: Border.all(color: mj.ruleStrong),
+                        borderRadius: BorderRadius.circular(4),
+                      )
+                    : BoxDecoration(
+                        color: theme.colorScheme.secondaryContainer,
+                        borderRadius: BorderRadius.circular(6),
+                      ),
                 child: Text(
                   _getTrustLevelLabel(trustLevel ?? 0),
                   style: theme.textTheme.labelSmall?.copyWith(
-                    color: theme.colorScheme.onSecondaryContainer,
+                    color: mj?.ink2 ?? theme.colorScheme.onSecondaryContainer,
                     fontWeight: FontWeight.w500,
                   ),
                 ),

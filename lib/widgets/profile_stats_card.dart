@@ -10,6 +10,7 @@ import '../providers/directory_providers.dart';
 import '../providers/profile_stats_provider.dart';
 import '../utils/number_utils.dart';
 import '../l10n/s.dart';
+import '../theme/mojian_theme.dart';
 import 'package:m3e_ui/m3e_ui.dart';
 
 /// 统计卡片渲染组件（个人页使用）
@@ -108,6 +109,24 @@ class ProfileStatsCardPreview extends StatelessWidget {
                 ),
               ),
             ),
+          ),
+        ),
+      );
+    }
+
+    // 墨笺:不要卡片,上下两条细线框出一栏数字(数字随 titleLarge 已是宋体)
+    final mj = Theme.of(context).extension<MojianTokens>();
+    if (mj != null) {
+      return Container(
+        width: double.infinity,
+        decoration: BoxDecoration(
+          border: Border.symmetric(horizontal: BorderSide(color: mj.rule)),
+        ),
+        child: InkWell(
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 4),
+            child: _buildLayout(context),
           ),
         ),
       );

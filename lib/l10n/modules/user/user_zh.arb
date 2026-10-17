@@ -273,5 +273,7 @@
         "type": "int"
       }
     }
-  }
+  },
+  "profile_sectionCommunity": "社区",
+  "profile_sectionTools": "工具与设置"
 }
