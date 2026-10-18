@@ -48,12 +48,15 @@ class WindowsWebViewEnvironmentService {
   /// 代理决策的最长等待。超时兜底用上次持久化的期望值,避免代理启动
   /// 失败时卡死 Environment 创建。
   ///
-  /// 8s 曾经不够用:本次调用排在 main.dart 启动链路里 rhttp 初始化
-  /// 之后,而 rhttp 自己就留了最多 5s 超时预算,后面还有好几个服务
-  /// 初始化——真机复现 8s 内等不到本次会话的真实代理端口,回退用了
-  /// 上次持久化的旧端口(端口早已随 TIME_WAIT 漂移到别处),导致
-  /// WebView2 在这次会话里全程连着一个不存在的代理，验证怎么也过不去。
-  /// 放宽到 15s，盖过 rhttp 5s 预算 + 本地代理实际启动耗时的合理上限。
+  /// 8s 曾经不够用:当时 UA 获取和这次初始化都排在 main.dart 启动链路
+  /// 的前段,排在本轮代理端口确定之前——真机复现 8s 内等不到本次会话的
+  /// 真实代理端口,回退用了上次持久化的旧端口(端口早已随 TIME_WAIT 漂移
+  /// 到别处),导致 WebView2 在这次会话里全程连着一个不存在的代理，验证
+  /// 怎么也过不去。放宽到 15s 只是兜底。
+  ///
+  /// 调用顺序同样重要：任何会触发 Environment 创建的调用（包括启动时的
+  /// UA 获取）都必须排在 NetworkSettingsService/ setProxy 之后，否则
+  /// 每次冷启动都要白等满这个超时。main.dart 里 UA 获取已挪到代理决策后。
   static const _proxyDecisionTimeout = Duration(seconds: 15);
 
   bool get _isSupported => !kIsWeb && Platform.isWindows;

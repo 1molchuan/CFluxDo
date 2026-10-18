@@ -299,7 +299,6 @@ Future<void> main(List<String> args) async {
   // 阶段 1：并行执行所有不相互依赖的初始化
   final futures = <Future<dynamic>>[
     SharedPreferences.getInstance(),
-    AppConstants.initUserAgent(),
     LogWriter.init(),
     ProxyCertificate.initialize(),
     // Windows 深链协议注册(discourse:// / fluxdo://):写 HKCU 免管理员,
@@ -392,6 +391,12 @@ Future<void> main(List<String> args) async {
   }
   await NetworkSettingsService.instance.initialize(prefs);
   StartupTimeline.mark('proxy');
+  // 桌面端 WebView UA 必须等本地代理端口确定后再取：WebView2 Environment
+  // 创建时会把代理写死，而 Environment 第一次创建若发生在代理决策之前，
+  // 会空等 _proxyDecision 到 15s 超时（此前它在阶段 1 并行初始化里，
+  // 每次冷启动都白等满 15s）。这里放到 NetworkSettingsService 之后，
+  // 放到后台跑，首次请求若更早到达会由 RequestHeaderInterceptor 等它。
+  unawaited(AppConstants.initUserAgent());
   // WindowsWebViewEnvironmentService 必须等 NetworkSettingsService 把本次
   // 会话真正要用的代理端口定下来之后再创建 Environment。之前放在最早那批
   // 并行初始化里,等的是"猜的"8s 超时——NetworkSettingsService 前面还排
