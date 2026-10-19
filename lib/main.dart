@@ -159,22 +159,38 @@ Future<void> _applyAndroidDisplayMode(SharedPreferences prefs) async {
   }
 }
 
+OverlayEntry? _linuxWebViewCrashEntry;
+
+/// 网页进程崩溃提示。崩溃多发生在人机验证页，而验证页是插在根 Overlay 上的
+/// OverlayEntry、盖在所有路由之上，走 showAppDialog 会被它挡住，所以这里也直接插
+/// OverlayEntry（后插的在上面）。
 void _showLinuxWebViewCrashDialog() {
-  final context = navigatorKey.currentContext;
-  if (context == null) return;
-  showAppDialog<void>(
-    context: context,
-    builder: (dialogContext) => AlertDialog(
-      title: Text(S.current.preferences_linuxWebViewCrashTitle),
-      content: Text(S.current.preferences_linuxWebViewCrashBody),
-      actions: [
-        FilledButton(
-          onPressed: () => Navigator.pop(dialogContext),
-          child: Text(S.current.common_gotIt),
+  final overlay = navigatorKey.currentState?.overlay;
+  if (overlay == null || _linuxWebViewCrashEntry != null) return;
+  late final OverlayEntry entry;
+  entry = OverlayEntry(
+    builder: (context) => Stack(
+      fit: StackFit.expand,
+      children: [
+        const ModalBarrier(dismissible: false, color: Colors.black54),
+        AlertDialog(
+          title: Text(S.current.preferences_linuxWebViewCrashTitle),
+          content: Text(S.current.preferences_linuxWebViewCrashBody),
+          actions: [
+            FilledButton(
+              onPressed: () {
+                entry.remove();
+                _linuxWebViewCrashEntry = null;
+              },
+              child: Text(S.current.common_gotIt),
+            ),
+          ],
         ),
       ],
     ),
   );
+  _linuxWebViewCrashEntry = entry;
+  overlay.insert(entry);
 }
 
 Future<void> main(List<String> args) async {
