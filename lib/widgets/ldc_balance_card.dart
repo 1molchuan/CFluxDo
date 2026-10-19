@@ -1,14 +1,19 @@
 import 'package:flutter/material.dart';
 import 'package:app_icons/app_icons.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
 import '../providers/core_providers.dart';
 import '../providers/ldc_providers.dart';
 import '../pages/webview_page.dart';
 import '../services/network/exceptions/oauth_exception.dart';
 import '../utils/number_utils.dart';
+
 import 'package:m3e_ui/m3e_ui.dart';
-import '../../../../l10n/s.dart';
+
+import '../l10n/s.dart';
 import '../theme/mojian_theme.dart';
+import 'common/balance_card_action_button.dart';
+import 'common/balance_card_cf_action.dart';
 import 'common/mojian_ledger_card.dart';
 
 class LdcBalanceCard extends ConsumerWidget {
@@ -16,6 +21,7 @@ class LdcBalanceCard extends ConsumerWidget {
 
   final bool compact;
   final bool inline;
+  final bool isProcessing;
   final VoidCallback? onDisable;
   final VoidCallback? onReauthorize;
 
@@ -23,17 +29,27 @@ class LdcBalanceCard extends ConsumerWidget {
     super.key,
     this.compact = false,
     this.inline = false,
+    this.isProcessing = false,
     this.onDisable,
     this.onReauthorize,
   });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    return IgnorePointer(
+      ignoring: isProcessing,
+      child: _buildCard(context, ref),
+    );
+  }
+
+  Widget _buildCard(BuildContext context, WidgetRef ref) {
     final ldcUserInfo = ref.watch(ldcUserInfoProvider);
 
     // 授权过期时强制显示错误卡片（即使有旧数据缓存）；其他错误仅在无旧数据时显示
     if (ldcUserInfo.hasError &&
-        (!ldcUserInfo.hasValue || ldcUserInfo.error is OAuthExpiredException)) {
+        (ldcUserInfo.value == null ||
+            ldcUserInfo.error is OAuthExpiredException ||
+            OAuthErrorPolicy.isCfChallenge(ldcUserInfo.error))) {
       return _buildErrorCard(context, ref, ldcUserInfo.error!);
     }
 
@@ -59,7 +75,7 @@ class LdcBalanceCard extends ConsumerWidget {
         : NumberUtils.formatSignedInt(dailyIncome);
 
     final theme = Theme.of(context);
-    final isRefreshing = ldcUserInfo.isLoading;
+    final isRefreshing = isProcessing || ldcUserInfo.isLoading;
 
     if (inline) {
       return Material(
@@ -427,6 +443,36 @@ class LdcBalanceCard extends ConsumerWidget {
   Widget _buildErrorCard(BuildContext context, WidgetRef ref, Object error) {
     final theme = Theme.of(context);
     final isExpired = error is OAuthExpiredException;
+    final isCfChallenge = OAuthErrorPolicy.isCfChallenge(error);
+    final errorTitle = isCfChallenge
+        ? S.current.error_securityChallenge
+        : isExpired
+        ? S.current.common_authExpired
+        : S.current.common_loadFailed;
+    final isBusy = isProcessing || ref.watch(ldcUserInfoProvider).isLoading;
+    final canReauthorize = isExpired && onReauthorize != null;
+
+    Widget actionButton({bool filled = false, bool outlined = false}) =>
+        isCfChallenge
+        ? BalanceCardCfAction(
+            onRetry: () => ref
+                .read(ldcUserInfoProvider.notifier)
+                .refreshAfterCfVerification(),
+            isLoading: isBusy,
+            filled: filled,
+            outlined: outlined,
+          )
+        : BalanceCardActionButton(
+            label: canReauthorize
+                ? S.current.common_reAuth
+                : S.current.common_retry,
+            onPressed: canReauthorize
+                ? onReauthorize!
+                : () => ref.read(ldcUserInfoProvider.notifier).refresh(),
+            isLoading: isBusy,
+            filled: filled,
+            outlined: outlined,
+          );
 
     if (inline) {
       return Material(
@@ -446,7 +492,9 @@ class LdcBalanceCard extends ConsumerWidget {
                       shape: BoxShape.circle,
                     ),
                     child: Icon(
-                      isExpired
+                      isCfChallenge
+                          ? Symbols.shield_rounded
+                          : isExpired
                           ? Symbols.lock_clock_rounded
                           : Symbols.error_rounded,
                       size: 20,
@@ -467,9 +515,7 @@ class LdcBalanceCard extends ConsumerWidget {
                           ),
                         ),
                         Text(
-                          isExpired
-                              ? S.current.common_authExpired
-                              : S.current.common_loadFailed,
+                          errorTitle,
                           style: theme.textTheme.titleMedium?.copyWith(
                             fontWeight: FontWeight.w600,
                             color: isExpired
@@ -480,17 +526,7 @@ class LdcBalanceCard extends ConsumerWidget {
                       ],
                     ),
                   ),
-                  if (isExpired && onReauthorize != null)
-                    TextButton(
-                      onPressed: onReauthorize,
-                      child: Text(S.current.common_reAuth),
-                    )
-                  else
-                    TextButton(
-                      onPressed: () =>
-                          ref.read(ldcUserInfoProvider.notifier).refresh(),
-                      child: Text(S.current.common_retry),
-                    ),
+                  actionButton(),
                 ],
               ),
             ),
@@ -527,7 +563,9 @@ class LdcBalanceCard extends ConsumerWidget {
                   shape: BoxShape.circle,
                 ),
                 child: Icon(
-                  isExpired
+                  isCfChallenge
+                      ? Symbols.shield_rounded
+                      : isExpired
                       ? Symbols.lock_clock_rounded
                       : Symbols.error_rounded,
                   size: 20,
@@ -548,9 +586,7 @@ class LdcBalanceCard extends ConsumerWidget {
                       ),
                     ),
                     Text(
-                      isExpired
-                          ? S.current.common_authExpired
-                          : S.current.common_loadFailed,
+                      errorTitle,
                       style: theme.textTheme.titleMedium?.copyWith(
                         fontWeight: FontWeight.w600,
                         color: isExpired
@@ -561,17 +597,7 @@ class LdcBalanceCard extends ConsumerWidget {
                   ],
                 ),
               ),
-              if (isExpired && onReauthorize != null)
-                TextButton(
-                  onPressed: onReauthorize,
-                  child: Text(S.current.common_reAuth),
-                )
-              else
-                TextButton(
-                  onPressed: () =>
-                      ref.read(ldcUserInfoProvider.notifier).refresh(),
-                  child: Text(S.current.common_retry),
-                ),
+              actionButton(),
             ],
           ),
         ),
@@ -582,17 +608,19 @@ class LdcBalanceCard extends ConsumerWidget {
     if (mj != null) {
       // 墨笺:账本卡;过期时框线与状态字用错误色
       return MojianLedgerCard(
-        icon: isExpired ? Symbols.lock_clock_rounded : Symbols.error_rounded,
+        icon: isCfChallenge
+            ? Symbols.shield_rounded
+            : isExpired
+            ? Symbols.lock_clock_rounded
+            : Symbols.error_rounded,
         title: 'LINUX DO Credits',
         danger: isExpired,
-        trailing: onDisable != null
+        trailing: onDisable != null && !isBusy
             ? MojianLedgerCard.powerButton(mj, onDisable!)
             : null,
         children: [
           Text(
-            isExpired
-                ? S.current.common_authExpired
-                : S.current.common_loadFailed,
+            errorTitle,
             style: MojianLedgerCard.figureStyle(mj).copyWith(
               fontSize: 24,
               color: isExpired ? theme.colorScheme.error : mj.ink,
@@ -600,21 +628,15 @@ class LdcBalanceCard extends ConsumerWidget {
           ),
           const SizedBox(height: 4),
           Text(
-            isExpired ? S.current.ldc_reAuthHint : S.current.common_checkNetworkRetry,
+            isCfChallenge
+                ? S.current.cf_dataBlockedByChallenge
+                : isExpired
+                ? S.current.ldc_reAuthHint
+                : S.current.common_checkNetworkRetry,
             style: theme.textTheme.bodyMedium?.copyWith(color: mj.ink3),
           ),
           const SizedBox(height: 14),
-          OutlinedButton.icon(
-            onPressed: isExpired && onReauthorize != null
-                ? onReauthorize
-                : () => ref.read(ldcUserInfoProvider.notifier).refresh(),
-            icon: const Icon(Symbols.refresh_rounded, size: 18),
-            label: Text(
-              isExpired && onReauthorize != null
-                  ? S.current.common_reAuth
-                  : S.current.common_retry,
-            ),
-          ),
+          actionButton(outlined: true),
         ],
       );
     }
@@ -647,7 +669,9 @@ class LdcBalanceCard extends ConsumerWidget {
               right: -20,
               top: -20,
               child: Icon(
-                isExpired
+                isCfChallenge
+                    ? Symbols.shield_rounded
+                    : isExpired
                     ? Symbols.lock_clock_rounded
                     : Symbols.error_rounded,
                 size: 150,
@@ -668,7 +692,9 @@ class LdcBalanceCard extends ConsumerWidget {
                           borderRadius: BorderRadius.circular(12),
                         ),
                         child: Icon(
-                          isExpired
+                          isCfChallenge
+                              ? Symbols.shield_rounded
+                              : isExpired
                               ? Symbols.lock_clock_rounded
                               : Symbols.error_rounded,
                           color: Colors.white,
@@ -685,7 +711,7 @@ class LdcBalanceCard extends ConsumerWidget {
                           ),
                         ),
                       ),
-                      if (onDisable != null)
+                      if (onDisable != null && !isBusy)
                         GestureDetector(
                           onTap: onDisable,
                           child: Container(
@@ -705,9 +731,7 @@ class LdcBalanceCard extends ConsumerWidget {
                   ),
                   const SizedBox(height: 24),
                   Text(
-                    isExpired
-                        ? S.current.common_authExpired
-                        : S.current.common_loadFailed,
+                    errorTitle,
                     style: theme.textTheme.displaySmall?.copyWith(
                       fontWeight: FontWeight.w600,
                       color: Colors.white,
@@ -716,7 +740,9 @@ class LdcBalanceCard extends ConsumerWidget {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    isExpired
+                    isCfChallenge
+                        ? S.current.cf_dataBlockedByChallenge
+                        : isExpired
                         ? S.current.ldc_reAuthHint
                         : S.current.common_checkNetworkRetry,
                     style: theme.textTheme.bodyMedium?.copyWith(
@@ -724,27 +750,7 @@ class LdcBalanceCard extends ConsumerWidget {
                     ),
                   ),
                   const SizedBox(height: 16),
-                  if (isExpired && onReauthorize != null)
-                    FilledButton.icon(
-                      onPressed: onReauthorize,
-                      icon: const Icon(Symbols.refresh_rounded, size: 18),
-                      label: Text(S.current.common_reAuth),
-                      style: FilledButton.styleFrom(
-                        backgroundColor: Colors.white.withValues(alpha: 0.2),
-                        foregroundColor: Colors.white,
-                      ),
-                    )
-                  else
-                    FilledButton.icon(
-                      onPressed: () =>
-                          ref.read(ldcUserInfoProvider.notifier).refresh(),
-                      icon: const Icon(Symbols.refresh_rounded, size: 18),
-                      label: Text(S.current.common_retry),
-                      style: FilledButton.styleFrom(
-                        backgroundColor: Colors.white.withValues(alpha: 0.2),
-                        foregroundColor: Colors.white,
-                      ),
-                    ),
+                  actionButton(filled: true),
                 ],
               ),
             ),
