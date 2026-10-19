@@ -43,6 +43,28 @@ void main() {
     expect(service.canHandleUri(Uri.parse('ftp://linux.do/t/123')), isFalse);
   });
 
+  test('linkFromLaunchArgs 从 Linux 冷启动参数里取第一个可处理的链接', () {
+    expect(DeepLinkService.linkFromLaunchArgs(const []), isNull);
+    expect(
+      DeepLinkService.linkFromLaunchArgs(const [
+        '--verbose',
+        'https://example.com/t/1',
+        'discourse://auth_redirect?payload=abc',
+        'fluxdo://topic/2',
+      ]),
+      Uri.parse('discourse://auth_redirect?payload=abc'),
+    );
+    expect(
+      DeepLinkService.linkFromLaunchArgs(const ['fluxdo://topic/2']),
+      Uri.parse('fluxdo://topic/2'),
+    );
+    // 其他 discourse:// 链接不接管
+    expect(
+      DeepLinkService.linkFromLaunchArgs(const ['discourse://other']),
+      isNull,
+    );
+  });
+
   testWidgets('handleUri 不接管非 linux.do 的话题路径', (tester) async {
     BuildContext? capturedContext;
 

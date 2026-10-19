@@ -67,6 +67,16 @@ static void first_frame_cb(MyApplication* self, FlView* view) {
 // Implements GApplication::activate.
 static void my_application_activate(GApplication* application) {
   MyApplication* self = MY_APPLICATION(application);
+
+  // 单实例：已有窗口就把它提到前面。浏览器授权登录回跳（discourse://auth_redirect）、
+  // fluxdo:// 链接都会再启动一次本程序，第二个进程只把命令行转给这里（见下方
+  // local_command_line），不另开窗口。
+  GList* windows = gtk_application_get_windows(GTK_APPLICATION(application));
+  if (windows != nullptr) {
+    gtk_window_present(GTK_WINDOW(windows->data));
+    return;
+  }
+
   GtkWindow* window =
       GTK_WINDOW(gtk_application_window_new(GTK_APPLICATION(application)));
 
@@ -154,7 +164,21 @@ static gboolean my_application_local_command_line(GApplication* application,
   g_application_activate(application);
   *exit_status = 0;
 
-  return TRUE;
+  // 返回 FALSE 让 GApplication 接着处理命令行：主实例在本地发出 command-line 信号，
+  // 后启动的实例把命令行经 D-Bus 转给主实例后退出。gtk 插件（app_links 的 Linux 实现
+  // 靠它）监听这个信号，把链接交给 Dart。上游模板返回 TRUE 且不唯一，结果每次回跳都
+  // 新开一个进程，链接谁也收不到。
+  return FALSE;
+}
+
+// Implements GApplication::command_line.
+// gtk 插件连在 command-line 信号上并先于这里返回；插件没注册时兜底，避免 GLib 报
+// 「声称处理命令行却没实现」并以 1 退出。
+static int my_application_command_line(GApplication* application,
+                                       GApplicationCommandLine* command_line) {
+  (void)application;
+  (void)command_line;
+  return 0;
 }
 
 // Implements GApplication::startup.
@@ -186,6 +210,7 @@ static void my_application_class_init(MyApplicationClass* klass) {
   G_APPLICATION_CLASS(klass)->activate = my_application_activate;
   G_APPLICATION_CLASS(klass)->local_command_line =
       my_application_local_command_line;
+  G_APPLICATION_CLASS(klass)->command_line = my_application_command_line;
   G_APPLICATION_CLASS(klass)->startup = my_application_startup;
   G_APPLICATION_CLASS(klass)->shutdown = my_application_shutdown;
   G_OBJECT_CLASS(klass)->dispose = my_application_dispose;
@@ -200,7 +225,8 @@ MyApplication* my_application_new() {
   // the application to be recognized beyond its binary name.
   g_set_prgname(APPLICATION_ID);
 
-  return MY_APPLICATION(g_object_new(my_application_get_type(),
-                                     "application-id", APPLICATION_ID, "flags",
-                                     G_APPLICATION_NON_UNIQUE, nullptr));
+  return MY_APPLICATION(g_object_new(
+      my_application_get_type(), "application-id", APPLICATION_ID, "flags",
+      G_APPLICATION_HANDLES_COMMAND_LINE | G_APPLICATION_HANDLES_OPEN,
+      nullptr));
 }

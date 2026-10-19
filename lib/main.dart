@@ -177,7 +177,9 @@ void _showLinuxWebViewCrashDialog() {
   );
 }
 
-Future<void> main() async {
+Future<void> main(List<String> args) async {
+  DeepLinkService.instance.launchArgs = args;
+
   // 自定义 binding:接管标准图片解码入口,全局限制解码并发(= 限制
   // Impeller 纹理上传并发,图密话题快滚 raster 尖峰的对症闸门,
   // 见 image_decode_gate.dart)。

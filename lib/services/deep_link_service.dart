@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:app_links/app_links.dart';
 import 'package:flutter/material.dart';
 import '../pages/topic_detail_page/topic_detail_page.dart';
@@ -30,6 +31,10 @@ class DeepLinkService {
   /// 邮箱登录成功回调（用于 Onboarding 页面完成引导）
   VoidCallback? onEmailLoginSuccess;
 
+  /// 启动参数（main 收到的 args）。Linux 冷启动由链接拉起时链接就在这里：
+  /// 主实例自己的 command-line 信号发得比 Dart 侧监听早，app_links 可能收不到。
+  List<String> launchArgs = const [];
+
   /// 初始化服务
   /// 在主页面初始化后调用
   void initialize(BuildContext context) {
@@ -53,7 +58,10 @@ class DeepLinkService {
   /// 处理初始链接（冷启动）
   Future<void> _handleInitialLink() async {
     try {
-      final uri = await _appLinks.getInitialLink();
+      var uri = await _appLinks.getInitialLink();
+      if (uri == null && Platform.isLinux) {
+        uri = linkFromLaunchArgs(launchArgs);
+      }
       if (uri != null) {
         // 延迟处理，确保导航 context 已就绪
         await Future.delayed(const Duration(milliseconds: 500));
@@ -71,6 +79,17 @@ class DeepLinkService {
 
   @visibleForTesting
   bool canHandleUri(Uri uri) => _canHandleUri(uri);
+
+  /// 从启动参数里挑出第一个能处理的链接（跳过 --xxx 之类的开关）
+  @visibleForTesting
+  static Uri? linkFromLaunchArgs(List<String> args) {
+    for (final arg in args) {
+      if (arg.startsWith('-')) continue;
+      final uri = Uri.tryParse(arg);
+      if (uri != null && _canHandleUri(uri)) return uri;
+    }
+    return null;
+  }
 
   /// 处理链接
   void _handleLink(Uri uri) {
