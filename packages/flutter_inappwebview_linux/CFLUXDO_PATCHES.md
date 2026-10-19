@@ -20,4 +20,24 @@
    拷走像素，当帧就还；只有 EGL 零拷贝路径留到下一帧，并且持有一个引用。上游 fluxdo 450c00ef 也做了
    同样的「只有 EGL 路径保留」。
 
+5. 新增 `linux/cfluxdo_render_mode.{h,cc}`，取代上游的 `ApplySoftwareRenderingIfNeeded()`：
+   决定网页进程（WPEWebProcess）用硬件还是软件渲染。上游把 NVIDIA 专有驱动当「已知可用」，
+   网页进程拿到 NVIDIA 渲染节点走 GBM / EGL，在 `libnvidia-eglcore` 里 SIGSEGV（Kubuntu 26.04 +
+   615.71 实测：登录页、人机验证页全黑，换 Intel 核显正常）。
+   - 自动判定顺序：上次硬件下网页进程崩过 → 渲染节点有 `nvidia` 驱动 → 没有渲染节点 → 已设
+     `LIBGL_ALWAYS_SOFTWARE` → 上游的虚拟机判定 → 硬件。
+   - 软件 = `LIBGL_ALWAYS_SOFTWARE=1`（WPEPlatform 不交渲染节点，帧走 SHM）+
+     `__EGL_VENDOR_LIBRARY_FILENAMES=<Mesa 厂商文件>`（glvnd 不加载 NVIDIA）+
+     `WEBKIT_SKIA_ENABLE_CPU_RENDERING=1`。主界面的 GL 在注册插件前已初始化，不受影响。
+   - 崩溃自愈：`InAppWebView::OnWebProcessTerminated` 里 `didCrash` 时调
+     `cfluxdo_render_mode_on_web_process_crashed()`，「自动 + 硬件」下记下崩溃，下次启动改软件，
+     并经 `cfluxdo/wpe_render` 通道通知 Dart 弹提示。
+   - 设置：`cfluxdo/wpe_render` 的 `getState` / `setMode(auto|hardware|software)`，存在
+     `<XDG 配置目录>/<程序名>/webview_render_mode`；`CFLUXDO_WEBVIEW_RENDERING=hardware|software`
+     优先于一切。都是下次启动生效（WebKit 只取一次渲染节点）。
+
 升级插件版本时逐条核对上面的改动是否还需要。
+
+另：runner（`linux/runner/my_application.cc`）改成单实例（`G_APPLICATION_HANDLES_COMMAND_LINE`，
+`local_command_line` 返回 FALSE），浏览器授权登录回跳 `discourse://auth_redirect` 才能转给正在运行
+的实例；原模板 `G_APPLICATION_NON_UNIQUE` 每次回跳都新开一个进程，链接谁也收不到。

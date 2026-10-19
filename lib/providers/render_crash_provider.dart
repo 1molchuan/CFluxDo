@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../services/linux_webview_render_service.dart';
 import '../services/render_backend_service.dart';
 
 /// 是否曾检测到疑似 Mali/Vulkan 渲染崩溃。
@@ -12,3 +13,10 @@ import '../services/render_backend_service.dart';
 final renderCrashDetectedProvider = FutureProvider<bool>((ref) async {
   return RenderBackendService.hasDetectedRenderCrash();
 });
+
+/// Linux：本次启动的内置网页（WPEWebProcess）渲染状态，设置页展示用；改设置后
+/// invalidate 取「已保存」的新值。非 Linux 恒为 null。
+final linuxWebViewRenderStateProvider =
+    FutureProvider<LinuxWebViewRenderState?>((ref) async {
+      return LinuxWebViewRenderService.getState();
+    });

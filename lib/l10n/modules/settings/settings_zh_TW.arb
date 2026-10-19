@@ -108,6 +108,33 @@
   "preferences_renderGlesDetectedTitle": "偵測到渲染異常",
   "preferences_renderGlesRecommended": "偵測到閃退，建議開啟",
   "preferences_renderGlesRestartBody": "設定已儲存。渲染後端會在下次開啟 cfluxdo 時切換，請關閉並重新開啟應用以套用變更。",
+  "preferences_linuxWebViewRendering": "內建網頁渲染方式",
+  "preferences_linuxWebViewRenderingDesc": "登入、人機驗證等內建網頁使用的渲染方式。NVIDIA 專有驅動下硬體加速可能讓網頁黑屏或崩潰，重新啟動應用後生效",
+  "preferences_linuxWebViewRenderAuto": "自動（推薦）",
+  "preferences_linuxWebViewRenderHardware": "硬體加速",
+  "preferences_linuxWebViewRenderSoftware": "軟體渲染",
+  "preferences_linuxWebViewRenderCurrent": "本次：{mode}（{reason}）",
+  "@preferences_linuxWebViewRenderCurrent": {
+    "placeholders": {
+      "mode": {
+        "type": "String"
+      },
+      "reason": {
+        "type": "String"
+      }
+    }
+  },
+  "preferences_linuxWebViewRenderPending": "已儲存，重新啟動後生效",
+  "preferences_linuxWebViewReasonEnv": "環境變數指定",
+  "preferences_linuxWebViewReasonUser": "手動指定",
+  "preferences_linuxWebViewReasonCrash": "上次網頁行程崩潰",
+  "preferences_linuxWebViewReasonNvidia": "偵測到 NVIDIA 專有驅動",
+  "preferences_linuxWebViewReasonNoGpu": "未偵測到可用顯示卡",
+  "preferences_linuxWebViewReasonVm": "虛擬機或不相容的顯示卡",
+  "preferences_linuxWebViewReasonPreset": "已設定 LIBGL_ALWAYS_SOFTWARE",
+  "preferences_linuxWebViewReasonDefault": "顯示卡正常",
+  "preferences_linuxWebViewCrashTitle": "內建網頁崩潰了",
+  "preferences_linuxWebViewCrashBody": "內建網頁的渲染行程崩潰，多半是顯示卡驅動與硬體加速不相容。已改用軟體渲染，請關閉並重新開啟 cfluxdo 後再試。\n\n之後可在「功能設定 → 進階 → 內建網頁渲染方式」中更改。",
   "preferences_renderGlesRestartTitle": "需要重新啟動應用",
   "preferences_stickerSource": "表情包資料來源",
   "preferences_title": "功能設定",

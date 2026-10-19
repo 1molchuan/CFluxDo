@@ -38,6 +38,7 @@ import 'services/network/cookie/cookie_store_observer.dart';
 import 'services/local_notification_service.dart';
 import 'services/data_management/cache_size_service.dart';
 import 'services/discourse_cache_manager.dart';
+import 'services/linux_webview_render_service.dart';
 import 'services/render_backend_service.dart';
 import 'services/toast_service.dart';
 import 'package:m3e_ui/m3e_ui.dart';
@@ -158,6 +159,24 @@ Future<void> _applyAndroidDisplayMode(SharedPreferences prefs) async {
   }
 }
 
+void _showLinuxWebViewCrashDialog() {
+  final context = navigatorKey.currentContext;
+  if (context == null) return;
+  showAppDialog<void>(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      title: Text(S.current.preferences_linuxWebViewCrashTitle),
+      content: Text(S.current.preferences_linuxWebViewCrashBody),
+      actions: [
+        FilledButton(
+          onPressed: () => Navigator.pop(dialogContext),
+          child: Text(S.current.common_gotIt),
+        ),
+      ],
+    ),
+  );
+}
+
 Future<void> main() async {
   // 自定义 binding:接管标准图片解码入口,全局限制解码并发(= 限制
   // Impeller 纹理上传并发,图密话题快滚 raster 尖峰的对症闸门,
@@ -249,6 +268,12 @@ Future<void> main() async {
   if (Platform.isAndroid) {
     InAppWebViewController.setWebContentsDebuggingEnabled(false);
   }
+
+  // Linux：内置网页进程在硬件渲染下崩溃（多见于 NVIDIA 专有驱动）时，原生侧已记下、
+  // 下次启动改软件渲染，这里提示用户重启
+  LinuxWebViewRenderService.listen(
+    onWebProcessCrashed: _showLinuxWebViewCrashDialog,
+  );
 
   // 阶段 1：并行执行所有不相互依赖的初始化
   final futures = <Future<dynamic>>[

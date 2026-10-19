@@ -53,6 +53,7 @@
 #include "../plugin_scripts_js/print_interception_js.h"
 #include "../plugin_scripts_js/web_message_channel_js.h"
 #include "../plugin_scripts_js/web_message_listener_js.h"
+#include "../cfluxdo_render_mode.h"
 #include "../types/client_cert_challenge.h"
 #include "../types/client_cert_response.h"
 #include "../types/create_window_action.h"
@@ -6722,6 +6723,11 @@ void InAppWebView::OnWebProcessTerminated(WebKitWebView* web_view,
     }
   }
 #endif  // HAVE_WPE_BACKEND_LEGACY
+
+  // cfluxdo：硬件渲染下网页进程崩溃 → 记下来，下次启动起改软件渲染（见 cfluxdo_render_mode.cc）
+  if (didCrash) {
+    cfluxdo_render_mode_on_web_process_crashed();
+  }
 
   if (self->channel_delegate_) {
     self->channel_delegate_->onRenderProcessGone(didCrash);

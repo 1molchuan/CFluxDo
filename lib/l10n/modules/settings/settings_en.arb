@@ -108,6 +108,33 @@
   "preferences_renderGlesDetectedTitle": "Rendering Issue Detected",
   "preferences_renderGlesRecommended": "Crash detected — enabling this is recommended",
   "preferences_renderGlesRestartBody": "The setting has been saved. The rendering backend will switch the next time you open cfluxdo. Close and reopen the app for the change to take effect.",
+  "preferences_linuxWebViewRendering": "Built-in web page rendering",
+  "preferences_linuxWebViewRenderingDesc": "How built-in web pages such as login and human verification are rendered. With the NVIDIA proprietary driver, hardware acceleration may make them black or crash. Takes effect after restarting the app",
+  "preferences_linuxWebViewRenderAuto": "Automatic (recommended)",
+  "preferences_linuxWebViewRenderHardware": "Hardware acceleration",
+  "preferences_linuxWebViewRenderSoftware": "Software rendering",
+  "preferences_linuxWebViewRenderCurrent": "Now: {mode} ({reason})",
+  "@preferences_linuxWebViewRenderCurrent": {
+    "placeholders": {
+      "mode": {
+        "type": "String"
+      },
+      "reason": {
+        "type": "String"
+      }
+    }
+  },
+  "preferences_linuxWebViewRenderPending": "Saved, takes effect after restart",
+  "preferences_linuxWebViewReasonEnv": "set by environment variable",
+  "preferences_linuxWebViewReasonUser": "chosen manually",
+  "preferences_linuxWebViewReasonCrash": "web process crashed last time",
+  "preferences_linuxWebViewReasonNvidia": "NVIDIA proprietary driver detected",
+  "preferences_linuxWebViewReasonNoGpu": "no usable GPU found",
+  "preferences_linuxWebViewReasonVm": "virtual machine or incompatible GPU",
+  "preferences_linuxWebViewReasonPreset": "LIBGL_ALWAYS_SOFTWARE is set",
+  "preferences_linuxWebViewReasonDefault": "GPU looks fine",
+  "preferences_linuxWebViewCrashTitle": "Built-in web page crashed",
+  "preferences_linuxWebViewCrashBody": "The rendering process of the built-in web page crashed, most likely because the GPU driver does not work with hardware acceleration. Software rendering will be used from now on. Close and reopen cfluxdo, then try again.\n\nYou can change this later in Preferences → Advanced → Built-in web page rendering.",
   "preferences_renderGlesRestartTitle": "Restart Required",
   "preferences_stickerSource": "Sticker source",
   "preferences_title": "Preferences",

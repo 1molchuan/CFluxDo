@@ -10,6 +10,7 @@
 #include <cstring>
 #include <memory>
 
+#include "cfluxdo_render_mode.h"
 #include "cfluxdo_tls_channel.h"
 #include "cookie_manager.h"
 #include "credential_database.h"
@@ -80,7 +81,9 @@ void flutter_inappwebview_linux_plugin_register_with_registrar(FlPluginRegistrar
   // This must happen before any WPEDisplay is created, because WebKit's WebProcess
   // inherits environment variables at spawn time. Setting LIBGL_ALWAYS_SOFTWARE
   // after WebProcess starts has no effect.
-  flutter_inappwebview_plugin::ApplySoftwareRenderingIfNeeded();
+  // cfluxdo：换成自己的判定（在上游虚拟机判定之外加 NVIDIA 专有驱动、崩溃自愈与设置项），
+  // 见 cfluxdo_render_mode.cc
+  cfluxdo_render_mode_apply();
 
   FlutterInappwebviewLinuxPlugin* plugin = FLUTTER_INAPPWEBVIEW_LINUX_PLUGIN(
       g_object_new(flutter_inappwebview_linux_plugin_get_type(), nullptr));
@@ -120,6 +123,7 @@ void flutter_inappwebview_linux_plugin_register_with_registrar(FlPluginRegistrar
 
   cfluxdo_enable_persistent_cookies();
   cfluxdo_tls_channel_register(registrar);
+  cfluxdo_render_mode_register(registrar);
 
   // Note: We don't unref the plugin here as it needs to stay alive
   // for the lifetime of the application

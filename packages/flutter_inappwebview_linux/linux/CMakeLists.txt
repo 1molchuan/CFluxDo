@@ -174,6 +174,7 @@ list(APPEND PLUGIN_SOURCES
   "cookie_manager.cc"
   "credential_database.cc"
   "proxy_manager.cc"
+  "cfluxdo_render_mode.cc"
   "cfluxdo_tls_channel.cc"
   "utils/software_rendering.cc"
   "web_storage_manager.cc"

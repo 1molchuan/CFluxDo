@@ -12,6 +12,7 @@ import '../../providers/preferences_provider.dart';
 import '../../providers/render_crash_provider.dart';
 import '../../providers/secret_store_provider.dart';
 import '../../services/crypto/crypto_key_store.dart';
+import '../../services/linux_webview_render_service.dart';
 import '../../services/toast_service.dart';
 import '../../utils/dialog_utils.dart';
 import '../../utils/blocked_user_filter.dart';
@@ -334,6 +335,33 @@ List<SettingsGroup> buildPreferencesGroups(BuildContext context) {
           ),
         ],
       ),
+    // 与上面的 Android 高级分组互斥，标题相同
+    if (Platform.isLinux)
+      SettingsGroup(
+        title: l10n.preferences_advanced,
+        icon: Symbols.bug_report_rounded,
+        items: [
+          // 内置网页（WPEWebProcess）渲染方式：NVIDIA 专有驱动下硬件渲染会在
+          // libnvidia-eglcore 里崩，登录 / 人机验证页全黑。默认自动判定。
+          ActionModel(
+            id: 'linuxWebViewRendering',
+            title: l10n.preferences_linuxWebViewRendering,
+            subtitle: l10n.preferences_linuxWebViewRenderingDesc,
+            icon: Symbols.web_rounded,
+            wrapSubtitle: true,
+            getDynamicSubtitle: (ref) {
+              final state = ref
+                  .watch(linuxWebViewRenderStateProvider)
+                  .maybeWhen(data: (v) => v, orElse: () => null);
+              if (state == null) return null;
+              return '${l10n.preferences_linuxWebViewRenderingDesc}'
+                  '\n${linuxWebViewRenderStatus(l10n, state)}';
+            },
+            onTap: (context, ref) =>
+                _showLinuxWebViewRenderPicker(context, ref),
+          ),
+        ],
+      ),
 
     SettingsGroup(
       title: l10n.crypto_settingsGroup,
@@ -381,6 +409,88 @@ List<SettingsGroup> buildPreferencesGroups(BuildContext context) {
       ],
     ),
   ];
+}
+
+String _linuxWebViewRenderModeLabel(
+  AppLocalizations l10n,
+  LinuxWebViewRenderMode mode,
+) => switch (mode) {
+  LinuxWebViewRenderMode.auto => l10n.preferences_linuxWebViewRenderAuto,
+  LinuxWebViewRenderMode.hardware =>
+    l10n.preferences_linuxWebViewRenderHardware,
+  LinuxWebViewRenderMode.software =>
+    l10n.preferences_linuxWebViewRenderSoftware,
+};
+
+/// 设置页上的一行状态：「本次：软件渲染（检测到 NVIDIA 专有驱动）」，改了没重启再补一句
+@visibleForTesting
+String linuxWebViewRenderStatus(
+  AppLocalizations l10n,
+  LinuxWebViewRenderState state,
+) {
+  final effective = state.software
+      ? l10n.preferences_linuxWebViewRenderSoftware
+      : l10n.preferences_linuxWebViewRenderHardware;
+  final reason = switch (state.reason) {
+    'env' => l10n.preferences_linuxWebViewReasonEnv,
+    'user' => l10n.preferences_linuxWebViewReasonUser,
+    'crash' => l10n.preferences_linuxWebViewReasonCrash,
+    'nvidia' => l10n.preferences_linuxWebViewReasonNvidia,
+    'no_gpu' => l10n.preferences_linuxWebViewReasonNoGpu,
+    'vm' => l10n.preferences_linuxWebViewReasonVm,
+    'preset' => l10n.preferences_linuxWebViewReasonPreset,
+    _ => l10n.preferences_linuxWebViewReasonDefault,
+  };
+  final line = l10n.preferences_linuxWebViewRenderCurrent(effective, reason);
+  if (!state.pendingRestart) return line;
+  return '$line · ${l10n.preferences_linuxWebViewRenderPending}';
+}
+
+Future<void> _showLinuxWebViewRenderPicker(
+  BuildContext context,
+  WidgetRef ref,
+) async {
+  final l10n = context.l10n;
+  final state = await ref.read(linuxWebViewRenderStateProvider.future);
+  if (!context.mounted) return;
+  final current = state?.savedMode ?? LinuxWebViewRenderMode.auto;
+  final selected = await showAppDialog<LinuxWebViewRenderMode>(
+    context: context,
+    builder: (dialogContext) => SimpleDialog(
+      title: Text(l10n.preferences_linuxWebViewRendering),
+      children: [
+        for (final mode in LinuxWebViewRenderMode.values)
+          SimpleDialogOption(
+            onPressed: () => Navigator.pop(dialogContext, mode),
+            child: Row(
+              children: [
+                Icon(
+                  mode == current
+                      ? Symbols.radio_button_checked_rounded
+                      : Symbols.radio_button_unchecked_rounded,
+                  color: mode == current
+                      ? Theme.of(dialogContext).colorScheme.primary
+                      : null,
+                  size: 20,
+                ),
+                const SizedBox(width: 12),
+                Text(_linuxWebViewRenderModeLabel(l10n, mode)),
+              ],
+            ),
+          ),
+      ],
+    ),
+  );
+  if (selected == null || selected == current) return;
+  try {
+    await LinuxWebViewRenderService.setMode(selected);
+  } catch (e) {
+    ToastService.showError(e.toString());
+    return;
+  }
+  if (!context.mounted) return;
+  ref.invalidate(linuxWebViewRenderStateProvider);
+  _showRenderBackendRestartDialog(context);
 }
 
 /// 渲染后端切换后提示重启。
