@@ -6,6 +6,7 @@ import '../../theme/mojian_theme.dart';
 import 'package:app_icons/app_icons.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+
 import '../../models/topic.dart';
 import '../../models/category.dart';
 import '../../models/topic_card_style.dart';
@@ -24,6 +25,7 @@ import '../common/icon_glyph_span.dart';
 import '../common/relative_time_text.dart';
 import '../../utils/number_utils.dart';
 import '../common/emoji_text.dart';
+import 'topic_expandable_excerpt.dart';
 
 Widget _withDesktopTertiaryTap(Widget child, VoidCallback? onMiddleClick) {
   if (!PlatformUtils.isDesktop || onMiddleClick == null) return child;
@@ -241,9 +243,8 @@ class _MobileTopicTapSurfaceState extends State<_MobileTopicTapSurface> {
 
   @override
   Widget build(BuildContext context) {
-    final overlayColor = Theme.of(
-      context,
-    ).colorScheme.onSurface.withValues(alpha: 0.06);
+    final overlayColor = Theme.of(context).colorScheme.onSurface
+        .withValues(alpha: 0.06);
     return Semantics(
       onTap: widget.onTap == null ? null : _handleTap,
       onLongPress: widget.onLongPress == null ? null : _handleLongPress,
@@ -546,13 +547,29 @@ class TopicCard extends ConsumerWidget {
       );
     }
 
+    final effectiveMiddle =
+        middleWidget ??
+        (!messageStyle && (style.showExcerpt || style.showImages)
+            ? TopicExpandableExcerpt(
+                topic: topic,
+                showText: style.showExcerpt,
+                showImages: style.showImages,
+                maxCollapsedLines: style.maxCollapsedLines,
+                isFullyRead: isFullyRead,
+                allowFetch: style.allowExcerptFetch,
+              )
+            : null);
+
     final content = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         titleRow,
         // 详情摘要(如书签的帖子摘要):标题下、署名块上,
-        // Gmail snippet 的位置
-        if (middleWidget != null) ...[const SizedBox(height: 4), middleWidget!],
+        // Gmail snippet 的位置，类 X/推特信息流正文展示
+        if (effectiveMiddle != null) ...[
+          const SizedBox(height: 4),
+          effectiveMiddle,
+        ],
         const SizedBox(height: 8),
         metadata(
           withAvatarInline: style.avatarLayout == TopicCardAvatarLayout.inline,
