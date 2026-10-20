@@ -2983,13 +2983,16 @@ class _TopicListState extends ConsumerState<_TopicList>
     if (focusIndex < 0 || focusIndex >= topics.length) return;
 
     final topic = topics[focusIndex];
+    final scrollToPostNumber = ref.read(preferencesProvider).defaultNestedView
+        ? null
+        : topic.lastReadPostNumber;
     // 强制用 Navigator push 打开（而非 Master-Detail 内选中）
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => TopicDetailPage(
           topicId: topic.id,
           initialTitle: topic.title,
-          scrollToPostNumber: topic.lastReadPostNumber,
+          scrollToPostNumber: scrollToPostNumber,
         ),
       ),
     );
@@ -3096,6 +3099,10 @@ class _TopicListState extends ConsumerState<_TopicList>
   }
 
   void _openTopic(Topic topic) {
+    // 树形视图从完整话题开始，续读楼层只用于平铺视图。
+    final scrollToPostNumber = ref.read(preferencesProvider).defaultNestedView
+        ? null
+        : topic.lastReadPostNumber;
     final canShowDetailPane = MasterDetailLayout.canShowBothPanesFor(context);
 
     if (canShowDetailPane) {
@@ -3104,7 +3111,7 @@ class _TopicListState extends ConsumerState<_TopicList>
           .select(
             topicId: topic.id,
             initialTitle: topic.title,
-            scrollToPostNumber: topic.lastReadPostNumber,
+            scrollToPostNumber: scrollToPostNumber,
           );
       return;
     }
@@ -3114,7 +3121,7 @@ class _TopicListState extends ConsumerState<_TopicList>
         builder: (_) => TopicDetailPage(
           topicId: topic.id,
           initialTitle: topic.title,
-          scrollToPostNumber: topic.lastReadPostNumber,
+          scrollToPostNumber: scrollToPostNumber,
           autoSwitchToMasterDetail: true,
         ),
       ),

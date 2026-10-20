@@ -1435,6 +1435,7 @@ extension _UserActions on _TopicDetailPageState {
 
   /// 当前活跃的嵌套视图 family 参数(context 定位模式带目标楼层)
   NestedTopicParams get _activeNestedParams => NestedTopicParams(
+    instanceId: _instanceId,
     topicId: widget.topicId,
     targetPostNumber: _nestedTargetPostNumber,
   );
@@ -1684,6 +1685,7 @@ extension _UserActions on _TopicDetailPageState {
     if (_isNestedView) {
       setState(() {
         _isNestedView = false;
+        _nestedReadingSession.enabled = false;
         _nestedAutoEnabled = false;
         _nestedTargetPostNumber = null;
       });
@@ -1696,6 +1698,7 @@ extension _UserActions on _TopicDetailPageState {
     final hadFilter = notifier.viewMode.isFiltered;
     setState(() {
       _isNestedView = true;
+      _nestedReadingSession.enabled = true;
       // 手动开启:失败时显示错误页可重试,不做静默回落
       _nestedAutoEnabled = false;
     });

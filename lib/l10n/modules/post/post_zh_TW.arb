@@ -329,5 +329,23 @@
   "@postRevision_showSuccess": {
     "placeholders": {"revision": {"type": "int"}}
   },
-  "postRevision_deleteAllSuccess": "已永久刪除全部編輯歷史"
+  "postRevision_deleteAllSuccess": "已永久刪除全部編輯歷史",
+  "nested_resumeReading": "繼續上次閱讀 · 第 {postNumber} 樓",
+  "@nested_resumeReading": {
+    "placeholders": {
+      "postNumber": {
+        "type": "int"
+      }
+    }
+  },
+  "nested_nextRoot": "下一則主回覆",
+  "nested_showMoreReplies": "展開其餘 {count} 則回覆",
+  "@nested_showMoreReplies": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "nested_restoreFailed": "暫時無法恢復此位置，請重試"
 }

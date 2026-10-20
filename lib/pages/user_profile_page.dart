@@ -3805,7 +3805,10 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage>
               onTap: () => _openTopic(
                 topicId: topic.id,
                 initialTitle: topic.title,
-                scrollToPostNumber: topic.lastReadPostNumber,
+                scrollToPostNumber:
+                    ref.read(preferencesProvider).defaultNestedView
+                        ? null
+                        : topic.lastReadPostNumber,
               ),
               enableLongPress: enableLongPress,
             );
