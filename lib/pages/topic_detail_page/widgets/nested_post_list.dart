@@ -637,14 +637,12 @@ class _NestedPostListState extends ConsumerState<NestedPostList> {
                           current: ns.sort,
                           onTap: () => _changeSort('top'),
                         ),
-                        const SizedBox(width: 6),
                         _SortChip(
                           label: context.l10n.nested_sortNew,
                           value: 'new',
                           current: ns.sort,
                           onTap: () => _changeSort('new'),
                         ),
-                        const SizedBox(width: 6),
                         _SortChip(
                           label: context.l10n.nested_sortOld,
                           value: 'old',
@@ -656,7 +654,7 @@ class _NestedPostListState extends ConsumerState<NestedPostList> {
                   ),
                 ),
 
-                if (contextMode)
+                if (contextMode && contextChain == null)
                   SliverToBoxAdapter(child: _buildContextBanner(context)),
 
                 if (!contextMode && ns.newRootPostIds.isNotEmpty)
@@ -779,13 +777,7 @@ class _NestedPostListState extends ConsumerState<NestedPostList> {
             PositionedDirectional(
               end: 16,
               bottom: 100 + MediaQuery.paddingOf(context).bottom,
-              child: contextMode && widget.onViewFullTopic != null
-                  ? FilledButton.tonalIcon(
-                      onPressed: widget.onViewFullTopic,
-                      icon: const Icon(Icons.arrow_back_rounded),
-                      label: Text(context.l10n.nested_contextViewFullTopic),
-                    )
-                  : !contextMode && roots.isNotEmpty
+              child: !contextMode && roots.isNotEmpty
                   ? ValueListenableBuilder<int?>(
                       valueListenable: _currentRoot,
                       builder: (context, current, _) {
@@ -905,11 +897,30 @@ class _SortChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ChoiceChip(
-      label: Text(label),
-      selected: value == current,
-      onSelected: (_) => onTap(),
-      materialTapTargetSize: MaterialTapTargetSize.padded,
+    final theme = Theme.of(context);
+    final isActive = value == current;
+    return GestureDetector(
+      onTap: isActive ? null : onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: isActive
+              ? theme.colorScheme.primaryContainer
+              : theme.colorScheme.surfaceContainerHighest.withValues(
+                  alpha: 0.4,
+                ),
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Text(
+          label,
+          style: theme.textTheme.labelSmall?.copyWith(
+            color: isActive
+                ? theme.colorScheme.primary
+                : theme.colorScheme.onSurfaceVariant,
+            fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
+          ),
+        ),
+      ),
     );
   }
 }
