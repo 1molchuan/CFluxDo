@@ -12,6 +12,7 @@
   <url type="homepage">https://github.com/1molchuan/fluxdo</url>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="1.2.0-beta.3" date="2026-10-20" type="development"/>
     <release version="1.1.1-beta.4" date="2026-10-16" type="development"/>
   </releases>
 </component>
