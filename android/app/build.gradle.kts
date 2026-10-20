@@ -81,6 +81,10 @@ android {
                 keyPassword = releaseKeyPassword
                 storeFile = releaseStoreFile
                 storePassword = releaseStorePassword
+                // minSdk ≥ 24 时 AGP 默认只签 v2；部分手机安装器、文件管理器只认
+                // META-INF 里的 v1 签名，会把只有 v2 的包显示成「未签名」
+                enableV1Signing = true
+                enableV2Signing = true
             }
         }
     }
