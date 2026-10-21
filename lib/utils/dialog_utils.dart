@@ -25,6 +25,7 @@ bool _isBlurEnabled(BuildContext context) {
 Widget _buildAnimatedBlurBarrier({
   required Widget barrier,
   required Animation<double> animation,
+  required ModalBlurScene scene,
 }) {
   return AnimatedBuilder(
     animation: animation,
@@ -32,7 +33,7 @@ Widget _buildAnimatedBlurBarrier({
       final t = animation.value;
       if (t == 0) return child!;
 
-      final sigma = (blurSigma * t).clamp(0.01, blurSigma);
+      final sigma = (scene.sigma * t).clamp(0.01, scene.sigma);
       final filter = createBlurFilter(sigma);
 
       return BackdropFilter(filter: filter, child: child);
@@ -149,7 +150,10 @@ Future<T?> showAppDialog<T>({
     barrierColor:
         barrierColor ??
         (enableBlur
-            ? blurBarrierColor(Theme.of(context).brightness)
+            ? blurBarrierColor(
+                Theme.of(context).brightness,
+                scene: ModalBlurScene.dialog,
+              )
             : Colors.black54),
     barrierLabel:
         barrierLabel ??
@@ -195,7 +199,10 @@ Future<T?> showAppGeneralDialog<T extends Object?>({
     barrierColor:
         barrierColor ??
         (enableBlur
-            ? blurBarrierColor(Theme.of(context).brightness)
+            ? blurBarrierColor(
+                Theme.of(context).brightness,
+                scene: ModalBlurScene.dialog,
+              )
             : const Color(0x80000000)),
     transitionDuration: transitionDuration,
     reverseTransitionDuration: reverseTransitionDuration,
@@ -290,7 +297,10 @@ Future<T?> showAppBottomSheet<T>({
     modalBarrierColor:
         barrierColor ??
         (enableBlur
-            ? blurBarrierColor(Theme.of(context).brightness)
+            ? blurBarrierColor(
+                Theme.of(context).brightness,
+                scene: ModalBlurScene.sheet,
+              )
             : Theme.of(context).bottomSheetTheme.modalBarrierColor),
     isDismissible: isDismissible,
     enableDrag: enableDrag,
@@ -347,7 +357,11 @@ class _BlurModalBottomSheetRoute<T> extends ModalBottomSheetRoute<T> {
   Widget buildModalBarrier() {
     final barrier = super.buildModalBarrier();
     if (!enableBlur) return barrier;
-    return _buildAnimatedBlurBarrier(barrier: barrier, animation: animation!);
+    return _buildAnimatedBlurBarrier(
+      barrier: barrier,
+      animation: animation!,
+      scene: ModalBlurScene.sheet,
+    );
   }
 
   /// Android 预测返回手势:慢划边缘时 sheet 跟手下滑,与手指下拉关闭是同
@@ -458,6 +472,10 @@ class _BlurRawDialogRoute<T> extends PopupRoute<T> {
   Widget buildModalBarrier() {
     final barrier = super.buildModalBarrier();
     if (!enableBlur) return barrier;
-    return _buildAnimatedBlurBarrier(barrier: barrier, animation: animation!);
+    return _buildAnimatedBlurBarrier(
+      barrier: barrier,
+      animation: animation!,
+      scene: ModalBlurScene.dialog,
+    );
   }
 }
