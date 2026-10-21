@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import '../../../../models/topic.dart';
 import '../../../../services/discourse_cache_manager.dart';
 import '../../../../services/emoji_handler.dart';
+import '../../../../theme/mojian_theme.dart';
 
 String _getEmojiUrl(String emojiName) {
   return EmojiHandler().getEmojiUrl(emojiName);
@@ -648,7 +649,12 @@ class _ReactionPickerOverlayState extends State<_ReactionPickerOverlay> {
 
     // 面板:从按钮胶囊形变到面板胶囊,起点与按钮重合所以先透明再显形
     final panelRect = Rect.lerp(ctrl.buttonRect, ctrl.pickerRect, m)!;
-    final finalRadius = ctrl.rows == 1 ? 26.0 : 24.0;
+    // 墨笺：纸面小圆角，不做大胶囊
+    final finalRadius = theme.extension<MojianTokens>() != null
+        ? 6.0
+        : ctrl.rows == 1
+        ? 26.0
+        : 24.0;
     final radius = lerpDouble(ctrl.buttonRect.height / 2, finalRadius, m)!;
     final panelOpacity = (m / 0.35).clamp(0.0, 1.0);
 
@@ -799,7 +805,9 @@ class _ReactionPickerOverlayState extends State<_ReactionPickerOverlay> {
               child: DecoratedBox(
                 decoration: BoxDecoration(
                   color: theme.colorScheme.inverseSurface,
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(
+                    theme.extension<MojianTokens>() != null ? 4 : 12,
+                  ),
                 ),
                 child: Padding(
                   padding: const EdgeInsets.symmetric(
@@ -857,6 +865,25 @@ class _PanelSurface extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final dark = theme.brightness == Brightness.dark;
+    final mj = theme.extension<MojianTokens>();
+    if (mj != null) {
+      // 墨笺：纸色底 + 细线，只留一层很淡的投影把面板从正文里托起来
+      return DecoratedBox(
+        decoration: BoxDecoration(
+          color: mj.paper,
+          borderRadius: BorderRadius.circular(radius),
+          border: Border.all(color: mj.ruleStrong),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: dark ? 0.22 : 0.06),
+              blurRadius: 10,
+              offset: const Offset(0, 3),
+            ),
+          ],
+        ),
+        child: const SizedBox.expand(),
+      );
+    }
     return DecoratedBox(
       decoration: BoxDecoration(
         color: theme.colorScheme.surfaceContainerHigh,
@@ -965,7 +992,8 @@ class _ReactionItem extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final primary = theme.colorScheme.primary;
-    final borderRadius = BorderRadius.circular(14);
+    final mj = theme.extension<MojianTokens>();
+    final borderRadius = BorderRadius.circular(mj != null ? 4 : 14);
     final highlightScale = isHighlighted
         ? _kHighlightScale
         : isNeighbor
@@ -973,7 +1001,7 @@ class _ReactionItem extends StatelessWidget {
             : 1.0;
 
     final background = isCurrent
-        ? theme.colorScheme.primaryContainer
+        ? (mj?.paper3 ?? theme.colorScheme.primaryContainer)
         : isHighlighted
             ? primary.withValues(alpha: 0.1)
             : primary.withValues(alpha: 0);
