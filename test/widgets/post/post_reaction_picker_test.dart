@@ -40,6 +40,7 @@ class _ActionBarHarness {
     bool scrollable = false,
     bool isGuest = false,
     bool isOwnPost = false,
+    bool pushed = false,
   }) {
     final bar = PostActionBar(
       post: Post(
@@ -69,10 +70,8 @@ class _ActionBarHarness {
       onShowMoreMenu: () {},
       onToggleReplies: () {},
     );
-    return TranslationProvider(
-      child: MaterialApp(
-        home: Scaffold(
-          body: scrollable
+    final page = Scaffold(
+      body: scrollable
               ? SingleChildScrollView(
                   child: Column(
                     children: [
@@ -83,8 +82,18 @@ class _ActionBarHarness {
                   ),
                 )
               : Center(child: bar),
-        ),
-      ),
+    );
+    return TranslationProvider(
+      child: pushed
+          // 面板所在页压在首页之上，返回键的去向才看得出来
+          ? MaterialApp(
+              routes: {
+                '/': (_) => const Scaffold(body: Text('首页')),
+                '/post': (_) => page,
+              },
+              initialRoute: '/post',
+            )
+          : MaterialApp(home: page),
     );
   }
 
@@ -267,6 +276,30 @@ void main() {
 
     expect(harness.selected, isEmpty);
     expect(_reactionImage('heart'), findsNothing);
+  });
+
+  testWidgets('面板开着时返回键先收起面板，不退出页面', (tester) async {
+    final harness = _ActionBarHarness();
+    addTearDown(harness.dispose);
+    await tester.pumpWidget(harness.build(pushed: true));
+    await tester.pumpAndSettle();
+
+    final gesture = await _holdButton(tester, harness);
+    await gesture.up();
+    await tester.pumpAndSettle();
+    expect(_reactionImage('heart'), findsOneWidget);
+
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(_reactionImage('heart'), findsNothing);
+    expect(find.byKey(harness.likeButtonKey), findsOneWidget);
+    expect(harness.selected, isEmpty);
+
+    // 面板收起后返回键照常退出页面
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(find.byKey(harness.likeButtonKey), findsNothing);
+    expect(find.text('首页'), findsOneWidget);
   });
 
   testWidgets('长按后拖远松手取消选择', (tester) async {

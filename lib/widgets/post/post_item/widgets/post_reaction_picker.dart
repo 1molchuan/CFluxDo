@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 import 'dart:ui' show lerpDouble;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:app_icons/app_icons.dart';
 import 'package:flutter/services.dart';
@@ -141,6 +142,11 @@ class ReactionPickerController {
   /// 任一发生都立即关闭 picker,避免 geometry 错位或 picker 残留
   _ReactionPickerLifecycleObserver? _lifecycleObserver;
 
+  /// picker 开着时挂在所在路由上：返回键 / 预测返回手势先收起 picker，
+  /// 不让整个话题页跟着退出
+  ModalRoute<Object?>? _popRoute;
+  _ReactionPickerPopEntry? _popEntry;
+
   // 上一次启动时计算好的几何数据
   Rect _buttonRect = Rect.zero;
   Rect _pickerRect = Rect.zero;
@@ -234,8 +240,28 @@ class ReactionPickerController {
 
     _attachScrollListeners(context);
     _attachLifecycleObserver();
+    _attachPopEntry(context);
 
     enter.forward(from: 0);
+  }
+
+  void _attachPopEntry(BuildContext context) {
+    _detachPopEntry();
+    final route = ModalRoute.of(context);
+    if (route == null) return;
+    final entry = _ReactionPickerPopEntry(onBack: close);
+    route.registerPopEntry(entry);
+    _popRoute = route;
+    _popEntry = entry;
+  }
+
+  void _detachPopEntry() {
+    final entry = _popEntry;
+    if (entry == null) return;
+    _popRoute?.unregisterPopEntry(entry);
+    entry.dispose();
+    _popRoute = null;
+    _popEntry = null;
   }
 
   /// 沿 context 向上找所有 Scrollable，订阅其 position 变化
@@ -474,6 +500,7 @@ class ReactionPickerController {
     _desktopLeaveTimer?.cancel();
     _desktopLeaveTimer = null;
     _closing = true;
+    _detachPopEntry();
     enter.reverse().whenCompleteOrCancel(_disposeEntryIfNeeded);
     flightAnim.forward(from: 0).whenCompleteOrCancel(_onFlightDone);
   }
@@ -498,6 +525,8 @@ class ReactionPickerController {
     _touchPinned = false;
     _desktopLeaveTimer?.cancel();
     _desktopLeaveTimer = null;
+    // 收回动画还在播时返回键就该交还给页面
+    _detachPopEntry();
     enter.reverse().whenCompleteOrCancel(_disposeEntryIfNeeded);
   }
 
@@ -513,6 +542,7 @@ class ReactionPickerController {
     _touchPinned = false;
     _detachScrollListeners();
     _detachLifecycleObserver();
+    _detachPopEntry();
   }
 
   // ============================== 桌面端 hover 安全区 ==============================
@@ -551,6 +581,7 @@ class ReactionPickerController {
     _desktopLeaveTimer?.cancel();
     _detachScrollListeners();
     _detachLifecycleObserver();
+    _detachPopEntry();
     _entry?.remove();
     _entry = null;
     _flight = null;
@@ -559,6 +590,25 @@ class ReactionPickerController {
     _enter?.dispose();
     _flightAnim?.dispose();
   }
+}
+
+/// 挂在 picker 所在路由上的返回拦截：不允许路由直接退出，返回时收起 picker。
+class _ReactionPickerPopEntry extends PopEntry<Object?> {
+  _ReactionPickerPopEntry({required this.onBack});
+
+  final VoidCallback onBack;
+  final ValueNotifier<bool> _canPop = ValueNotifier(false);
+
+  @override
+  ValueListenable<bool> get canPopNotifier => _canPop;
+
+  @override
+  void onPopInvokedWithResult(bool didPop, Object? result) {
+    // 路由正在遍历自己的 PopEntry，收起时要注销本条，挪到遍历结束后
+    if (!didPop) scheduleMicrotask(onBack);
+  }
+
+  void dispose() => _canPop.dispose();
 }
 
 /// 屏幕指标 / App 生命周期变化时关闭 picker。
