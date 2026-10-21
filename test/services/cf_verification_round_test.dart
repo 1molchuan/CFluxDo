@@ -95,6 +95,24 @@ void main() {
       expect(env.landed, hasLength(3), reason: '落值确认 3 次');
     });
 
+    test('定稿后站点又签一枚（第二枚晚到）→ 落值失败后改落最新值并通过', () async {
+      env.landOnlyCurrentWebView = true;
+      // 定稿窗口已过、正在落 v1 时，/challenge 跳转又签了 v2
+      env.onLand = (value) {
+        if (value == 'v1') env.webView = 'v2';
+      };
+      final (outcome, round) = await start();
+      env.webView = 'v1';
+      round.clearanceSeen('v1', source: 'polling');
+      await clock.advance(const Duration(seconds: 3));
+
+      final result = await outcome;
+      expect((result as CfRoundPassed).clearance, 'v2');
+      expect(env.jar, 'v2');
+      expect(env.landed.first, 'v1');
+      expect(env.landed.last, 'v2');
+    });
+
     test('值一直在变、稳定不下来 → 不落值，按超时收口', () async {
       final (outcome, round) = await start();
       var n = 0;

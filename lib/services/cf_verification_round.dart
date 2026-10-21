@@ -327,9 +327,11 @@ class CfVerificationRound implements CfVerificationSignals {
     }
   }
 
-  Future<void> _land(String value) async {
+  Future<void> _land(String settled) async {
     _landingInProgress = true;
     _cancelTicker();
+    var value = settled;
+    var switched = false;
     for (var attempt = 1; attempt <= landingAttempts; attempt++) {
       String? inJar;
       try {
@@ -350,6 +352,24 @@ class CfVerificationRound implements CfVerificationSignals {
         '(jar=${inJar?.length ?? 0} chars)',
         level: 'warning',
       );
+      // 定稿后站点又签了一枚（CF 常在挑战提交和随后的 /challenge 跳转各签一次，
+      // 第二枚晚到时定稿窗口已过）：落值只收 WebView 现有的那枚，死等旧值必败。
+      // 改落最新值、重新计次，只换一次，免得来回换卡住
+      if (!switched) {
+        final latest = await _readLatest();
+        if (isDone) return;
+        if (latest != null && !CfClearanceAuthority.isSameValue(latest, value)) {
+          switched = true;
+          CfChallengeLogger.log(
+            '[ROUND $id] cf_clearance changed during landing '
+            '(${latest.length} chars), landing the newer value',
+          );
+          value = latest;
+          _pendingValue = latest;
+          attempt = 0;
+          continue;
+        }
+      }
       if (attempt < landingAttempts) await _delay(landingRetryDelay);
       if (isDone) return;
     }
@@ -357,6 +377,19 @@ class CfVerificationRound implements CfVerificationSignals {
       CfRoundFailed(round: id, reason: CfRoundFailure.notLanded),
       detail: 'settled value not confirmed in jar',
     );
+  }
+
+  /// 落值期间读一次 WebView 当前的新值（读不到 / 出错返回 null）
+  Future<String?> _readLatest() async {
+    final reader = _reader;
+    if (reader == null) return null;
+    try {
+      final value = (await reader())?.trim();
+      return value == null || value.isEmpty ? null : value;
+    } catch (e) {
+      debugPrint('[CfRound] 落值期间读取 WebView cf_clearance 失败: $e');
+      return null;
+    }
   }
 
   Future<void> _delay(Duration duration) {
