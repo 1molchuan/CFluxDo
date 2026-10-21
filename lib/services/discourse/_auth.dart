@@ -1249,7 +1249,7 @@ mixin _AuthMixin on _DiscourseServiceBase {
         'jarTHash': _safeTokenHash(tToken),
         ..._sentTDiagnostics(response.requestOptions),
       });
-      return _recoverOrLogoutAfterStartupCheck(
+      return await _recoverOrLogoutAfterStartupCheck(
         triggerInfo: 'GET /session/current.json → ${response.statusCode} 无 current_user',
         signalRequestOptions: response.requestOptions,
         storedUsername: username,
