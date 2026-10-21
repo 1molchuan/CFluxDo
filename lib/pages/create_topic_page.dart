@@ -38,6 +38,7 @@ import '../constants.dart';
 import '../l10n/s.dart';
 import '../utils/dialog_utils.dart';
 import '../utils/discourse_url_parser.dart';
+import '../utils/platform_utils.dart';
 import 'pending_posts_page.dart';
 import '../theme/mojian_theme.dart';
 
@@ -1220,6 +1221,11 @@ class _CreateTopicPageState extends ConsumerState<CreateTopicPage> {
                                             ? const SizedBox.shrink()
                                             : RichComposerEditor(
                                                 key: _richKey,
+                                                // 手机进入页面时不自动跳到文末：键盘弹起
+                                                // 和长草稿定位同时改可视区域，正文偶尔
+                                                // 整块空白
+                                                autofocus:
+                                                    PlatformUtils.isDesktop,
                                                 header: _buildComposerHeader(
                                                   theme,
                                                   minTitleLength,
