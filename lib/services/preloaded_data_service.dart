@@ -4,6 +4,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart' show compute, visibleForTesting;
 import 'package:flutter/material.dart';
 import '../constants.dart';
+import 'app_logger.dart';
 import '../models/topic.dart';
 import '../models/category.dart';
 import 'network/discourse_dio.dart';
@@ -18,6 +19,8 @@ import 'cf_clearance_refresh_service.dart';
 /// （内容是原始 JSON），旧版为元素属性 `data-preloaded="..."`（HTML 实体转义），
 /// 两种形态都支持。
 class PreloadedDataService {
+  static bool _uploadSettingsLogged = false;
+
   static final PreloadedDataService _instance =
       PreloadedDataService._internal();
   factory PreloadedDataService() => _instance;
@@ -817,6 +820,21 @@ class PreloadedDataService {
         if (reactionsStr != null && reactionsStr.isNotEmpty) {
           _enabledReactions = reactionsStr.split('|');
           debugPrint('[PreloadedData] reactions: $_enabledReactions');
+        }
+
+        // 上传通道相关配置落进应用日志（每个进程一次）：排查上传失败时
+        // 要知道站点走不走 S3 直传、附件上限是多少
+        if (!_uploadSettingsLogged) {
+          _uploadSettingsLogged = true;
+          AppLogger.info(
+            'site upload settings',
+            tag: 'PreloadedData',
+            fields: {
+              'direct_s3': _siteSettings?['enable_direct_s3_uploads'],
+              'max_attachment_kb': _siteSettings?['max_attachment_size_kb'],
+              'max_image_kb': _siteSettings?['max_image_size_kb'],
+            },
+          );
         }
 
         // 提取 MessageBus 长轮询独立域名
