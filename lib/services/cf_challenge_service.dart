@@ -968,9 +968,10 @@ class _CfChallengePageState extends State<CfChallengePage> {
   static const _completionProbeTimeout = Duration(seconds: 8);
   static const _noChallengeProbeTimeout = Duration(milliseconds: 1800);
 
-  /// 验证页面加载时 WebView 中的 cf_clearance 快照
-  /// 用于区分「旧值残留」和「验证后新设的值」
-  String? _initialCfClearance;
+  /// 验证开始前见过的所有 cf_clearance（备份的旧值 + 验证页加载时 WebView 里的值）
+  /// 用于区分「旧值残留」和「验证后新设的值」。jar 和 WebView 可能各留着一个
+  /// 不同的旧值，只记一个时另一个会被当成新值、误判验证成功（上游 a2e9b7c2 同一处）
+  final Set<String> _initialCfClearances = {};
 
   int get _activeMaxCheckCount => _isBackground
       ? (widget.foregroundAfter?.inSeconds ?? _backgroundMaxCheckCount)
@@ -1006,25 +1007,25 @@ class _CfChallengePageState extends State<CfChallengePage> {
   /// 解决 Windows 上 initState 时 controller 为 null 导致 _initialCfClearance
   /// 为 null，进而无法过滤残留旧值、误判为验证成功的问题
   Future<void> _snapshotInitialClearance() async {
-    // 优先使用从 showManualVerify 传入的备份旧值（最可靠）
-    if (widget.oldCfClearanceValue != null &&
-        widget.oldCfClearanceValue!.isNotEmpty) {
-      _initialCfClearance = widget.oldCfClearanceValue;
+    // 备份的旧值最可靠，同步记下（读值入口可能在下面的 await 之前就被调用）
+    final backup = widget.oldCfClearanceValue;
+    if (backup != null && backup.isNotEmpty) {
+      _initialCfClearances.add(backup);
       debugPrint(
         '[CfChallenge] 使用备份的旧 cf_clearance 作为初始快照 '
-        '(${_initialCfClearance!.length} chars)',
+        '(${backup.length} chars)',
       );
-      return;
     }
 
-    // 兜底：从 WebView 读取（可能不可靠，但聊胜于无）
+    // 再读一次 WebView：它可能留着另一个旧值，也要记下（可能读不到，聊胜于无）
     try {
       final cookieValue = await _readCookieValue('cf_clearance');
-      _initialCfClearance = cookieValue;
-      if (_initialCfClearance != null && _initialCfClearance!.isNotEmpty) {
+      if (cookieValue != null &&
+          cookieValue.isNotEmpty &&
+          _initialCfClearances.add(cookieValue)) {
         debugPrint(
           '[CfChallenge] ⚠️ 验证页加载时 WebView 仍存在旧 cf_clearance '
-          '(${_initialCfClearance!.length} chars)，将忽略该值',
+          '(${cookieValue.length} chars)，将忽略该值',
         );
       }
     } catch (e) {
@@ -1760,12 +1761,7 @@ class _CfChallengePageState extends State<CfChallengePage> {
 
   bool _isFreshClearance(String? cookieValue) {
     if (cookieValue == null || cookieValue.isEmpty) return false;
-    if (_initialCfClearance != null &&
-        _initialCfClearance!.isNotEmpty &&
-        cookieValue == _initialCfClearance) {
-      return false;
-    }
-    return true;
+    return !_initialCfClearances.contains(cookieValue);
   }
 
   bool _isVerifyUrl(WebUri? url) {

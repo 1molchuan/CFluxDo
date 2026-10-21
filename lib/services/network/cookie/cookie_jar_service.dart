@@ -939,6 +939,9 @@ class CookieJarService {
   }
 
   /// Windows：通过页面级 controller 的 CDP 将关键 cookie 直接写入 CookieJar。
+  ///
+  /// [admit]：按名字和值做最后一道放行判断（异步），返回 false 的不写。
+  /// 调用方用它让 CDP 快路径也过 cf_clearance 的在位值闸门。
   Future<int> syncCriticalCookiesFromController(
     InAppWebViewController controller, {
     String? currentUrl,
@@ -946,6 +949,7 @@ class CookieJarService {
     Set<String>? excludeCookieNames,
     Map<String, String>? acceptValues,
     bool trusted = false,
+    Future<bool> Function(String name, String value)? admit,
   }) async {
     if (!io.Platform.isWindows) return 0;
     if (!_initialized) await initialize();
@@ -958,7 +962,7 @@ class CookieJarService {
         controller,
         currentUrl: currentUrl,
       );
-      final filtered = rawCookies
+      var filtered = rawCookies
           .where((raw) {
             final name = raw['name']?.toString();
             final value = raw['value']?.toString() ?? '';
@@ -978,6 +982,16 @@ class CookieJarService {
             return matchesAppHost(domain);
           })
           .toList(growable: false);
+
+      if (admit != null && filtered.isNotEmpty) {
+        final admitted = <Map<String, dynamic>>[];
+        for (final raw in filtered) {
+          final name = raw['name']?.toString() ?? '';
+          final value = raw['value']?.toString() ?? '';
+          if (await admit(name, value)) admitted.add(raw);
+        }
+        filtered = admitted;
+      }
 
       if (filtered.isEmpty) return 0;
 

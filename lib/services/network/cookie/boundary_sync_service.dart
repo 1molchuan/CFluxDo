@@ -248,6 +248,22 @@ class BoundarySyncService {
           excludeCookieNames: {...?excludeCookieNames, _sessionTokenName},
           trusted: trusted,
           acceptValues: acceptValues,
+          // CDP 快路径同样过 cf_clearance 在位值闸门（下方 strategy 路径的同一套
+          // 判定），否则 WebView 里残留的旧值能直接顶掉 jar 里健康的值
+          admit: (name, value) async {
+            if (name != CfClearanceAuthority.cookieName) return true;
+            final authority = CfClearanceAuthority.instance;
+            authority.noteWebViewValueObserved(value);
+            final decision = await authority.evaluateReplacement(value);
+            if (decision != CfClearanceReplaceDecision.allow) {
+              debugPrint(
+                '[BoundarySync] CDP: cf_clearance 在位值健康，跳过异值替换 '
+                '(valueLength=${value.length})',
+              );
+              return false;
+            }
+            return true;
+          },
         );
         if (synced > 0) {
           final syncedDetails = await _jar.getCookieDiagnosticsForRequest(
