@@ -21,7 +21,11 @@ import '../../helpers/memory_draft_store.dart';
 
 const _longName = 'a_really_long_username_for_testing';
 
-Future<void> _pumpReply(WidgetTester tester, {required double width}) async {
+Future<void> _pumpReply(
+  WidgetTester tester, {
+  required double width,
+  String username = _longName,
+}) async {
   PlatformUtils.debugDesktopOverride = false;
   addTearDown(() => PlatformUtils.debugDesktopOverride = null);
   tester.view.devicePixelRatio = 1;
@@ -73,7 +77,7 @@ Future<void> _pumpReply(WidgetTester tester, {required double width}) async {
               replyToPost: Post.fromJson({
                 'id': 9,
                 'post_number': 3,
-                'username': _longName,
+                'username': username,
               }),
             ),
           ),
@@ -100,6 +104,19 @@ void main() {
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
     // 草稿加载、presence 离开频道等收尾计时器跑完
+    await tester.pump(const Duration(seconds: 5));
+  });
+
+  testWidgets('手机宽度下短名字仍是单行页头', (tester) async {
+    // 测试字体每个字符都是 1em 宽，比真机字体宽得多，这里宽度放宽一些
+    await _pumpReply(tester, width: 460, username: 'Zzz_0.0');
+    expect(
+      find.byKey(const ValueKey('reply-composer-recipient-row')),
+      findsNothing,
+    );
+    expect(find.text(S.current.post_replyToUser('Zzz_0.0')), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump(const Duration(seconds: 5));
   });
 

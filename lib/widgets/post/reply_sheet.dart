@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:app_icons/app_icons.dart';
@@ -798,12 +800,16 @@ class _ReplySheetState extends ConsumerState<ReplySheet> {
   }
 
   /// 回复某楼时页头一行能否放下「头像 + 回复 @用户名」和右侧按钮
-  /// （对齐上游 53921966：放不下就给回复对象单独一行）。按钮宽按实际文案
-  /// 估算，偏保守。
+  /// （对齐上游 53921966：放不下就给回复对象单独一行）。按钮宽按实际
+  /// 文案估算；草稿状态图标按固定宽度预留，不随保存状态变来变去，免得
+  /// 打字时页头在一行、两行之间跳。
   bool _replyTargetNeedsOwnRow(ThemeData theme, double width) {
     final target = widget.replyToPost;
     if (target == null || _isEditMode || _isPrivateMessage) return false;
     final buttonStyle = theme.textTheme.labelLarge;
+    // M3 文字按钮左右各 12、实心按钮各 24，最小宽 64
+    double button(String label, double padding) =>
+        math.max(64, _textWidth(label, buttonStyle) + padding * 2);
     final title =
         28 +
         8 +
@@ -811,13 +817,18 @@ class _ReplySheetState extends ConsumerState<ReplySheet> {
           context.l10n.post_replyToUser(target.username),
           theme.textTheme.titleSmall,
         );
-    final discard = _draftController == null
-        ? 0
-        : 40 + 4 + _textWidth(context.l10n.common_discard, buttonStyle) + 32;
-    final review = _canReviewPost ? 48 + 8 : 0;
-    final send = _textWidth(context.l10n.common_send, buttonStyle) + 48;
-    // 32 = 左右内边距，8 = 标题与按钮的间隙
-    return 32 + title + 8 + discard + review + send > width;
+    final draft = _draftController == null
+        ? 0.0
+        : 24 + 4 + button(context.l10n.common_discard, 12) + 8;
+    final review = !_canReviewPost
+        ? 0.0
+        : (ref.read(preferencesProvider).aiPostReviewEnabled
+                  ? button(context.l10n.aiPostReview_button, 12)
+                  : 0) +
+              8;
+    final send = button(context.l10n.common_send, 24);
+    // 32 = 左右内边距，8 = 标题与按钮的最小间隙
+    return 32 + title + 8 + draft + review + send > width;
   }
 
   /// 单独一行的回复对象：头像 + @用户名，名字长就换行，不截断
