@@ -1017,9 +1017,15 @@ class _CfChallengePageState extends State<CfChallengePage> {
       );
     }
 
-    // 再读一次 WebView：它可能留着另一个旧值，也要记下（可能读不到，聊胜于无）
+    // 再读一次 WebView：它可能留着另一个旧值，也要记下（可能读不到，聊胜于无）。
+    // 读得太慢就不记：那时页面可能已经铸出新值，把新值当旧值会让验证永远等不到结果
     try {
+      final stopwatch = Stopwatch()..start();
       final cookieValue = await _readCookieValue('cf_clearance');
+      if (stopwatch.elapsed > const Duration(seconds: 2)) {
+        debugPrint('[CfChallenge] 快照读取过慢，不记录 WebView 中的 cf_clearance');
+        return;
+      }
       if (cookieValue != null &&
           cookieValue.isNotEmpty &&
           _initialCfClearances.add(cookieValue)) {
