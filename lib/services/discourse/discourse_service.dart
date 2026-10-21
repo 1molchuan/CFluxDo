@@ -49,6 +49,7 @@ import '../network/doh/accel_doh_auth_service.dart';
 import '../network/flux_request_spec.dart';
 import '../preloaded_data_service.dart';
 import '../session/session_token_authority.dart';
+import '../uploads/media_upload_limits.dart';
 import '../webview_session_cookie_refresh_service.dart';
 import '../app_logger.dart';
 import '../log/log_writer.dart';
