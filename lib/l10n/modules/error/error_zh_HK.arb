@@ -15,6 +15,18 @@
   "error_forbiddenAccess": "沒有權限訪問",
   "error_gone": "已刪除",
   "error_imageFormatUnsupported": "圖片格式不支持或不符合要求",
+  "error_fileTooBig": "文件過大，超過站點允許的附件大小",
+  "error_fileTooBigLimit": "文件過大：站點附件上限 {limit}，當前 {size}",
+  "@error_fileTooBigLimit": {
+    "placeholders": {
+      "limit": {
+        "type": "String"
+      },
+      "size": {
+        "type": "String"
+      }
+    }
+  },
   "error_imageTooBig": "圖片文件過大，請壓縮後重試",
   "error_internalServerError": "服務器內部錯誤",
   "error_loadFailed": "加載失敗",

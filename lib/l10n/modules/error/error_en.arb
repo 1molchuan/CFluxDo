@@ -15,6 +15,18 @@
   "error_forbiddenAccess": "No permission to access",
   "error_gone": "Deleted",
   "error_imageFormatUnsupported": "Image format not supported",
+  "error_fileTooBig": "File too large: exceeds the attachment size allowed by the site",
+  "error_fileTooBigLimit": "File too large: the site allows up to {limit}, this file is {size}",
+  "@error_fileTooBigLimit": {
+    "placeholders": {
+      "limit": {
+        "type": "String"
+      },
+      "size": {
+        "type": "String"
+      }
+    }
+  },
   "error_imageTooBig": "Image too large, please compress and retry",
   "error_internalServerError": "Internal server error",
   "error_loadFailed": "Failed to load",

@@ -273,10 +273,30 @@ mixin _UploadsMixin on _DiscourseServiceBase {
     DioMediaType? contentTypeOverride,
   }) async {
     const maxRetries = 3;
+    // 取文件名不能按 '/' 切：Windows 路径是反斜杠，整条路径会被当成文件名
+    final fileName = filenameOverride ?? File(filePath).uri.pathSegments.last;
+    final isImage = _imageExtensions.contains(
+      fileName.split('.').last.toLowerCase(),
+    );
+
+    // 非图片附件先按站点 max_attachment_size_kb 检查，免得整个传完才被 413
+    // 拒掉。图片不查：站点对图片另有上限，且可能先在服务端缩放；音视频改名
+    // 上传（filenameOverride）在 uploadMediaAsXz 里已经查过。
+    if (!isImage && filenameOverride == null) {
+      final maxBytes = await MediaUploadLimits.load();
+      final size = await File(filePath).length();
+      if (maxBytes != null && size > maxBytes) {
+        throw Exception(
+          S.current.error_fileTooBigLimit(
+            UploadResult.formatFileSize(maxBytes),
+            UploadResult.formatFileSize(size),
+          ),
+        );
+      }
+    }
 
     for (int attempt = 0; attempt <= maxRetries; attempt++) {
       try {
-        final fileName = filenameOverride ?? filePath.split('/').last;
 
         final formData = FormData.fromMap({
           'upload_type': 'composer',
@@ -358,7 +378,9 @@ mixin _UploadsMixin on _DiscourseServiceBase {
         }
 
         if (e.response?.statusCode == 413) {
-          throw Exception(S.current.error_imageTooBig);
+          throw Exception(
+            isImage ? S.current.error_imageTooBig : S.current.error_fileTooBig,
+          );
         }
         if (e.response?.statusCode == 422) {
           final data = e.response?.data;
@@ -377,6 +399,11 @@ mixin _UploadsMixin on _DiscourseServiceBase {
     // 不可达，但编译器需要
     throw Exception(S.current.error_uploadNoUrl);
   }
+
+  static const Set<String> _imageExtensions = {
+    'jpg', 'jpeg', 'png', 'gif', 'webp', 'avif', 'heic', 'heif', 'bmp', //
+    'ico', 'svg', 'tif', 'tiff',
+  };
 
   /// 上传图片（uploadFile 的别名，保持向后兼容）
   Future<UploadResult> uploadImage(String filePath) => uploadFile(filePath);
