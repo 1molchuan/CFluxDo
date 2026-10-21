@@ -2,9 +2,21 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart' show visibleForTesting;
 
 import '../network/flux_request_spec.dart';
 import 'upload_trace.dart';
+
+/// 分片 PUT 到对象存储失败（重试用尽）。此时合并请求还没发出、分片上传已
+/// 放弃，换普通上传重来不会产生重复附件。
+class MultipartStorageException implements Exception {
+  const MultipartStorageException(this.cause);
+
+  final DioException cause;
+
+  @override
+  String toString() => 'MultipartStorageException: $cause';
+}
 
 /// 控制请求沿用站点客户端，签名 PUT 使用无站点凭据的独立客户端。
 class S3MultipartUpload {
@@ -12,7 +24,12 @@ class S3MultipartUpload {
     : trace = trace ?? UploadTrace(),
       storage =
           storage ??
+          debugStorageFactory?.call() ??
           Dio(BaseOptions(connectTimeout: const Duration(seconds: 30)));
+
+  /// 测试用：替换签名 PUT 的客户端（上层 uploadFile 无法逐次注入）。
+  @visibleForTesting
+  static Dio Function()? debugStorageFactory;
 
   final UploadTrace trace;
   final Dio control;
@@ -212,6 +229,7 @@ class S3MultipartUpload {
         );
         if (error is! DioException) rethrow;
         final status = error.response?.statusCode;
+        Never giveUp() => throw MultipartStorageException(error);
         final retryable =
             error.type == DioExceptionType.connectionError ||
             error.type == DioExceptionType.connectionTimeout ||
@@ -219,7 +237,7 @@ class S3MultipartUpload {
             error.type == DioExceptionType.receiveTimeout ||
             status == 429 ||
             (status != null && status >= 500);
-        if (!retryable || attempt >= 2) rethrow;
+        if (!retryable || attempt >= 2) giveUp();
         trace.event(
           'multipart_part_retry',
           fields: {...fields, 'delayMs': (attempt + 1) * 1000},

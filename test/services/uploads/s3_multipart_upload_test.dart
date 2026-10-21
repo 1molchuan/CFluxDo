@@ -109,7 +109,16 @@ void main() {
         storage: storage,
       ).upload(file, 'image.jpg');
       if (fail) {
-        await expectLater(future, throwsA(isA<DioException>()));
+        await expectLater(
+          future,
+          throwsA(
+            isA<MultipartStorageException>().having(
+              (e) => e.cause.response?.statusCode,
+              'storage status',
+              403,
+            ),
+          ),
+        );
         expect(actions.last, '/uploads/abort-multipart.json');
         expect(actions, isNot(contains('/uploads/complete-multipart.json')));
       } else {

@@ -273,7 +273,7 @@ mixin _UploadsMixin on _DiscourseServiceBase {
     DioMediaType? contentTypeOverride,
   }) async {
     final uploadTrace = UploadTrace();
-    final direct = await UploadSettings.shouldUseMultipart(
+    var direct = await UploadSettings.shouldUseMultipart(
       trace: uploadTrace,
       loadSiteSettings: PreloadedDataService().getSiteSettings,
     );
@@ -375,6 +375,16 @@ mixin _UploadsMixin on _DiscourseServiceBase {
         }
 
         throw Exception(S.current.error_uploadNoUrl);
+      } on MultipartStorageException catch (e) {
+        // 对象存储（与站点不同的主机）这条网络走不通：分片上传已放弃、合并
+        // 没发出，改走普通上传重来一次，不至于整张图传不上去
+        debugPrint('[DiscourseService] 分片直传失败，改用普通上传: $e');
+        uploadTrace.event(
+          'upload_route',
+          fields: {'mode': 'standard', 'reason': 'multipart_storage_failed'},
+        );
+        direct = false;
+        continue;
       } on DioException catch (e) {
         debugPrint('[DiscourseService] Upload image failed: $e');
 
