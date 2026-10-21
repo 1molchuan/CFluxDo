@@ -172,6 +172,8 @@ class S3MultipartUpload {
         'partNumber': partNumber,
         'attempt': attempt + 1,
         'bytes': bytes.length,
+        // 只记对象存储的主机名（不含签名参数），排查直传连不连得上用
+        'host': uri.host,
       };
       trace.event('multipart_part_start', fields: fields);
       try {
