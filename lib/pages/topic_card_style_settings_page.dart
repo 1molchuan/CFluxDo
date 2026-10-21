@@ -305,8 +305,11 @@ class _TopicCardStyleSettingsPageState
         .clamp(0.0, Breakpoints.maxContentWidth - 32)
         .toDouble();
 
-    // 内容预览关闭时保留原有自绘预览和统计展示方式。
-    if (!style.showExcerpt && !style.showImages) {
+    final showContent = style.showExcerpt || style.showImages;
+    final mojian = Theme.of(context).extension<MojianTokens>() != null;
+    // 内容预览关闭时保留原有自绘预览和统计展示方式;墨笺开了摘要/图片
+    // 也是自绘卡夹摘要组件(与列表一致,见 buildTopicItem)
+    if (!showContent || mojian) {
       final layout = TopicCardLayout.obtain(
         identity: 'style-preview:0',
         topic: _previewTopic!,
@@ -320,7 +323,17 @@ class _TopicCardStyleSettingsPageState
       return IgnorePointer(
         child: SizedBox(
           width: cardWidth,
-          child: PaintedTopicCard(layout: layout),
+          child: PaintedTopicCard(
+            layout: layout,
+            middle: showContent
+                ? TopicExpandableExcerpt(
+                    topic: _previewTopic!,
+                    showText: style.showExcerpt,
+                    showImages: style.showImages,
+                    maxCollapsedLines: style.maxCollapsedLines,
+                  )
+                : null,
+          ),
         ),
       );
     }

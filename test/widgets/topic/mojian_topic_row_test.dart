@@ -111,7 +111,46 @@ void main() {
       expect(l.bottomGap, 8);
       expect(l.separatorColor, isNull);
       expect(l.avatarRect.width, 32);
+      expect(l.middleSplitY, isNull, reason: '经典卡没有中段插槽');
     });
+
+    test('中段插槽在标题之下、元信息行之上', () {
+      final l = _layout(_mojianTheme(Brightness.light), _topic(unread: 2));
+      final split = l.middleSplitY!;
+      expect(split, greaterThan(l.titleOffset.dy + l.title!.height - 0.01));
+      expect(split, lessThan(l.avatarRect.top));
+      expect(split, lessThan(l.timeOffset.dy));
+    });
+  });
+
+  testWidgets('中段组件把墨笺行切成上下两段，按自身高度撑开', (tester) async {
+    final theme = _mojianTheme(Brightness.light);
+    final l = _layout(theme, _topic(unseen: true));
+    const middleKey = ValueKey('middle');
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: theme,
+        home: Scaffold(
+          body: Align(
+            alignment: Alignment.topLeft,
+            child: SizedBox(
+              width: 380,
+              child: PaintedTopicCard(
+                layout: l,
+                middle: const SizedBox(key: middleKey, height: 40),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    final card = tester.getRect(find.byType(PaintedTopicCard));
+    expect(card.height, closeTo(l.cardHeight - l.bottomGap + 40, 0.01));
+    final middle = tester.getRect(find.byKey(middleKey));
+    expect(middle.top - card.top, closeTo(l.middleSplitY!, 0.01));
+    expect(middle.left - card.left, 12);
+    expect(middle.width, 380 - 24);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('墨笺话题行在深浅两色下都能挂载绘制', (tester) async {

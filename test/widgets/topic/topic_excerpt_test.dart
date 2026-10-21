@@ -13,6 +13,7 @@ import 'package:fluxdo/providers/theme_provider.dart';
 import 'package:fluxdo/services/discourse/discourse_service.dart';
 import 'package:fluxdo/services/local_notification_service.dart';
 import 'package:fluxdo/services/topic_excerpt_service.dart';
+import 'package:fluxdo/theme/mojian_theme.dart';
 import 'package:fluxdo/utils/relative_time_clock.dart';
 import 'package:fluxdo/widgets/topic/painted_topic_card.dart';
 import 'package:fluxdo/widgets/common/cached_image.dart';
@@ -67,7 +68,17 @@ void main() {
   });
   tearDown(() => TopicCardStyleScope.current = TopicCardStyle.defaults);
 
-  Widget app(Widget child, {double scale = 1}) => ProviderScope(
+  ThemeData mojianTheme() => MojianTheme.build(
+    scheme: MojianTheme.colorScheme(Brightness.light, MojianAccent.cinnabar),
+    accent: MojianAccent.cinnabar,
+    fontFamily: null,
+    pageTransitionsTheme: const PageTransitionsTheme(),
+    iconTheme: const IconThemeData(),
+    primaryIconTheme: const IconThemeData(),
+  );
+
+  Widget app(Widget child, {double scale = 1, ThemeData? theme}) =>
+      ProviderScope(
     overrides: [
       sharedPreferencesProvider.overrideWithValue(prefs),
       discourseServiceProvider.overrideWithValue(api),
@@ -82,6 +93,7 @@ void main() {
           GlobalCupertinoLocalizations.delegate,
         ],
         supportedLocales: AppLocaleUtils.supportedLocales,
+        theme: theme,
         builder: (context, child) => MediaQuery(
           data: MediaQuery.of(context).copyWith(
             textScaler: TextScaler.linear(scale),
@@ -202,6 +214,52 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('列表已有摘要'), findsOneWidget);
     expect(api.pending, isEmpty);
+  });
+
+  testWidgets('墨笺开了摘要仍走自绘行，摘要夹在标题与元信息之间且能展开', (tester) async {
+    const style = TopicCardStyle(showExcerpt: true, maxCollapsedLines: 2);
+    await prefs.setString('pref_topic_card_style', style.toJsonString());
+    TopicCardStyleScope.current = style;
+    var taps = 0;
+    final longExcerpt = List.filled(40, '墨笺列表的长摘要').join(' ');
+    await tester.pumpWidget(
+      app(
+        Builder(
+          builder: (context) => buildTopicItem(
+            context: context,
+            topic: _topic(1, excerpt: longExcerpt),
+            isSelected: false,
+            onTap: () => taps++,
+            enableLongPress: false,
+            categoryMap: const {},
+          ),
+        ),
+        theme: mojianTheme(),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final painted = find.byType(PaintedTopicCard);
+    expect(painted, findsOneWidget);
+    expect(find.byType(TopicCard), findsNothing);
+    final excerpt = find.descendant(
+      of: painted,
+      matching: find.byType(TopicExpandableExcerpt),
+    );
+    expect(excerpt, findsOneWidget);
+    final collapsed = tester.getSize(painted).height;
+
+    // 展开按钮在自绘行里照常可点，行随摘要长高
+    await tester.tap(find.text('查看更多'));
+    await tester.pumpAndSettle();
+    expect(tester.getSize(painted).height, greaterThan(collapsed));
+    expect(taps, 0);
+
+    // 点标题区仍打开话题
+    await tester.tapAt(tester.getTopLeft(painted) + const Offset(40, 30));
+    await tester.pump();
+    expect(taps, 1);
+    expect(api.pending, isEmpty);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('即使三个开关均开启，私信仍保持原布局且不请求首楼', (tester) async {

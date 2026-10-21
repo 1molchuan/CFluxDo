@@ -39,9 +39,15 @@ class PaintedTopicCard extends StatefulWidget {
     this.onPreviewIntent,
     this.isSelected = false,
     this.highlightColor,
+    this.middle,
   });
 
   final TopicCardLayout layout;
+
+  /// 夹在标题与元信息行之间的组件(列表摘要/图片)。仅墨笺话题行支持
+  /// ([TopicCardLayout.middleSplitY] 非空):画布在分界处切成上下两段,
+  /// 中间是普通组件,展开收起、点图看图都照常。其他排版传了也不显示
+  final Widget? middle;
   final VoidCallback? onTap;
   final VoidCallback? onLongPress;
   final VoidCallback? onMiddleClick;
@@ -115,12 +121,7 @@ class _PaintedTopicCardState extends State<PaintedTopicCard> {
         onLongPress: widget.onLongPress,
         onPreviewIntent: widget.onPreviewIntent,
         onMiddleClick: widget.onMiddleClick,
-        child: _PaintedTopicCardLeaf(
-          layout: layout,
-          paintStaticAvatar:
-              animatedUrl == null || animatedUrl != _readyAnimatedUrl,
-          child: avatarOverlay,
-        ),
+        child: _buildContent(layout, animatedUrl, avatarOverlay),
       ),
     );
     if (layout.band != null) {
@@ -134,14 +135,60 @@ class _PaintedTopicCardState extends State<PaintedTopicCard> {
   }
 }
 
+extension on _PaintedTopicCardState {
+  Widget _buildContent(
+    TopicCardLayout layout,
+    String? animatedUrl,
+    Widget? avatarOverlay,
+  ) {
+    final paintStaticAvatar =
+        animatedUrl == null || animatedUrl != _readyAnimatedUrl;
+    final middle = widget.middle;
+    if (middle == null || layout.middleSplitY == null) {
+      return _PaintedTopicCardLeaf(
+        layout: layout,
+        paintStaticAvatar: paintStaticAvatar,
+        child: avatarOverlay,
+      );
+    }
+    // 画布切成上下两段,中段组件按自身高度撑开;头像在下段
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _PaintedTopicCardLeaf(
+          layout: layout,
+          paintStaticAvatar: paintStaticAvatar,
+          region: _CardRegion.top,
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          child: middle,
+        ),
+        _PaintedTopicCardLeaf(
+          layout: layout,
+          paintStaticAvatar: paintStaticAvatar,
+          region: _CardRegion.bottom,
+          child: avatarOverlay,
+        ),
+      ],
+    );
+  }
+}
+
+/// 画布的哪一段:整卡 / 中段插槽以上 / 以下
+enum _CardRegion { all, top, bottom }
+
 class _PaintedTopicCardLeaf extends SingleChildRenderObjectWidget {
   const _PaintedTopicCardLeaf({
     required this.layout,
     required this.paintStaticAvatar,
+    this.region = _CardRegion.all,
     super.child,
   });
 
   final TopicCardLayout layout;
+  final _CardRegion region;
 
   /// 动图 overlay 已就绪在播时为 false:画布停画静态头像,防透明 gif
   /// 从透明像素后透出静态层成"双影"
@@ -152,6 +199,7 @@ class _PaintedTopicCardLeaf extends SingleChildRenderObjectWidget {
     return _RenderTopicCard(
       layout: layout,
       paintStaticAvatar: paintStaticAvatar,
+      region: region,
     );
   }
 
@@ -162,7 +210,8 @@ class _PaintedTopicCardLeaf extends SingleChildRenderObjectWidget {
   ) {
     renderObject
       ..layoutData = layout
-      ..paintStaticAvatar = paintStaticAvatar;
+      ..paintStaticAvatar = paintStaticAvatar
+      ..region = region;
   }
 }
 
@@ -171,8 +220,10 @@ class _RenderTopicCard extends RenderBox
   _RenderTopicCard({
     required TopicCardLayout layout,
     required bool paintStaticAvatar,
+    required _CardRegion region,
   }) : _layout = layout,
-       _paintStaticAvatar = paintStaticAvatar;
+       _paintStaticAvatar = paintStaticAvatar,
+       _region = region;
 
   TopicCardLayout _layout;
   int _seenRevision = 0;
@@ -188,6 +239,24 @@ class _RenderTopicCard extends RenderBox
     if (v == _paintStaticAvatar) return;
     _paintStaticAvatar = v;
     markNeedsPaint();
+  }
+
+  _CardRegion _region;
+  set region(_CardRegion v) {
+    if (v == _region) return;
+    _region = v;
+    markNeedsLayout();
+    markNeedsSemanticsUpdate();
+  }
+
+  /// 本段在整卡排版坐标里的上下界
+  double get _regionTop =>
+      _region == _CardRegion.bottom ? (_layout.middleSplitY ?? 0) : 0;
+  double get _regionBottom {
+    final full = _layout.cardHeight - _layout.bottomGap;
+    return _region == _CardRegion.top
+        ? (_layout.middleSplitY ?? full)
+        : full;
   }
 
   /// 在屏订阅分钟心跳:跳一次即原地重排本卡(时间串换新)并重绘。
@@ -223,15 +292,17 @@ class _RenderTopicCard extends RenderBox
     // 列表格子真实宽不同,估错 = 右对齐元素画出卡外)。真实约束宽在
     // 此才可知,差 >0.5px 触发一次按宽重排(结果缓存,后续帧零成本)
     _layout.ensureWidth(constraints.maxWidth);
-    // cardHeight 含底部卡间距(由外层 Padding 提供),内容体扣除
+    // cardHeight 含底部卡间距(由外层 Padding 提供),内容体扣除;
+    // 分段时只取本段
     size = constraints.constrain(
-      Size(constraints.maxWidth, _layout.cardHeight - _layout.bottomGap),
+      Size(constraints.maxWidth, _regionBottom - _regionTop),
     );
     // 动图头像子节点(SmartAvatar 混合岛):钉在 avatarRect
     final c = child;
     if (c != null) {
       c.layout(BoxConstraints.tight(_layout.avatarRect.size));
-      (c.parentData! as BoxParentData).offset = _layout.avatarRect.topLeft;
+      (c.parentData! as BoxParentData).offset =
+          _layout.avatarRect.topLeft - Offset(0, _regionTop);
     }
   }
 
@@ -240,14 +311,38 @@ class _RenderTopicCard extends RenderBox
 
   @override
   void paint(PaintingContext context, Offset offset) {
+    if (_region == _CardRegion.all) {
+      _paintCard(context, offset);
+      return;
+    }
+    // 分段:整卡照常画,平移到本段原点并裁到本段范围(走 pushClipRect:
+    // 头像 overlay 子节点自带 RepaintBoundary,画它会换掉当前 canvas)
+    _clipHandle.layer = context.pushClipRect(
+      needsCompositing,
+      offset,
+      Offset.zero & size,
+      (context, offset) => _paintCard(context, offset - Offset(0, _regionTop)),
+      oldLayer: _clipHandle.layer,
+    );
+  }
+
+  final _clipHandle = LayerHandle<ClipRectLayer>();
+
+  @override
+  void dispose() {
+    _clipHandle.layer = null;
+    super.dispose();
+  }
+
+  void _paintCard(PaintingContext context, Offset offset) {
     final canvas = context.canvas;
     final l = _layout;
 
-    // 墨笺:行底细线(与内容同宽,左右各让出内边距)
+    // 墨笺:行底细线(与内容同宽,左右各让出内边距);分段时由下段画
     final sep = l.separatorColor;
-    if (sep != null) {
+    if (sep != null && _region != _CardRegion.top) {
       // strokeWidth 0 = 一个物理像素的发丝线,任何像素密度下都最细
-      final y = offset.dy + size.height - 0.5;
+      final y = offset.dy + _regionBottom - 0.5;
       canvas.drawLine(
         Offset(offset.dx + 12, y),
         Offset(offset.dx + size.width - 12, y),
@@ -386,14 +481,19 @@ class _RenderTopicCard extends RenderBox
     // 逐帧重绘不连累本画布)
     final c = child;
     if (c != null) {
-      context.paintChild(c, offset + (c.parentData! as BoxParentData).offset);
+      context.paintChild(
+        c,
+        offset + Offset(0, _regionTop) + (c.parentData! as BoxParentData).offset,
+      );
     }
   }
 
   @override
   void describeSemanticsConfiguration(SemanticsConfiguration config) {
     super.describeSemanticsConfiguration(config);
-    // 点按/长按动作由外层交互面的 Semantics 提供,这里只报内容
+    // 点按/长按动作由外层交互面的 Semantics 提供,这里只报内容;
+    // 分段时整卡标签只报一次
+    if (_region == _CardRegion.bottom) return;
     config
       ..label = _layout.semanticsLabel
       ..textDirection = TextDirection.ltr;

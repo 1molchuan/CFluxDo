@@ -143,11 +143,18 @@ Widget buildTopicItem({
 
   // 自绘路径的排版在 Builder 外先取好:入参(context/theme/宽度)与
   // Builder 内一致,避免逐分支重复。
+  // 列表摘要/图片:墨笺话题行把摘要组件夹进自绘卡的中段插槽,不退回
+  // widget 版(两种卡排版不同,开了摘要列表就变样);经典卡仍走 widget 版
+  final excerptInPainted =
+      middleWidget == null &&
+      effectiveMiddleWidget != null &&
+      !messageStyle &&
+      theme.extension<MojianTokens>() != null;
   final usePainted =
       kUsePaintedTopicCard &&
       topWidget == null &&
-      effectiveMiddleWidget == null;
-  final paintedLayout = usePainted && !topic.pinned
+      (effectiveMiddleWidget == null || excerptInPainted);
+  var paintedLayout = usePainted && !topic.pinned
       ? obtainTopicItemLayout(
           context: context,
           topic: topic,
@@ -156,6 +163,9 @@ Widget buildTopicItem({
           messageStyle: messageStyle,
         )
       : null;
+  if (excerptInPainted && paintedLayout?.middleSplitY == null) {
+    paintedLayout = null;
+  }
 
   // 自绘路径:排版全局缓存 + 单渲染对象。宽度口径见
   // [topicCardWidthFor];分类表由调用方传入(未传时不查,分类行缺分
@@ -188,6 +198,7 @@ Widget buildTopicItem({
           onPreviewIntent: previewIntent,
           isSelected: isSelected,
           highlightColor: highlightColor,
+          middle: excerptInPainted ? effectiveMiddleWidget : null,
         );
       }
       return TopicCard(

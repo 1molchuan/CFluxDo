@@ -81,6 +81,12 @@ class TopicCardLayout {
 
   /// 是否按墨笺排版(主题带 [MojianTokens] 时)
   bool mojian = false;
+
+  /// 墨笺话题行的「中段插槽」分界:标题(及自带摘要)之下、元信息行之上
+  /// 的 y。列表开了摘要/图片时,[PaintedTopicCard] 在这里切开画布,把
+  /// 摘要组件夹在两段之间 —— 墨笺行不必为摘要退回 widget 版卡片。
+  /// null = 本排版不支持(经典卡、私信卡)
+  double? middleSplitY;
   Rect avatarRect = Rect.zero;
   Offset titleOffset = Offset.zero;
   Offset excerptOffset = Offset.zero;
@@ -493,6 +499,7 @@ class TopicCardLayout {
           );
     final hlFg = mj?.ink ?? scheme.onPrimaryContainer;
     mojian = mj != null;
+    middleSplitY = null;
     // 墨笺的普通话题行另走一套纵向装配(分类在上、宋体标题、细线分隔);
     // 私信卡沿用经典装配,只换字体与外壳
     final mjRow = mj != null && !messageStyle;
@@ -1167,6 +1174,8 @@ class TopicCardLayout {
       excerptOffset = Offset(hPad, y);
       y += excerpt!.height;
     }
+
+    middleSplitY = y;
 
     // 4. 元信息行
     y += 10;
