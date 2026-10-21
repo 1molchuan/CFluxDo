@@ -102,5 +102,18 @@
   "toolbar_spoilerTooltip": "剧透",
   "toolbar_calloutPlaceholder": "内容",
   "toolbar_calloutTooltip": "插入标注",
-  "toolbar_strikethroughPlaceholder": "删除线文本"
+  "toolbar_strikethroughPlaceholder": "删除线文本",
+  "composer_draftAutoSave": "草稿自动保存",
+  "composer_draftPending": "草稿待保存",
+  "composer_draftSaving": "正在保存草稿",
+  "composer_draftSaved": "草稿已保存",
+  "composer_draftLocal": "草稿已存本机，待同步",
+  "composer_draftError": "草稿保存失败",
+  "composer_draftConflict": "草稿版本冲突",
+  "composer_draftConflictTitle": "草稿版本冲突",
+  "composer_draftConflictBody": "本机和云端都有修改。使用云端版本会替换本机当前内容；覆盖云端会上传本机当前内容。取消可继续保留本机内容。",
+  "composer_draftOverwrite": "覆盖云端",
+  "composer_draftUseRemote": "使用云端版本",
+  "composer_draftResolve": "选择版本",
+  "composer_draftReloadFailed": "无法加载云端草稿，已保留本机内容"
 }

@@ -102,5 +102,18 @@
   "toolbar_spoilerTooltip": "劇透",
   "toolbar_calloutPlaceholder": "內容",
   "toolbar_calloutTooltip": "插入標注",
-  "toolbar_strikethroughPlaceholder": "刪除線文本"
+  "toolbar_strikethroughPlaceholder": "刪除線文本",
+  "composer_draftAutoSave": "草稿自動儲存",
+  "composer_draftPending": "草稿待儲存",
+  "composer_draftSaving": "正在儲存草稿",
+  "composer_draftSaved": "草稿已儲存",
+  "composer_draftLocal": "草稿已存於本機，待同步",
+  "composer_draftError": "草稿儲存失敗",
+  "composer_draftConflict": "草稿版本衝突",
+  "composer_draftConflictTitle": "草稿版本衝突",
+  "composer_draftConflictBody": "本機和雲端都有修改。使用雲端版本會取代本機目前內容；覆蓋雲端會上傳本機目前內容。取消可繼續保留本機內容。",
+  "composer_draftOverwrite": "覆蓋雲端",
+  "composer_draftUseRemote": "使用雲端版本",
+  "composer_draftResolve": "選擇版本",
+  "composer_draftReloadFailed": "無法載入雲端草稿，已保留本機內容"
 }

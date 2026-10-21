@@ -16,6 +16,10 @@ import '../widgets/common/relative_time_text.dart';
 import '../l10n/s.dart';
 import '../utils/dialog_utils.dart';
 import '../services/drafts_signal.dart';
+import '../services/local_draft_store.dart';
+import '../services/connectivity_service.dart';
+import '../providers/connectivity_provider.dart';
+import '../providers/draft_store_provider.dart';
 import '../providers/selected_topic_provider.dart';
 import '../theme/mojian_theme.dart';
 import '../widgets/topic/topic_card.dart' show mojianCardDecoration;
@@ -23,10 +27,38 @@ import 'create_topic_page.dart';
 import 'topic_detail_page/topic_detail_page.dart';
 
 /// 草稿列表 Provider
+///
+/// 在线时以服务端为准，同时补上本机还没同步上去的草稿；断网或请求失败
+/// 时退回本机缓存。
 final draftsProvider = FutureProvider.autoDispose<List<Draft>>((ref) async {
   final service = ref.watch(discourseServiceProvider);
-  final response = await service.getDrafts();
-  return response.drafts;
+  final store = ref.watch(localDraftStoreProvider);
+  final online =
+      ref.watch(isConnectedProvider).value ?? ConnectivityService().isConnected;
+  var local = <String, LocalDraftEntry>{};
+  String? account;
+  try {
+    account = await service.getUsername();
+    if (account != null) local = await store.list(account);
+  } catch (e) {
+    debugPrint('[DraftsPage] local drafts unavailable: $e');
+  }
+  if (!online) return mergeLocalDrafts([], local, serverAvailable: false);
+  try {
+    final response = await service.getDrafts();
+    if (account != null) {
+      try {
+        await store.cacheRemoteDrafts(account, response.drafts);
+        local = await store.list(account);
+      } catch (e) {
+        debugPrint('[DraftsPage] caching server drafts failed: $e');
+      }
+    }
+    return mergeLocalDrafts(response.drafts, local, serverAvailable: true);
+  } catch (_) {
+    if (local.isEmpty) rethrow;
+    return mergeLocalDrafts([], local, serverAvailable: false);
+  }
 });
 
 /// 草稿页:邮件式独立双栏。
@@ -333,6 +365,13 @@ class _DraftsPageState extends ConsumerState<DraftsPage> {
                             draft.draftKey,
                             sequence: draft.sequence,
                           );
+                          final account = await DiscourseService()
+                              .getUsername();
+                          if (account != null) {
+                            await ref
+                                .read(localDraftStoreProvider)
+                                .delete(account, draft.draftKey);
+                          }
                           if (dialogContext.mounted) {
                             Navigator.pop(dialogContext, true);
                           }

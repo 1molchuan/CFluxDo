@@ -8,6 +8,7 @@ import 'package:fluxdo/widgets/common/error_view.dart';
 import 'package:fluxdo/widgets/common/progressive_top_blur.dart';
 import 'package:m3e_ui/m3e_ui.dart';
 import 'package:fluxdo/providers/preferences_provider.dart';
+import 'package:fluxdo/widgets/markdown_editor/composer_draft_status.dart';
 import 'package:fluxdo/widgets/markdown_editor/composer_shortcuts.dart';
 import 'package:fluxdo/widgets/markdown_editor/composer_switch_fade.dart';
 import 'package:fluxdo/widgets/markdown_editor/markdown_editor.dart';
@@ -17,6 +18,7 @@ import 'package:fluxdo/models/draft.dart';
 import 'package:fluxdo/models/shortcut_binding.dart';
 
 import 'package:fluxdo/providers/discourse_providers.dart';
+import 'package:fluxdo/providers/draft_store_provider.dart';
 import 'package:fluxdo/services/composer_min_length_resolver.dart';
 import 'package:fluxdo/widgets/common/character_counts_overlay.dart';
 import 'package:fluxdo/services/toast_service.dart';
@@ -65,13 +67,13 @@ class CreateTopicPage extends ConsumerStatefulWidget {
 class _CreateTopicPageState extends ConsumerState<CreateTopicPage> {
   /// 富文本导入失败时本次会话降级纯文本
   bool _richFallback = false;
-  final _richKey = GlobalKey<RichComposerEditorState>();
+  var _richKey = GlobalKey<RichComposerEditorState>();
 
   final _formKey = GlobalKey<FormState>();
   final _titleController = TextEditingController();
   final _contentController = TextEditingController();
   final _contentFocusNode = FocusNode();
-  final _editorKey = GlobalKey<MarkdownEditorState>();
+  var _editorKey = GlobalKey<MarkdownEditorState>();
   late final ShortcutSurfaceBinding _shortcutSurfaceBinding =
       ShortcutSurfaceBinding(
         ref: ref,
@@ -107,6 +109,12 @@ class _CreateTopicPageState extends ConsumerState<CreateTopicPage> {
 
   // 草稿控制器
   late final DraftController _draftController;
+  bool _restoringDraft = false;
+  bool _reloadingDraft = false;
+  bool _hasRestoredDraft = false;
+  int? _draftCategoryId;
+  ProviderSubscription<AsyncValue<List<Category>>>? _draftCategorySubscription;
+  AppLifecycleListener? _draftLifecycle;
 
   @override
   void initState() {
@@ -114,7 +122,24 @@ class _CreateTopicPageState extends ConsumerState<CreateTopicPage> {
     _contentController.addListener(_updateContentLength);
 
     // 初始化草稿控制器
-    _draftController = DraftController(draftKey: widget.draftKey);
+    _draftController = DraftController(
+      draftKey: widget.draftKey,
+      localStore: ref.read(localDraftStoreProvider),
+      // 其他设备改了云端草稿、本机又没有未上传的修改时，直接换成云端内容
+      onRemoteDraftChanged: (data) {
+        if (mounted &&
+            !_submitted &&
+            !_discarded &&
+            (!_isLoadingDraft || _reloadingDraft)) {
+          _restoreDraft(Draft(draftKey: widget.draftKey, data: data));
+        }
+      },
+      currentEditorData: () {
+        if (!mounted || (_isLoadingDraft && !_reloadingDraft)) return null;
+        _richKey.currentState?.flushToController();
+        return _currentDraftData();
+      },
+    );
 
     // 添加草稿自动保存监听
     // 标题上的三件事（featured link 解析 / 草稿 / 计数器）合并成一个监听，
@@ -143,6 +168,12 @@ class _CreateTopicPageState extends ConsumerState<CreateTopicPage> {
     WidgetsBinding.instance.addPostFrameCallback((_) => _applyCurrentFilter());
     // 先按站点默认算一版下限，_applyCurrentFilter 选中分类后会再刷新
     _refreshMinContentLength();
+    // 切后台先存一版；回前台再核对其他设备有没有改过
+    _draftLifecycle = AppLifecycleListener(
+      onInactive: _flushDraftForLifecycle,
+      onPause: _flushDraftForLifecycle,
+      onResume: () => _flushDraftForLifecycle(refresh: true),
+    );
   }
 
   @override
@@ -176,7 +207,9 @@ class _CreateTopicPageState extends ConsumerState<CreateTopicPage> {
         // 弹出恢复草稿对话框
         final restore = await _showRestoreDraftDialog();
         if (restore == true && mounted) {
-          _restoreDraft(draft);
+          // 弹窗期间云端可能又有更新，取控制器手里最新的一份
+          final latest = _draftController.currentDraft;
+          if (latest != null) _restoreDraft(latest);
         } else if (restore == false && mounted) {
           // 用户选择丢弃，删除草稿
           await _draftController.deleteDraft();
@@ -185,6 +218,7 @@ class _CreateTopicPageState extends ConsumerState<CreateTopicPage> {
     } finally {
       if (mounted) {
         setState(() => _isLoadingDraft = false);
+        _applyCurrentFilter();
       }
     }
   }
@@ -211,32 +245,45 @@ class _CreateTopicPageState extends ConsumerState<CreateTopicPage> {
     );
   }
 
-  /// 恢复草稿内容
+  /// 恢复草稿内容（整份替换：标题、正文、分类、标签都以草稿为准）
   void _restoreDraft(Draft draft) {
-    if (draft.data.title != null) {
-      _titleController.text = draft.data.title!;
-    }
-    if (draft.data.reply != null) {
-      _contentController.text = draft.data.reply!;
-      _templateContent = null; // 恢复草稿后清除模板标记
-    }
-    if (draft.data.tags != null && draft.data.tags!.isNotEmpty) {
-      setState(() => _selectedTags = List.from(draft.data.tags!));
-    }
-    // 分类需要在 categories 加载后设置，通过 _applyCurrentFilter 中处理
-    if (draft.data.categoryId != null) {
-      // 监听 categories 加载完成后设置分类
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        _restoreCategoryFromDraft(draft.data.categoryId!);
+    _restoringDraft = true;
+    // 富文本编辑器换新文档：旧编辑器卸载时不能把旧正文写回来
+    _richKey.currentState?.prepareForDocumentReplacement();
+    _richKey = GlobalKey<RichComposerEditorState>();
+    _editorKey = GlobalKey<MarkdownEditorState>();
+    _hasRestoredDraft = true;
+    _featuredLinkDebounce?.cancel();
+    _titleChangeGeneration++;
+    _draftCategorySubscription?.close();
+    try {
+      _titleController.text = draft.data.title ?? '';
+      _contentController.text = draft.data.reply ?? '';
+      setState(() {
+        _templateContent = null; // 恢复草稿后清除模板标记
+        _selectedTags = List.of(draft.data.tags ?? const []);
+        _selectedCategory = null;
+        _draftCategoryId = draft.data.categoryId;
+        _featuredLink = null;
+        _featuredLinkAutoPosted = false;
       });
+      // 分类要等 categories 加载完才能落到 _selectedCategory
+      if (_draftCategoryId != null) {
+        _restoreCategoryFromDraft(_draftCategoryId!);
+      }
+    } finally {
+      _restoringDraft = false;
     }
   }
 
   /// 从草稿恢复分类
   void _restoreCategoryFromDraft(int categoryId) {
-    ref.listenManual(categoriesProvider, (previous, next) {
+    _draftCategorySubscription = ref.listenManual(categoriesProvider, (
+      previous,
+      next,
+    ) {
       next.whenData((categories) {
-        if (!mounted) return;
+        if (!mounted || _draftCategoryId != categoryId) return;
         final category = categories
             .where((c) => c.id == categoryId)
             .firstOrNull;
@@ -249,15 +296,78 @@ class _CreateTopicPageState extends ConsumerState<CreateTopicPage> {
 
   /// 草稿内容变化时触发保存
   void _onDraftContentChanged() {
-    final data = DraftData(
-      title: _titleController.text,
-      reply: _contentController.text,
-      categoryId: _selectedCategory?.id,
-      tags: _selectedTags.isNotEmpty ? _selectedTags : null,
-      action: 'createTopic',
-      archetypeId: 'regular',
-    );
-    _draftController.scheduleSave(data);
+    if (_isLoadingDraft || _restoringDraft) return;
+    _draftController.scheduleSave(_currentDraftData());
+  }
+
+  DraftData _currentDraftData() => DraftData(
+    title: _titleController.text,
+    reply: _contentController.text,
+    // 草稿里的分类还没等到 categories 加载时，先原样带着
+    categoryId: _selectedCategory?.id ?? _draftCategoryId,
+    tags: _selectedTags.isNotEmpty ? _selectedTags : null,
+    action: 'createTopic',
+    archetypeId: 'regular',
+  );
+
+  void _flushDraftForLifecycle({bool refresh = false}) {
+    if (!mounted ||
+        _isSubmitting ||
+        _isLoadingDraft ||
+        _submitted ||
+        _discarded) {
+      return;
+    }
+    _richKey.currentState?.flushToController();
+    if (refresh) {
+      _draftController.scheduleSave(_currentDraftData());
+      _draftController.retryPending();
+    } else {
+      _draftController.saveNow(_currentDraftData());
+    }
+  }
+
+  /// 冲突时选了「使用云端版本」
+  Future<void> _reloadRemoteDraft() async {
+    setState(() {
+      _reloadingDraft = true;
+      _isLoadingDraft = true;
+    });
+    try {
+      if (!await _draftController.reloadFromRemote() && mounted) {
+        ToastService.showError(S.current.composer_draftReloadFailed);
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoadingDraft = false;
+          _reloadingDraft = false;
+        });
+      }
+    }
+  }
+
+  bool _retryingDraft = false;
+
+  /// 点草稿状态图标：失败/存本机时重试，冲突时让用户选版本
+  Future<void> _retryDraftSave() async {
+    if (_isSubmitting || _retryingDraft) return;
+    _retryingDraft = true;
+    try {
+      _richKey.currentState?.flushToController();
+      final force = _draftController.hasConflict;
+      if (force &&
+          !await confirmComposerDraftOverwrite(
+            context,
+            onReload: _reloadRemoteDraft,
+          )) {
+        return;
+      }
+      if (!mounted) return;
+      await _draftController.saveNow(_currentDraftData(), forceSave: force);
+    } finally {
+      _retryingDraft = false;
+    }
   }
 
   /// 舍弃草稿
@@ -282,16 +392,21 @@ class _CreateTopicPageState extends ConsumerState<CreateTopicPage> {
 
     if (confirm == true && mounted) {
       _discarded = true;
+      // 先停自动保存：编辑器里还留着旧正文，不能在删除排队时又被存回去
+      _draftController.disable();
       await _draftController.deleteDraft();
       if (mounted) Navigator.of(context).pop();
     }
   }
 
   void _applyCurrentFilter() async {
+    // 草稿还在加载、或已恢复草稿时，分类标签以草稿为准
+    if (_isLoadingDraft || _hasRestoredDraft) return;
     // 优先使用传入的分类，否则使用站点默认分类
     int? targetCategoryId = widget.initialCategoryId;
     targetCategoryId ??= await PreloadedDataService()
         .getDefaultComposerCategoryId();
+    if (!mounted || _isLoadingDraft || _hasRestoredDraft) return;
 
     // 应用传入的标签
     if (widget.initialTags != null &&
@@ -304,7 +419,7 @@ class _CreateTopicPageState extends ConsumerState<CreateTopicPage> {
       // 监听 categories 加载完成
       ref.listenManual(categoriesProvider, (previous, next) {
         next.whenData((categories) {
-          if (!mounted) return;
+          if (!mounted || _hasRestoredDraft) return;
           final category = categories
               .where((c) => c.id == targetCategoryId)
               .firstOrNull;
@@ -320,25 +435,20 @@ class _CreateTopicPageState extends ConsumerState<CreateTopicPage> {
 
   @override
   void dispose() {
+    _draftCategorySubscription?.close();
+    _draftLifecycle?.dispose();
     _shortcutSurfaceBinding.disposeDeferred();
     _featuredLinkDebounce?.cancel();
     // 移除草稿监听器
     _titleController.removeListener(_onTitleInputChanged);
     _contentController.removeListener(_onDraftContentChanged);
 
-    // 关闭时处理草稿：已提交则跳过，有内容则保存，无内容则删除
-    if (!_submitted && !_discarded) {
+    // 关闭时处理草稿：已提交则跳过，有内容则保存，无内容则删除。
+    // 草稿还没加载完就关页时，编辑器里的空内容不代表用户清空了草稿。
+    if (!_submitted && !_discarded && !_isLoadingDraft) {
       if (_titleController.text.trim().isNotEmpty ||
           _contentController.text.trim().isNotEmpty) {
-        final data = DraftData(
-          title: _titleController.text,
-          reply: _contentController.text,
-          categoryId: _selectedCategory?.id,
-          tags: _selectedTags.isNotEmpty ? _selectedTags : null,
-          action: 'createTopic',
-          archetypeId: 'regular',
-        );
-        _draftController.saveNow(data);
+        _draftController.saveNow(_currentDraftData());
       } else {
         // 内容为空，删除草稿
         _draftController.deleteDraft();
@@ -426,7 +536,7 @@ class _CreateTopicPageState extends ConsumerState<CreateTopicPage> {
   void _onTitleInputChanged() {
     _onDraftContentChanged();
     _updateTitleLength();
-    _onTitleChanged();
+    if (!_restoringDraft) _onTitleChanged();
   }
 
   /// 对齐 Discourse composer：标题只包含一个 URL 时，异步取 onebox 标题，
@@ -627,6 +737,7 @@ class _CreateTopicPageState extends ConsumerState<CreateTopicPage> {
   }
 
   void _onCategorySelected(Category category) {
+    _draftCategoryId = null;
     setState(() {
       _selectedCategory = category;
       // 分类联动问答默认值:强制分类锁定开;默认分类预勾选;
@@ -770,7 +881,20 @@ class _CreateTopicPageState extends ConsumerState<CreateTopicPage> {
       if (confirm != true) return;
     }
 
+    if (!mounted) return;
+    // 草稿冲突没解决就发：先让用户确认用本机内容
+    if (_draftController.hasConflict &&
+        !await confirmComposerDraftOverwrite(
+          context,
+          onReload: _reloadRemoteDraft,
+        )) {
+      return;
+    }
+    if (!mounted) return;
     setState(() => _isSubmitting = true);
+    // 对齐 Discourse 前端 composer.set("disableDrafts", true):
+    // 发送途中关掉自动保存,避免与 PostCreator 推进的 draft_sequence 撞 409
+    _draftController.disable();
 
     try {
       final service = ref.read(discourseServiceProvider);
@@ -781,6 +905,8 @@ class _CreateTopicPageState extends ConsumerState<CreateTopicPage> {
         tags: _selectedTags.isNotEmpty ? _selectedTags : null,
         featuredLink: _featuredLink,
         createAsPostVoting: _createAsPostVoting,
+        draftKey: _draftController.draftKey,
+        onDraftSequence: _draftController.syncSequence,
       );
 
       // 发送成功后删除草稿
@@ -806,8 +932,10 @@ class _CreateTopicPageState extends ConsumerState<CreateTopicPage> {
       );
       Navigator.of(context).pop();
     } on DioException catch (_) {
-      // 网络错误已由 ErrorInterceptor 处理
+      // 网络错误已由 ErrorInterceptor 处理:发送失败,恢复草稿保存
+      _draftController.enable();
     } catch (e, s) {
+      _draftController.enable();
       AppErrorHandler.handleUnexpected(e, s);
     } finally {
       if (mounted) setState(() => _isSubmitting = false);
@@ -944,40 +1072,6 @@ class _CreateTopicPageState extends ConsumerState<CreateTopicPage> {
     );
   }
 
-  /// 构建草稿保存状态指示器
-  /// 草稿保存状态指示器(瞬态):保存中转圈、失败红色警示;
-  /// 已保存/空闲不显示 —— 成功无需常驻宣告,失败才需要被看见。
-  Widget _buildDraftStatusIndicator(DraftSaveStatus status, ThemeData theme) {
-    final Widget child;
-    switch (status) {
-      case DraftSaveStatus.idle:
-      case DraftSaveStatus.pending:
-      case DraftSaveStatus.saved:
-        return const SizedBox.shrink();
-      case DraftSaveStatus.saving:
-        child = SizedBox(
-          width: 14,
-          height: 14,
-          child: CircularProgressIndicator(
-            strokeWidth: 1.5,
-            color: theme.colorScheme.outline,
-          ),
-        );
-      case DraftSaveStatus.error:
-        child = Icon(
-          Symbols.cloud_off_rounded,
-          size: 18,
-          color: theme.colorScheme.error,
-        );
-    }
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.only(left: 4, right: 4),
-        child: child,
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final categoriesAsync = ref.watch(categoriesProvider);
@@ -1013,13 +1107,11 @@ class _CreateTopicPageState extends ConsumerState<CreateTopicPage> {
               ? SystemUiOverlayStyle.light
               : SystemUiOverlayStyle.dark,
           actions: [
-            // 草稿保存状态(瞬态:保存中转圈/失败警示;已保存不常驻
-            // —— 成功无需一直宣告,失败才需要喊)
-            ValueListenableBuilder<DraftSaveStatus>(
-              valueListenable: _draftController.statusNotifier,
-              builder: (context, status, _) {
-                return _buildDraftStatusIndicator(status, theme);
-              },
+            // 草稿保存状态:保存中转圈;存本机待同步/失败/冲突常驻,点它
+            // 重试或选版本;已保存不常驻 —— 成功无需一直宣告
+            ComposerDraftStatusIndicator(
+              status: _draftController.statusNotifier,
+              onResolve: _isSubmitting ? null : _retryDraftSave,
             ),
             // 功能按钮全部图标直出不折叠(⋯ 菜单藏舍弃太难用):
             // 舍弃 🗑 / AI 审核 ✨,tooltip 兜底语义
@@ -1124,7 +1216,7 @@ class _CreateTopicPageState extends ConsumerState<CreateTopicPage> {
                                       // 一次性,提前挂会以空文档镜像覆盖草稿。
                                       // 占位留空 —— 加载视觉由页面级草稿遮罩
                                       // 统一提供(双 spinner 叠影)
-                                      ? (_isLoadingDraft
+                                      ? (_isLoadingDraft && !_reloadingDraft
                                             ? const SizedBox.shrink()
                                             : RichComposerEditor(
                                                 key: _richKey,

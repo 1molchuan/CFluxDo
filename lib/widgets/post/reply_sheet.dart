@@ -4,6 +4,7 @@ import 'package:app_icons/app_icons.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'pm_recipient_field.dart';
+import '../markdown_editor/composer_draft_status.dart';
 import '../markdown_editor/composer_shortcuts.dart';
 import '../markdown_editor/composer_switch_fade.dart';
 import '../markdown_editor/markdown_editor.dart';
@@ -13,6 +14,7 @@ import '../../models/topic.dart';
 import '../../models/draft.dart';
 import '../../plugins/plugins.dart';
 import '../../providers/category_provider.dart';
+import '../../providers/draft_store_provider.dart';
 import '../../services/composer_min_length_resolver.dart';
 import '../common/character_counts_overlay.dart';
 import '../../models/pending_post.dart';
@@ -200,12 +202,12 @@ class ReplySheet extends ConsumerStatefulWidget {
 class _ReplySheetState extends ConsumerState<ReplySheet> {
   /// 富文本导入失败(cook 不可用)时本次会话降级纯文本
   bool _richFallback = false;
-  final _richKey = GlobalKey<RichComposerEditorState>();
+  var _richKey = GlobalKey<RichComposerEditorState>();
 
   final _titleController = TextEditingController();
   final _contentController = TextEditingController();
   final _contentFocusNode = FocusNode();
-  final _editorKey = GlobalKey<MarkdownEditorState>();
+  var _editorKey = GlobalKey<MarkdownEditorState>();
 
   bool _isSubmitting = false;
   bool _submitted = false; // 提交成功标志，防止 dispose 重新保存草稿
@@ -213,6 +215,9 @@ class _ReplySheetState extends ConsumerState<ReplySheet> {
   bool _showEmojiPanel = false;
   bool _isLoadingRaw = false; // 编辑模式：加载原始内容中
   bool _isLoadingDraft = false; // 加载草稿中
+  bool _restoringDraft = false;
+  bool _reloadingDraft = false;
+  AppLifecycleListener? _draftLifecycle;
 
   // 表情面板高度
   static const double _emojiPanelHeight = 280.0;
@@ -295,6 +300,12 @@ class _ReplySheetState extends ConsumerState<ReplySheet> {
     // 但计数器在编辑帖子时同样需要实时更新
     _contentController.addListener(_onContentLengthChanged);
     _loadMinPostLength();
+    // 切后台先存一版；回前台再核对其他设备有没有改过
+    _draftLifecycle = AppLifecycleListener(
+      onInactive: _flushDraftForLifecycle,
+      onPause: _flushDraftForLifecycle,
+      onResume: () => _flushDraftForLifecycle(refresh: true),
+    );
 
     // 自动聚焦（非编辑模式时立即聚焦，编辑模式在加载完成后聚焦）
     if (!_isEditMode) {
@@ -329,7 +340,27 @@ class _ReplySheetState extends ConsumerState<ReplySheet> {
       return;
     }
 
-    _draftController = DraftController(draftKey: draftKey);
+    _draftController = DraftController(
+      draftKey: draftKey,
+      localStore: ref.read(localDraftStoreProvider),
+      // 其他设备改了云端草稿、本机又没有未上传的修改时，直接换成云端内容
+      onRemoteDraftChanged: (data) {
+        if (mounted &&
+            !_submitted &&
+            !_discarded &&
+            (!_isLoadingDraft || _reloadingDraft)) {
+          _restoreDraft(
+            Draft(draftKey: draftKey, data: data),
+            appendInitialContent: false,
+          );
+        }
+      },
+      currentEditorData: () {
+        if (!mounted || (_isLoadingDraft && !_reloadingDraft)) return null;
+        _richKey.currentState?.flushToController();
+        return _currentDraftData();
+      },
+    );
     if (shouldLoadDraft) {
       _loadExistingDraft();
     }
@@ -351,6 +382,8 @@ class _ReplySheetState extends ConsumerState<ReplySheet> {
     } finally {
       if (mounted) {
         setState(() => _isLoadingDraft = false);
+        // 加载期间不记草稿；带着引用进来的内容要补存一次
+        if (widget.initialContent?.isNotEmpty == true) _onContentChanged();
         _contentFocusNode.requestFocus();
       }
     }
@@ -378,31 +411,38 @@ class _ReplySheetState extends ConsumerState<ReplySheet> {
 
     if (confirm == true && mounted) {
       _discarded = true;
+      // 先停自动保存：编辑器里还留着旧正文，不能在删除排队时又被存回去
+      _draftController?.disable();
       await _draftController?.deleteDraft();
       if (mounted) Navigator.of(context).pop();
     }
   }
 
-  /// 恢复草稿内容
-  void _restoreDraft(Draft draft) {
-    if (draft.data.reply != null) {
-      // 有预填内容时，将草稿追加到引用内容后面
-      if (widget.initialContent != null && widget.initialContent!.isNotEmpty) {
-        _contentController.text = '${widget.initialContent}${draft.data.reply}';
-      } else {
-        _contentController.text = draft.data.reply!;
+  /// 恢复草稿内容（整份替换）。
+  ///
+  /// [appendInitialContent]：首次打开时草稿接在预填的引用后面；换成云端
+  /// 版本时云端内容本身就是完整正文，不再拼。
+  void _restoreDraft(Draft draft, {bool appendInitialContent = true}) {
+    _restoringDraft = true;
+    // 富文本编辑器换新文档：旧编辑器卸载时不能把旧正文写回来
+    _richKey.currentState?.prepareForDocumentReplacement();
+    _richKey = GlobalKey<RichComposerEditorState>();
+    _editorKey = GlobalKey<MarkdownEditorState>();
+    try {
+      final prefix = appendInitialContent ? widget.initialContent ?? '' : '';
+      _contentController.text = '$prefix${draft.data.reply ?? ''}';
+      if (_isPrivateMessage) {
+        _titleController.text = draft.data.title ?? '';
+        // 对齐 Discourse loadDraft：收件人以草稿数据为准（支持多收件人）
+        final recipients = draft.data.recipients;
+        if (recipients != null && recipients.isNotEmpty) {
+          _recipients = List.of(recipients);
+        }
       }
+    } finally {
+      _restoringDraft = false;
     }
-    if (_isPrivateMessage) {
-      if (draft.data.title != null) {
-        _titleController.text = draft.data.title!;
-      }
-      // 对齐 Discourse loadDraft：收件人以草稿数据为准（支持多收件人）
-      final recipients = draft.data.recipients;
-      if (recipients != null && recipients.isNotEmpty) {
-        setState(() => _recipients = List.of(recipients));
-      }
-    }
+    setState(() {});
   }
 
   /// 内容变化时触发草稿保存
@@ -430,18 +470,84 @@ class _ReplySheetState extends ConsumerState<ReplySheet> {
   }
 
   void _onContentChanged() {
-    if (_isEditMode || _draftController == null) return;
+    if (_isEditMode ||
+        _draftController == null ||
+        _isLoadingDraft ||
+        _restoringDraft) {
+      return;
+    }
 
-    final data = DraftData(
-      reply: _contentController.text,
-      title: _isPrivateMessage ? _titleController.text : null,
-      action: _isPrivateMessage ? 'privateMessage' : 'reply',
-      replyToPostNumber: widget.replyToPost?.postNumber,
-      recipients: _isPrivateMessage ? _recipients : null,
-      archetypeId: _isPrivateMessage ? 'private_message' : 'regular',
-    );
+    _draftController!.scheduleSave(_currentDraftData());
+  }
 
-    _draftController!.scheduleSave(data);
+  DraftData _currentDraftData() => DraftData(
+    reply: _contentController.text,
+    title: _isPrivateMessage ? _titleController.text : null,
+    action: _isPrivateMessage ? 'privateMessage' : 'reply',
+    replyToPostNumber: widget.replyToPost?.postNumber,
+    recipients: _isPrivateMessage ? _recipients : null,
+    archetypeId: _isPrivateMessage ? 'private_message' : 'regular',
+  );
+
+  void _flushDraftForLifecycle({bool refresh = false}) {
+    if (!mounted ||
+        _draftController == null ||
+        _isSubmitting ||
+        _isLoadingDraft ||
+        _submitted ||
+        _discarded) {
+      return;
+    }
+    _richKey.currentState?.flushToController();
+    if (refresh) {
+      _draftController!.scheduleSave(_currentDraftData());
+      _draftController!.retryPending();
+    } else {
+      _draftController!.saveNow(_currentDraftData());
+    }
+  }
+
+  /// 冲突时选了「使用云端版本」
+  Future<void> _reloadRemoteDraft() async {
+    setState(() {
+      _reloadingDraft = true;
+      _isLoadingDraft = true;
+    });
+    try {
+      if (await _draftController?.reloadFromRemote() != true && mounted) {
+        ToastService.showError(S.current.composer_draftReloadFailed);
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoadingDraft = false;
+          _reloadingDraft = false;
+        });
+      }
+    }
+  }
+
+  bool _retryingDraft = false;
+
+  /// 点草稿状态图标：失败/存本机时重试，冲突时让用户选版本
+  Future<void> _retryDraftSave() async {
+    if (_isSubmitting || _retryingDraft || _draftController == null) return;
+    _retryingDraft = true;
+    try {
+      _richKey.currentState?.flushToController();
+      final force = _draftController!.hasConflict;
+      if (force &&
+          !await confirmComposerDraftOverwrite(
+            context,
+            onReload: _reloadRemoteDraft,
+          )) {
+        return;
+      }
+      if (!mounted) return;
+      await _draftController?.saveNow(_currentDraftData(), forceSave: force);
+    } finally {
+      _retryingDraft = false;
+    }
   }
 
   /// 收件人本身也是私信草稿的一部分；只改名单不继续输入也要及时保存。
@@ -480,27 +586,24 @@ class _ReplySheetState extends ConsumerState<ReplySheet> {
 
   @override
   void dispose() {
+    _draftLifecycle?.dispose();
     // 移除监听器
     _contentController.removeListener(_onContentChanged);
     _titleController.removeListener(_onContentChanged);
     _contentController.removeListener(_onContentLengthChanged);
 
-    // 关闭时处理草稿：已提交则跳过，有内容则保存，无内容则删除
-    if (_draftController != null && !_submitted && !_discarded) {
+    // 关闭时处理草稿：已提交则跳过，有内容则保存，无内容则删除。
+    // 草稿还没加载完就关掉时，编辑器里的空内容不代表用户清空了草稿。
+    if (_draftController != null &&
+        !_submitted &&
+        !_discarded &&
+        !_isLoadingDraft) {
       final hasContent =
           _contentController.text.trim().isNotEmpty ||
           (_isPrivateMessage && _titleController.text.trim().isNotEmpty);
       if (hasContent) {
-        final data = DraftData(
-          reply: _contentController.text,
-          title: _isPrivateMessage ? _titleController.text : null,
-          action: _isPrivateMessage ? 'privateMessage' : 'reply',
-          replyToPostNumber: widget.replyToPost?.postNumber,
-          recipients: _isPrivateMessage ? _recipients : null,
-          archetypeId: _isPrivateMessage ? 'private_message' : 'regular',
-        );
-        // 异步保存，不阻塞 dispose
-        _draftController!.saveNow(data);
+        // 异步保存，不阻塞 dispose；页面销毁后保存队列照样跑完
+        _draftController!.saveNow(_currentDraftData());
       } else {
         // 内容为空，删除草稿
         _draftController!.deleteDraft();
@@ -587,6 +690,15 @@ class _ReplySheetState extends ConsumerState<ReplySheet> {
     );
     if (!pluginAllowed || !mounted) return;
 
+    // 草稿冲突没解决就发：先让用户确认用本机内容
+    if (_draftController?.hasConflict == true &&
+        !await confirmComposerDraftOverwrite(
+          context,
+          onReload: _reloadRemoteDraft,
+        )) {
+      return;
+    }
+    if (!mounted) return;
     setState(() => _isSubmitting = true);
     // 对齐 Discourse 前端 composer.set("disableDrafts", true):
     // 发送途中关掉自动保存,避免与 PostCreator 推进的 draft_sequence 撞 409
@@ -673,7 +785,6 @@ class _ReplySheetState extends ConsumerState<ReplySheet> {
     }
   }
 
-  /// 构建草稿保存状态指示器
   /// 字数不足时悬浮在正文区右下角的提示
   ///
   /// 对齐网页端：主题组件只吐一个 `.character-counts` div，悬浮定位由
@@ -683,36 +794,6 @@ class _ReplySheetState extends ConsumerState<ReplySheet> {
     length: _contentLength,
     minimumLength: _minPostLength,
   );
-
-  Widget _buildDraftStatusIndicator(DraftSaveStatus status, ThemeData theme) {
-    switch (status) {
-      case DraftSaveStatus.idle:
-        return const SizedBox.shrink();
-      case DraftSaveStatus.pending:
-        return const SizedBox.shrink();
-      case DraftSaveStatus.saving:
-        return SizedBox(
-          width: 12,
-          height: 12,
-          child: CircularProgressIndicator(
-            strokeWidth: 1.5,
-            color: theme.colorScheme.outline,
-          ),
-        );
-      case DraftSaveStatus.saved:
-        return Icon(
-          Symbols.cloud_done_rounded,
-          size: 16,
-          color: theme.colorScheme.outline,
-        );
-      case DraftSaveStatus.error:
-        return Icon(
-          Symbols.cloud_off_rounded,
-          size: 16,
-          color: theme.colorScheme.error,
-        );
-    }
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -841,17 +922,15 @@ class _ReplySheetState extends ConsumerState<ReplySheet> {
 
                                 // 草稿保存状态指示器
                                 if (_draftController != null) ...[
-                                  ValueListenableBuilder<DraftSaveStatus>(
-                                    valueListenable:
-                                        _draftController!.statusNotifier,
-                                    builder: (context, status, _) {
-                                      return _buildDraftStatusIndicator(
-                                        status,
-                                        theme,
-                                      );
-                                    },
+                                  ComposerDraftStatusIndicator(
+                                    status: _draftController!.statusNotifier,
+                                    onResolve: _isSubmitting
+                                        ? null
+                                        : _retryDraftSave,
+                                    showSaved: true,
+                                    iconSize: 18,
                                   ),
-                                  const SizedBox(width: 8),
+                                  const SizedBox(width: 4),
                                   // 舍弃按钮
                                   TextButton(
                                     onPressed: _isSubmitting
@@ -962,7 +1041,8 @@ class _ReplySheetState extends ConsumerState<ReplySheet> {
                             // 真内容(毁帖)。内容源就绪后才挂;占位留空,
                             // 加载视觉由草稿遮罩/RichComposer 自身统一提供
                             // (双 spinner 叠影)。
-                            ? ((_isLoadingRaw || _isLoadingDraft)
+                            ? ((_isLoadingRaw ||
+                                      (_isLoadingDraft && !_reloadingDraft))
                                   ? const SizedBox.shrink()
                                   : RichComposerEditor(
                                       key: _richKey,

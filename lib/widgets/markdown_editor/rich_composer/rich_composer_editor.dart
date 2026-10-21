@@ -165,6 +165,7 @@ class RichComposerEditorState extends State<RichComposerEditor> {
   bool _importing = true;
 
   Timer? _serializeDebounce;
+  bool _documentReplaced = false;
 
   bool _showEmojiPanel = false;
 
@@ -264,7 +265,7 @@ class RichComposerEditorState extends State<RichComposerEditor> {
     // 空文档/富 composer 自己存的草稿天然过门禁;唯一代价是打开时多一次
     // cook(warmUp 后毫秒级)。
     final doc = await markdownToDocGuarded(widget.controller.text);
-    if (!mounted) return;
+    if (!mounted || _documentReplaced) return;
     if (doc == null) {
       widget.onFallbackToPlain?.call();
       return;
@@ -348,7 +349,7 @@ class RichComposerEditorState extends State<RichComposerEditor> {
     // 打字停顿后再做;草稿保存自身还有二级 debounce,不丢内容。
     _serializeDebounce = Timer(const Duration(milliseconds: 800), () {
       final editor = _editor;
-      if (editor == null || !mounted) return;
+      if (editor == null || !mounted || _documentReplaced) return;
       final sw = Stopwatch()..start();
       final raw = docToRaw(editor.blocks);
       if (raw == widget.controller.text) return;
@@ -380,6 +381,7 @@ class RichComposerEditorState extends State<RichComposerEditor> {
   /// 窗口内提交也不丢内容)。
   void flushToController() {
     _serializeDebounce?.cancel();
+    if (_documentReplaced) return;
     final editor = _editor;
     if (editor == null) return;
     final raw = docToRaw(editor.blocks);
@@ -396,6 +398,12 @@ class RichComposerEditorState extends State<RichComposerEditor> {
         selection: TextSelection.collapsed(offset: raw.length),
       );
     }
+  }
+
+  /// 宿主已经采用另一份文档，即将重建编辑器；旧文档不能在卸载时回写。
+  void prepareForDocumentReplacement() {
+    _documentReplaced = true;
+    _serializeDebounce?.cancel();
   }
 
   // -----------------------------------------------------------------
