@@ -7,6 +7,7 @@ import '../../models/topic.dart';
 import '../../pages/topic_detail_page/topic_detail_page.dart';
 import '../../providers/discourse_providers.dart';
 import '../../providers/selected_topic_provider.dart';
+import '../../theme/mojian_theme.dart';
 import '../common/error_view.dart';
 import '../common/relative_time_text.dart';
 import '../markdown_editor/markdown_renderer.dart';
@@ -498,6 +499,7 @@ class _CollapsibleTopicSummaryState
     final hasCachedSummary =
         (topicDetail?.hasCachedSummary ?? false) ||
         (summaryAsync?.value?.summarizedText.isNotEmpty ?? false);
+    final mj = theme.extension<MojianTokens>();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -507,13 +509,21 @@ class _CollapsibleTopicSummaryState
             // 摘要按钮
             InkWell(
               onTap: _toggleExpand,
-              borderRadius: BorderRadius.circular(8),
+              borderRadius: BorderRadius.circular(mj != null ? 4 : 8),
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                decoration: BoxDecoration(
-                  color: theme.colorScheme.primaryContainer.withValues(alpha:0.3),
-                  borderRadius: BorderRadius.circular(8),
-                ),
+                // 墨笺：细线描边、小圆角，不铺底色（与订阅胶囊同一套）
+                decoration: mj != null
+                    ? BoxDecoration(
+                        border: Border.all(color: mj.rule),
+                        borderRadius: BorderRadius.circular(4),
+                      )
+                    : BoxDecoration(
+                        color: theme.colorScheme.primaryContainer.withValues(
+                          alpha: 0.3,
+                        ),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [

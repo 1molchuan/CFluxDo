@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../models/category.dart';
 import '../../models/topic.dart';
+import '../../theme/mojian_theme.dart';
 import '../common/notification_level_button.dart';
 
 enum TopicNotificationButtonStyle { icon, chip }
@@ -49,28 +50,35 @@ class TopicNotificationButton extends StatelessWidget {
         : theme.colorScheme.primaryContainer.withValues(alpha: 0.3);
 
     final fgColor = theme.colorScheme.primary;
+    final mj = theme.extension<MojianTokens>();
 
     return Material(
       color: Colors.transparent,
       child: InkWell(
         onTap: onChanged != null ? () => _showSheet(context) : null,
-        borderRadius: BorderRadius.circular(8), // 统一圆角为 8
+        borderRadius: BorderRadius.circular(mj != null ? 4 : 8),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 200),
           padding: const EdgeInsets.symmetric(
             horizontal: 12,
             vertical: 8,
           ), // 统一 Padding
-          decoration: BoxDecoration(
-            color: bgColor,
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(
-              color: isWatching
-                  ? theme.colorScheme.primary
-                  : Colors.transparent,
-              width: 1,
-            ),
-          ),
+          // 墨笺：细线描边、小圆角，不铺底色；关注 / 追踪时描边换强调色
+          decoration: mj != null
+              ? BoxDecoration(
+                  borderRadius: BorderRadius.circular(4),
+                  border: Border.all(color: isWatching ? mj.accent : mj.rule),
+                )
+              : BoxDecoration(
+                  color: bgColor,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: isWatching
+                        ? theme.colorScheme.primary
+                        : Colors.transparent,
+                    width: 1,
+                  ),
+                ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
