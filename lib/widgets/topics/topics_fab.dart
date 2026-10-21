@@ -5,6 +5,7 @@ import 'package:flutter/rendering.dart' show RenderStack;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../l10n/s.dart';
+import '../../theme/mojian_theme.dart';
 import '../../models/shortcut_binding.dart';
 import '../../providers/shortcut_provider.dart';
 import '../../providers/preferences_provider.dart';
@@ -231,6 +232,7 @@ class _TopicsFabState extends ConsumerState<TopicsFab>
       double.infinity,
     );
     final scheme = Theme.of(context).colorScheme;
+    final mj = Theme.of(context).extension<MojianTokens>();
 
     final controls = OverlayPortal(
       controller: _portal,
@@ -307,19 +309,29 @@ class _TopicsFabState extends ConsumerState<TopicsFab>
                                   ? context.l10n.common_close
                                   : context.l10n.topicsScreen_createTopic,
                               elevation: _expanded ? 0 : 3,
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(16 + 8 * t),
-                              ),
-                              backgroundColor: Color.lerp(
-                                scheme.primaryContainer,
-                                scheme.primary,
-                                t,
-                              ),
-                              foregroundColor: Color.lerp(
-                                scheme.onPrimaryContainer,
-                                scheme.onPrimary,
-                                t,
-                              ),
+                              // 墨笺：墨色圆形钮，展开时也不变色（见 mojian_theme 的
+                              // floatingActionButtonTheme）
+                              shape: mj != null
+                                  ? const CircleBorder()
+                                  : RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(
+                                        16 + 8 * t,
+                                      ),
+                                    ),
+                              backgroundColor: mj != null
+                                  ? mj.ink
+                                  : Color.lerp(
+                                      scheme.primaryContainer,
+                                      scheme.primary,
+                                      t,
+                                    ),
+                              foregroundColor: mj != null
+                                  ? mj.paper
+                                  : Color.lerp(
+                                      scheme.onPrimaryContainer,
+                                      scheme.onPrimary,
+                                      t,
+                                    ),
                               onPressed: _toggle,
                               child: Transform.rotate(
                                 angle: t * 0.7853981633974483,
@@ -478,6 +490,7 @@ class _TopicsFabState extends ConsumerState<TopicsFab>
       curve: Curves.easeOutCubic,
     ).transform(_animation.value);
     final theme = Theme.of(context);
+    final mj = theme.extension<MojianTokens>();
     return Opacity(
       opacity: t,
       child: Transform.translate(
@@ -486,12 +499,18 @@ class _TopicsFabState extends ConsumerState<TopicsFab>
           scaleX: 0.85 + 0.15 * t,
           alignment: Alignment.centerRight,
           child: FilledButton(
+            // 墨笺：菜单项是纸色底 + 细线框的小圆角条，不用浅色大胶囊
             style: FilledButton.styleFrom(
-              backgroundColor: theme.colorScheme.primaryContainer,
-              foregroundColor: theme.colorScheme.onPrimaryContainer,
+              backgroundColor: mj?.paper ?? theme.colorScheme.primaryContainer,
+              foregroundColor: mj?.ink ?? theme.colorScheme.onPrimaryContainer,
               minimumSize: const Size(0, 56),
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-              shape: const StadiumBorder(),
+              shape: mj != null
+                  ? RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(4),
+                      side: BorderSide(color: mj.ruleStrong),
+                    )
+                  : const StadiumBorder(),
               textStyle: theme.textTheme.labelLarge,
               tapTargetSize: MaterialTapTargetSize.shrinkWrap,
             ),
