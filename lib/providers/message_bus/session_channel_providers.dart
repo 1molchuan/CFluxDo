@@ -12,6 +12,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../services/message_bus_service.dart';
+import '../../utils/time_utils.dart';
+import '../category_provider.dart';
 import '../discourse_providers.dart';
 import 'message_bus_service_provider.dart';
 import 'topic_tracking_providers.dart';
@@ -81,4 +83,100 @@ class LogoutChannelNotifier extends Notifier<void> {
 
 final logoutChannelProvider = NotifierProvider<LogoutChannelNotifier, void>(
   LogoutChannelNotifier.new,
+);
+
+/// 勿扰模式结束时间（`/do-not-disturb/:user_id`，上游 d3e91680）
+///
+/// payload 是 `{ends_at: <httpdate 字符串或 null>}`；null 表示已退出勿扰。
+/// 处于勿扰时不弹本地通知，在别的端开启勿扰也能立即生效。
+class DoNotDisturbNotifier extends Notifier<DateTime?> {
+  String? _channel;
+  MessageBusCallback? _callback;
+
+  @override
+  DateTime? build() {
+    ref.watch(messageBusInitProvider);
+    final messageBus = ref.watch(messageBusServiceProvider);
+    final currentUser = ref.watch(currentUserProvider).value;
+
+    if (_channel != null && _callback != null) {
+      messageBus.unsubscribe(_channel!, _callback);
+      _channel = null;
+      _callback = null;
+    }
+
+    if (currentUser == null) return null;
+
+    final channel = '/do-not-disturb/${currentUser.id}';
+
+    void onDoNotDisturb(MessageBusMessage message) {
+      final data = message.data;
+      if (data is! Map<String, dynamic>) return;
+      // ends_at 为 null 是合法值（退出勿扰），不能当成「没字段」忽略
+      final endsAt = TimeUtils.parseUtcTime(data['ends_at'] as String?);
+      debugPrint('[DoNotDisturb] 勿扰结束时间: $endsAt');
+      state = endsAt;
+    }
+
+    _channel = channel;
+    _callback = onDoNotDisturb;
+    messageBus.subscribe(channel, onDoNotDisturb);
+
+    ref.onDispose(() {
+      if (_channel != null && _callback != null) {
+        messageBus.unsubscribe(_channel!, _callback);
+      }
+    });
+
+    return null;
+  }
+
+  /// 当前是否处于勿扰中
+  bool get isActive {
+    final endsAt = state;
+    return endsAt != null && endsAt.isAfter(DateTime.now());
+  }
+}
+
+final doNotDisturbProvider =
+    NotifierProvider<DoNotDisturbNotifier, DateTime?>(DoNotDisturbNotifier.new);
+
+/// 分类变更频道（`/categories`，取自上游 77188753）
+///
+/// 管理员改了分类才会推，频率极低，收到就让分类列表重拉。上游同一提交里
+/// 的 `/client_settings`、`/refresh_client` 会重拉首页 HTML（GET /），
+/// 所有在线客户端同时去拉，正撞人机验证高发路径，这里不订。
+class CategoryChangesNotifier extends Notifier<void> {
+  MessageBusCallback? _callback;
+
+  static const String _channel = '/categories';
+
+  @override
+  void build() {
+    ref.watch(messageBusInitProvider);
+    final messageBus = ref.watch(messageBusServiceProvider);
+
+    if (_callback != null) {
+      messageBus.unsubscribe(_channel, _callback);
+      _callback = null;
+    }
+
+    void onCategories(MessageBusMessage message) {
+      debugPrint('[CategoryChanges] 分类变更，刷新分类列表');
+      ref.invalidate(categoriesProvider);
+    }
+
+    _callback = onCategories;
+    messageBus.subscribe(_channel, onCategories);
+
+    ref.onDispose(() {
+      if (_callback != null) {
+        messageBus.unsubscribe(_channel, _callback);
+      }
+    });
+  }
+}
+
+final categoryChangesProvider = NotifierProvider<CategoryChangesNotifier, void>(
+  CategoryChangesNotifier.new,
 );

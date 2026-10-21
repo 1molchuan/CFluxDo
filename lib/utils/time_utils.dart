@@ -52,6 +52,31 @@ class TimeUtils {
       // 转换为本地时间
       return utcTime.toLocal();
     } catch (e) {
+      // ISO-8601 解不了时再试 HTTP-date（见 [parseHttpDate]）
+      return parseHttpDate(timeString);
+    }
+  }
+
+  // HTTP-date 固定用英文星期 / 月份缩写，锁死 en_US，不随设备区域变化
+  static final DateFormat _httpDateFormat = DateFormat(
+    'EEE, dd MMM yyyy HH:mm:ss',
+    'en_US',
+  );
+
+  /// 解析 RFC 7231 HTTP-date（形如 `Wed, 21 Oct 2015 07:28:00 GMT`），返回本地时间
+  ///
+  /// Discourse 少数接口用 Ruby 的 `httpdate` 输出时间（如 MessageBus
+  /// `/do-not-disturb/:id` 的 `ends_at`），`DateTime.parse` 解不了；当成 null
+  /// 会把勿扰误判为未开启、照常弹通知。（上游 d3e91680）
+  static DateTime? parseHttpDate(String? timeString) {
+    if (timeString == null || timeString.isEmpty) return null;
+    final trimmed = timeString.trim();
+    final withoutZone = trimmed.endsWith('GMT')
+        ? trimmed.substring(0, trimmed.length - 3).trim()
+        : trimmed;
+    try {
+      return _httpDateFormat.parseUtc(withoutZone).toLocal();
+    } catch (e) {
       return null;
     }
   }
