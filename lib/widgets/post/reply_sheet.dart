@@ -785,6 +785,199 @@ class _ReplySheetState extends ConsumerState<ReplySheet> {
     }
   }
 
+  double _textWidth(String text, TextStyle? style) {
+    final painter = TextPainter(
+      text: TextSpan(text: text, style: style),
+      textDirection: Directionality.of(context),
+      textScaler: MediaQuery.textScalerOf(context),
+      maxLines: 1,
+    )..layout();
+    final width = painter.width;
+    painter.dispose();
+    return width;
+  }
+
+  /// 回复某楼时页头一行能否放下「头像 + 回复 @用户名」和右侧按钮
+  /// （对齐上游 53921966：放不下就给回复对象单独一行）。按钮宽按实际文案
+  /// 估算，偏保守。
+  bool _replyTargetNeedsOwnRow(ThemeData theme, double width) {
+    final target = widget.replyToPost;
+    if (target == null || _isEditMode || _isPrivateMessage) return false;
+    final buttonStyle = theme.textTheme.labelLarge;
+    final title =
+        28 +
+        8 +
+        _textWidth(
+          context.l10n.post_replyToUser(target.username),
+          theme.textTheme.titleSmall,
+        );
+    final discard = _draftController == null
+        ? 0
+        : 40 + 4 + _textWidth(context.l10n.common_discard, buttonStyle) + 32;
+    final review = _canReviewPost ? 48 + 8 : 0;
+    final send = _textWidth(context.l10n.common_send, buttonStyle) + 48;
+    // 32 = 左右内边距，8 = 标题与按钮的间隙
+    return 32 + title + 8 + discard + review + send > width;
+  }
+
+  /// 单独一行的回复对象：头像 + @用户名，名字长就换行，不截断
+  Widget _buildReplyTargetRow(ThemeData theme) {
+    final target = widget.replyToPost!;
+    final avatar = target.getAvatarUrl();
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SmartAvatar(
+          imageUrl: avatar.isNotEmpty ? avatar : null,
+          radius: 12,
+          fallbackText: target.username,
+          backgroundColor: theme.colorScheme.primaryContainer,
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            '@${target.username}',
+            style: theme.textTheme.titleSmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// 页头标题行：回复对象 / 草稿状态 / 舍弃 / AI 审阅 / 发送。
+  /// [targetOwnRow] 时回复对象挪到下一行，这里只留「回复」。
+  Widget _buildHeaderRow(ThemeData theme, {required bool targetOwnRow}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(
+        horizontal: 16,
+        vertical: 8,
+      ),
+      child: Row(
+        children: [
+          // 标题信息
+          if (_isEditMode) ...[
+            Icon(
+              Symbols.edit_rounded,
+              size: 18,
+              color: theme.colorScheme.primary,
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                context.l10n.post_editPostTitle(
+                  widget.editPost!.postNumber,
+                ),
+                style: theme.textTheme.titleSmall,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ] else if (_isPrivateMessage)
+            Expanded(
+              child: Text(
+                _recipients.isEmpty
+                    ? context.l10n.pm_newTitle
+                    : context.l10n.post_sendPmTitle(
+                        _recipients.join(', '),
+                      ),
+                style: theme.textTheme.titleSmall,
+                overflow: TextOverflow.ellipsis,
+              ),
+            )
+          else if (targetOwnRow) ...[
+            Text(
+              context.l10n.common_reply,
+              style: theme.textTheme.titleSmall,
+            ),
+            const Spacer(),
+          ] else if (widget.replyToPost != null) ...[
+            SmartAvatar(
+              imageUrl:
+                  widget.replyToPost!
+                      .getAvatarUrl()
+                      .isNotEmpty
+                  ? widget.replyToPost!.getAvatarUrl()
+                  : null,
+              radius: 14,
+              fallbackText: widget.replyToPost!.username,
+              backgroundColor:
+                  theme.colorScheme.primaryContainer,
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                context.l10n.post_replyToUser(
+                  widget.replyToPost!.username,
+                ),
+                style: theme.textTheme.titleSmall,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ] else
+            Text(
+              context.l10n.post_replyToTopic,
+              style: theme.textTheme.titleSmall,
+            ),
+
+          if (!_isPrivateMessage &&
+              !_isEditMode &&
+              widget.replyToPost == null)
+            const Spacer(),
+
+          // 草稿保存状态指示器
+          if (_draftController != null) ...[
+            ComposerDraftStatusIndicator(
+              status: _draftController!.statusNotifier,
+              onResolve: _isSubmitting
+                  ? null
+                  : _retryDraftSave,
+              showSaved: true,
+              iconSize: 18,
+            ),
+            const SizedBox(width: 4),
+            // 舍弃按钮
+            TextButton(
+              onPressed: _isSubmitting
+                  ? null
+                  : _discardDraft,
+              child: Text(context.l10n.common_discard),
+            ),
+            const SizedBox(width: 8),
+          ],
+
+          if (_canReviewPost) ...[
+            AiPostReviewButton(
+              titleBuilder: () => widget.topicTitle,
+              contentBuilder: () =>
+                  _contentController.text,
+              target: AiPostReviewTarget.reply,
+              enabled: !_isSubmitting && !_isLoadingRaw,
+            ),
+            const SizedBox(width: 8),
+          ],
+
+          // 发送/保存按钮
+          FilledButton(
+            onPressed: (_isSubmitting || _isLoadingRaw)
+                ? null
+                : _submit,
+            child: _isSubmitting
+                ? const LoadingSpinner(
+                    size: 20,
+                    color: Colors.white,
+                  )
+                : Text(
+                    _isEditMode
+                        ? context.l10n.common_save
+                        : context.l10n.common_send,
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+
   /// 字数不足时悬浮在正文区右下角的提示
   ///
   /// 对齐网页端：主题组件只吐一个 `.character-counts` div，悬浮定位由
@@ -849,127 +1042,37 @@ class _ReplySheetState extends ConsumerState<ReplySheet> {
                             ),
                           ),
 
-                          // 标题行
-                          Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 16,
-                              vertical: 8,
-                            ),
-                            child: Row(
-                              children: [
-                                // 标题信息
-                                if (_isEditMode) ...[
-                                  Icon(
-                                    Symbols.edit_rounded,
-                                    size: 18,
-                                    color: theme.colorScheme.primary,
+                          // 标题行(窄屏放不下「回复 @用户名」时,回复对象挪到
+                          // 第二行,不截断名字也不压缩按钮)
+                          LayoutBuilder(
+                            builder: (context, bounds) {
+                              final targetOwnRow = _replyTargetNeedsOwnRow(
+                                theme,
+                                bounds.maxWidth,
+                              );
+                              return Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  _buildHeaderRow(
+                                    theme,
+                                    targetOwnRow: targetOwnRow,
                                   ),
-                                  const SizedBox(width: 8),
-                                  Expanded(
-                                    child: Text(
-                                      context.l10n.post_editPostTitle(
-                                        widget.editPost!.postNumber,
+                                  if (targetOwnRow)
+                                    Padding(
+                                      key: const ValueKey(
+                                        'reply-composer-recipient-row',
                                       ),
-                                      style: theme.textTheme.titleSmall,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                  ),
-                                ] else if (_isPrivateMessage)
-                                  Expanded(
-                                    child: Text(
-                                      _recipients.isEmpty
-                                          ? context.l10n.pm_newTitle
-                                          : context.l10n.post_sendPmTitle(
-                                              _recipients.join(', '),
-                                            ),
-                                      style: theme.textTheme.titleSmall,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                  )
-                                else if (widget.replyToPost != null) ...[
-                                  SmartAvatar(
-                                    imageUrl:
-                                        widget.replyToPost!
-                                            .getAvatarUrl()
-                                            .isNotEmpty
-                                        ? widget.replyToPost!.getAvatarUrl()
-                                        : null,
-                                    radius: 14,
-                                    fallbackText: widget.replyToPost!.username,
-                                    backgroundColor:
-                                        theme.colorScheme.primaryContainer,
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Expanded(
-                                    child: Text(
-                                      context.l10n.post_replyToUser(
-                                        widget.replyToPost!.username,
+                                      padding: const EdgeInsets.fromLTRB(
+                                        16,
+                                        0,
+                                        16,
+                                        10,
                                       ),
-                                      style: theme.textTheme.titleSmall,
-                                      overflow: TextOverflow.ellipsis,
+                                      child: _buildReplyTargetRow(theme),
                                     ),
-                                  ),
-                                ] else
-                                  Text(
-                                    context.l10n.post_replyToTopic,
-                                    style: theme.textTheme.titleSmall,
-                                  ),
-
-                                if (!_isPrivateMessage &&
-                                    !_isEditMode &&
-                                    widget.replyToPost == null)
-                                  const Spacer(),
-
-                                // 草稿保存状态指示器
-                                if (_draftController != null) ...[
-                                  ComposerDraftStatusIndicator(
-                                    status: _draftController!.statusNotifier,
-                                    onResolve: _isSubmitting
-                                        ? null
-                                        : _retryDraftSave,
-                                    showSaved: true,
-                                    iconSize: 18,
-                                  ),
-                                  const SizedBox(width: 4),
-                                  // 舍弃按钮
-                                  TextButton(
-                                    onPressed: _isSubmitting
-                                        ? null
-                                        : _discardDraft,
-                                    child: Text(context.l10n.common_discard),
-                                  ),
-                                  const SizedBox(width: 8),
                                 ],
-
-                                if (_canReviewPost) ...[
-                                  AiPostReviewButton(
-                                    titleBuilder: () => widget.topicTitle,
-                                    contentBuilder: () =>
-                                        _contentController.text,
-                                    target: AiPostReviewTarget.reply,
-                                    enabled: !_isSubmitting && !_isLoadingRaw,
-                                  ),
-                                  const SizedBox(width: 8),
-                                ],
-
-                                // 发送/保存按钮
-                                FilledButton(
-                                  onPressed: (_isSubmitting || _isLoadingRaw)
-                                      ? null
-                                      : _submit,
-                                  child: _isSubmitting
-                                      ? const LoadingSpinner(
-                                          size: 20,
-                                          color: Colors.white,
-                                        )
-                                      : Text(
-                                          _isEditMode
-                                              ? context.l10n.common_save
-                                              : context.l10n.common_send,
-                                        ),
-                                ),
-                              ],
-                            ),
+                              );
+                            },
                           ),
 
                           Divider(
