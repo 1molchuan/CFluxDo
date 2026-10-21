@@ -63,6 +63,7 @@ import '../../common/fading_edge_scroll_view.dart';
 import '../../common/smart_avatar.dart';
 import '../../content/discourse_html_content/image_utils.dart';
 import '../../mention/mention_autocomplete.dart';
+import '../composer_panel_height.dart';
 import '../emoji_popover.dart';
 import '../emoji_sticker_panel.dart';
 import '../image_upload_dialog.dart';
@@ -1410,15 +1411,13 @@ class RichComposerEditorState extends State<RichComposerEditor> {
     }
   }
 
-  /// 面板高度:键盘高度已知用键盘高(等高切换),否则 emojiPanelHeight
-  /// 兜底;都含底部安全区。
-  double get _panelHeight {
-    final safeBottom = MediaQuery.viewPaddingOf(context).bottom;
-    final kb = _panelController.keyboardHeight;
-    return kb > 0
-        ? max(kb, safeBottom)
-        : max(widget.emojiPanelHeight, safeBottom);
-  }
+  /// 面板高度:拿到正常软键盘高度时用键盘高(等高切换),浮动/外接键盘
+  /// 回报的过小高度不算数,用 emojiPanelHeight 兜底;都含底部安全区。
+  double get _panelHeight => resolveComposerPanelHeight(
+    keyboardHeight: _panelController.keyboardHeight,
+    fallbackHeight: widget.emojiPanelHeight,
+    safeBottom: MediaQuery.viewPaddingOf(context).bottom,
+  );
 
   /// 构建(或复用)EmojiStickerPanel 缓存实例,docked 与桌面悬浮弹层共用
   Widget _ensureEmojiPanelChild() {

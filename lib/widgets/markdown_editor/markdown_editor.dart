@@ -16,6 +16,7 @@ import '../../services/emoji_handler.dart';
 import '../../utils/emoji_shortcodes.dart';
 import '../../utils/platform_utils.dart';
 import '../mention/mention_autocomplete.dart';
+import 'composer_panel_height.dart';
 import 'composer_shortcuts.dart';
 import 'emoji_popover.dart';
 import 'emoji_sticker_panel.dart';
@@ -733,15 +734,13 @@ class MarkdownEditorState extends ConsumerState<MarkdownEditor> {
     return wrappedField;
   }
 
-  /// 自定义面板高度：键盘高度已知时直接使用（与 _KeyboardPlaceholder 等高），
-  /// 否则用 emojiPanelHeight 兜底
-  double get _panelHeight {
-    final safeBottom = MediaQuery.viewPaddingOf(context).bottom;
-    final keyboardHeight = _panelController.keyboardHeight;
-    return keyboardHeight > 0
-        ? max(keyboardHeight, safeBottom)
-        : max(widget.emojiPanelHeight, safeBottom);
-  }
+  /// 自定义面板高度：拿到正常软键盘高度时直接使用（与 _KeyboardPlaceholder
+  /// 等高），浮动/外接键盘回报的过小高度不算数，用 emojiPanelHeight 兜底
+  double get _panelHeight => resolveComposerPanelHeight(
+    keyboardHeight: _panelController.keyboardHeight,
+    fallbackHeight: widget.emojiPanelHeight,
+    safeBottom: MediaQuery.viewPaddingOf(context).bottom,
+  );
 
   /// 构建(或复用)EmojiStickerPanel 缓存实例,docked 与桌面悬浮弹层共用
   Widget _ensureEmojiPanelChild() {
