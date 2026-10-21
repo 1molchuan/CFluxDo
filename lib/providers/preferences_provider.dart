@@ -5,9 +5,11 @@ import 'package:flutter/services.dart';
 // ignore: depend_on_referenced_packages
 import 'package:flutter_riverpod/legacy.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
 import '../models/topic_card_style.dart';
 import '../navigation/nav_action_bus.dart';
 import '../services/network/request_scheduler_config.dart';
+import '../services/uploads/upload_settings.dart';
 import '../services/cf_challenge_service.dart';
 import '../services/render_backend_service.dart';
 import '../utils/blocked_user_filter.dart';
@@ -235,6 +237,7 @@ class AppPreferences {
   final BookmarksOpenMode bookmarksOpenMode;
 
   /// 最大并发请求数
+  final bool forceDisableMultipartUpload;
   final int maxConcurrent;
 
   /// 滑动窗口内最大请求数
@@ -331,6 +334,7 @@ class AppPreferences {
     this.defaultNestedView = false,
     this.nestedLineStyle = NestedLineStyle.auto,
     this.bookmarksOpenMode = BookmarksOpenMode.defaultRoute,
+    this.forceDisableMultipartUpload = false,
     required this.maxConcurrent,
     required this.maxPerWindow,
     required this.windowSeconds,
@@ -394,6 +398,7 @@ class AppPreferences {
     bool? defaultNestedView,
     NestedLineStyle? nestedLineStyle,
     BookmarksOpenMode? bookmarksOpenMode,
+    bool? forceDisableMultipartUpload,
     int? maxConcurrent,
     int? maxPerWindow,
     int? windowSeconds,
@@ -470,6 +475,8 @@ class AppPreferences {
       defaultNestedView: defaultNestedView ?? this.defaultNestedView,
       nestedLineStyle: nestedLineStyle ?? this.nestedLineStyle,
       bookmarksOpenMode: bookmarksOpenMode ?? this.bookmarksOpenMode,
+      forceDisableMultipartUpload:
+          forceDisableMultipartUpload ?? this.forceDisableMultipartUpload,
       maxConcurrent: maxConcurrent ?? this.maxConcurrent,
       maxPerWindow: maxPerWindow ?? this.maxPerWindow,
       windowSeconds: windowSeconds ?? this.windowSeconds,
@@ -649,6 +656,7 @@ class PreferencesNotifier extends StateNotifier<AppPreferences> {
           bookmarksOpenMode: BookmarksOpenMode.fromString(
             _prefs.getString(_bookmarksOpenModeKey),
           ),
+          forceDisableMultipartUpload: UploadSettings.forceDisabled(_prefs),
           maxConcurrent: _prefs.getInt(_maxConcurrentKey) ?? 3,
           maxPerWindow: _prefs.getInt(_maxPerWindowKey) ?? 6,
           windowSeconds: _prefs.getInt(_windowSecondsKey) ?? 3,
@@ -982,6 +990,11 @@ class PreferencesNotifier extends StateNotifier<AppPreferences> {
   Future<void> setBookmarksOpenMode(BookmarksOpenMode mode) async {
     state = state.copyWith(bookmarksOpenMode: mode);
     await _prefs.setString(_bookmarksOpenModeKey, mode.name);
+  }
+
+  Future<void> setForceDisableMultipartUpload(bool value) async {
+    await _prefs.setBool(UploadSettings.forceDisableMultipartKey, value);
+    state = state.copyWith(forceDisableMultipartUpload: value);
   }
 
   Future<void> setMaxConcurrent(int value) async {
