@@ -351,7 +351,9 @@ class RichComposerEditorState extends State<RichComposerEditor> {
       final editor = _editor;
       if (editor == null || !mounted || _documentReplaced) return;
       final sw = Stopwatch()..start();
-      final raw = docToRaw(editor.blocks);
+      // 即时渲染（ir）下光标处的格式已展开成源码字面量，直接序列化会被当成
+      // 普通正文再转义一层；exportMarkdown 在快照里先收口
+      final raw = editor.exportMarkdown();
       if (raw == widget.controller.text) return;
       widget.controller.text = raw;
       if (kDebugMode && sw.elapsedMilliseconds > 8) {
@@ -384,7 +386,7 @@ class RichComposerEditorState extends State<RichComposerEditor> {
     if (_documentReplaced) return;
     final editor = _editor;
     if (editor == null) return;
-    final raw = docToRaw(editor.blocks);
+    final raw = editor.exportMarkdown();
     if (raw != widget.controller.text) {
       // 原子赋值 + 合法末尾选区。text setter 会把 selection 置
       // collapsed(-1);切到源码模式时 TextField attach 的**首帧**
