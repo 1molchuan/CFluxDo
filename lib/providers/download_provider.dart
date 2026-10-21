@@ -141,31 +141,36 @@ class DownloadNotifier extends StateNotifier<List<DownloadItem>> {
         },
       );
       _updateItem(id, status: DownloadItemStatus.completed, progress: 1.0);
-      toastHandle.dismiss();
-      // 显示完成 Toast，带"查看"按钮跳转下载列表
-      ToastService.show(
+      // 进度 Toast 原位变成完成提示，带"查看"按钮跳转下载列表
+      toastHandle.complete(
         S.current.myBrowser_downloadComplete,
-        type: ToastType.success,
         duration: const Duration(seconds: 5),
         actionLabel: S.current.myBrowser_viewDownload,
         onAction: () => DownloadListPage.navigateTo(highlightItemId: id),
       );
     } on DioException catch (e) {
       await _releaseQuietly(reservation);
-      toastHandle.dismiss();
       if (e.type == DioExceptionType.cancel) {
+        // 用户主动取消：直接收起，不当失败提示
+        toastHandle.dismiss();
         debugPrint('[DownloadProvider] 下载已取消: $actualFileName');
       } else {
         debugPrint('[DownloadProvider] 下载失败: $e');
         _updateItem(id, status: DownloadItemStatus.failed);
-        ToastService.showError(S.current.myBrowser_downloadFailed);
+        // 原位变色，避免退场动画期间又插入一条导致同屏两条
+        toastHandle.complete(
+          S.current.myBrowser_downloadFailed,
+          type: ToastType.error,
+        );
       }
     } catch (e) {
       await _releaseQuietly(reservation);
-      toastHandle.dismiss();
       debugPrint('[DownloadProvider] 下载异常: $e');
       _updateItem(id, status: DownloadItemStatus.failed);
-      ToastService.showError(S.current.myBrowser_downloadFailed);
+      toastHandle.complete(
+        S.current.myBrowser_downloadFailed,
+        type: ToastType.error,
+      );
     } finally {
       _cancelTokens.remove(id);
       _lastProgressPublishMicros.remove(id);
