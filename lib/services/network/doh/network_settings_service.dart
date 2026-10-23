@@ -525,8 +525,7 @@ class NetworkSettingsService {
     ConnectivityService().networkSignature.addListener(
       _handleNetworkSignatureChanged,
     );
-    await _applyProxyState();
-    await refreshDnsCacheStats();
+    await _applyProxyState(startup: true);
     _touch();
   }
 
@@ -786,7 +785,9 @@ class NetworkSettingsService {
     }
   }
 
-  Future<void> _applyProxyState() async {
+  /// [startup] 为冷启动：没有界面在等 Loading，跳过给 UI 留的一帧和最短 400 ms，
+  /// DNS 缓存统计也不等（冷启动这里排在首个请求之前）
+  Future<void> _applyProxyState({bool startup = false}) async {
     final startedAt = DateTime.now();
     _syncAccelPolling();
     _applyDepth++;
@@ -796,7 +797,9 @@ class NetworkSettingsService {
         isApplying.value = true;
       }
       // 给 UI 一帧时间渲染 Loading
-      await Future<void>.delayed(const Duration(milliseconds: 16));
+      if (!startup) {
+        await Future<void>.delayed(const Duration(milliseconds: 16));
+      }
     }
     if (!shouldRunLocalProxy) {
       try {
@@ -813,11 +816,15 @@ class NetworkSettingsService {
         if (_applyDepth == 0) {
           final elapsed = DateTime.now().difference(startedAt);
           const minDuration = Duration(milliseconds: 400);
-          if (elapsed < minDuration) {
+          if (!startup && elapsed < minDuration) {
             await Future<void>.delayed(minDuration - elapsed);
           }
           isApplying.value = false;
-          await refreshDnsCacheStats();
+          if (startup) {
+            unawaited(refreshDnsCacheStats());
+          } else {
+            await refreshDnsCacheStats();
+          }
         }
       }
       return;
@@ -1003,11 +1010,15 @@ class NetworkSettingsService {
       if (_applyDepth == 0) {
         final elapsed = DateTime.now().difference(startedAt);
         const minDuration = Duration(milliseconds: 400);
-        if (elapsed < minDuration) {
+        if (!startup && elapsed < minDuration) {
           await Future<void>.delayed(minDuration - elapsed);
         }
         isApplying.value = false;
-        await refreshDnsCacheStats();
+        if (startup) {
+          unawaited(refreshDnsCacheStats());
+        } else {
+          await refreshDnsCacheStats();
+        }
         unawaited(refreshSelectStatus());
         _touch();
       }
