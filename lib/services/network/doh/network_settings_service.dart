@@ -1270,9 +1270,12 @@ class NetworkSettingsService {
         // 服务器地址变了时，下次解析会按签名自动清掉旧缓存
         _scheduleApplyProxyState();
       }
+      _touch();
+      return;
     }
-    // 只是提示文字变了也要刷新设置页
-    _touch();
+    // 只是提示文字变了（回前台时的令牌检查都会走到这里）：只刷新设置页，不动版本号——
+    // 版本号一变 Dart 侧会重建 HTTP 客户端、丢掉所有连接
+    notifier.value = notifier.value.copyWith();
   }
 
   /// 正在用加速服务器（专属或公共）时，定时问 Rust 代理：令牌有没有被拒、有没有新拉到路由表 / 节点列表
