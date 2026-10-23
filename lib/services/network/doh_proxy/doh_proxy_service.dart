@@ -99,6 +99,7 @@ class DohProxyService {
     List<String> extraCoveredHosts = const [],
     String? appVersion,
     String? networkSig,
+    List<String> preconnectHosts = const [],
   }) async {
     final authSignature = _buildAuthSignature(dohAuthToken, dohEchAuthToken);
     final bootstrapSignature = _buildBootstrapSignature(
@@ -179,6 +180,7 @@ class DohProxyService {
         extraCoveredHosts: extraCoveredHosts,
         appVersion: appVersion,
         networkSig: networkSig,
+        preconnectHosts: preconnectHosts,
       );
       // 桌面平台 FFI 加载失败时，回退到进程模式
       if (!result && DohProxyFfi.canFallbackToProcess) {
@@ -272,6 +274,7 @@ class DohProxyService {
     List<String> extraCoveredHosts = const [],
     String? appVersion,
     String? networkSig,
+    List<String> preconnectHosts = const [],
   }) async {
     try {
       return await _enqueueFfiOp(() async {
@@ -316,6 +319,7 @@ class DohProxyService {
           extraCoveredHosts: extraCoveredHosts,
           appVersion: appVersion,
           networkSig: networkSig,
+          preconnectHosts: preconnectHosts,
         );
         if (resultPort <= 0) {
           // _callFfiStart 已设置更详细的 _lastError，仅在未设置时补充
@@ -1187,6 +1191,7 @@ class DohProxyService {
     List<String> extraCoveredHosts = const [],
     String? appVersion,
     String? networkSig,
+    List<String> preconnectHosts = const [],
   }) async {
     final sendPort = await _ensureFfiIsolate();
     final response = ReceivePort();
@@ -1226,6 +1231,7 @@ class DohProxyService {
       'extraCoveredHosts': extraCoveredHosts,
       'appVersion': appVersion,
       'networkSig': networkSig,
+      'preconnectHosts': preconnectHosts,
       'preferredPort': port,
       'replyTo': response.sendPort,
     });
@@ -1583,6 +1589,7 @@ void _ffiIsolateEntry(SendPort mainSendPort) {
           final extraCoveredHosts = _stringList(message['extraCoveredHosts']);
           final appVersion = message['appVersion'] as String?;
           final networkSig = message['networkSig'] as String?;
+          final preconnectHosts = _stringList(message['preconnectHosts']);
           var resultPort = DohProxyFfi.instance.start(
             port: portValue,
             enableDoh: enableDoh,
@@ -1618,6 +1625,7 @@ void _ffiIsolateEntry(SendPort mainSendPort) {
             extraCoveredHosts: extraCoveredHosts,
             appVersion: appVersion,
             networkSig: networkSig,
+            preconnectHosts: preconnectHosts,
           );
           if (resultPort <= 0 && preferredPort != 0) {
             resultPort = DohProxyFfi.instance.start(
@@ -1655,6 +1663,7 @@ void _ffiIsolateEntry(SendPort mainSendPort) {
               extraCoveredHosts: extraCoveredHosts,
               appVersion: appVersion,
               networkSig: networkSig,
+              preconnectHosts: preconnectHosts,
             );
           }
           if (resultPort <= 0) {

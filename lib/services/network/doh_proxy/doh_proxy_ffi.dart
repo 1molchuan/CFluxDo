@@ -805,6 +805,7 @@ class DohProxyFfi {
     List<String> extraCoveredHosts = const [],
     String? appVersion,
     String? networkSig,
+    List<String> preconnectHosts = const [],
   }) {
     if (!_initialized && !initialize()) {
       return -1;
@@ -875,6 +876,7 @@ class DohProxyFfi {
       if (extraCoveredHosts.isNotEmpty) 'extra_covered_hosts': extraCoveredHosts,
       if (appVersion != null && appVersion.isNotEmpty) 'app_version': appVersion,
       if (networkSig != null && networkSig.isNotEmpty) 'network_sig': networkSig,
+      if (preconnectHosts.isNotEmpty) 'preconnect_hosts': preconnectHosts,
     });
     final configPtr = configJson.toNativeUtf8();
     try {
