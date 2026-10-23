@@ -362,6 +362,18 @@ Future<void> main(List<String> args) async {
   StartupTimeline.mark('rhttp');
   final startupConnectivity = await startupConnectivityCheck;
   ConnectivityService().seedInitialSignature(startupConnectivity);
+  // VPN 自动切换在起代理之前决定：要压制就直接改偏好，免得先起代理再关掉
+  // （关掉那一下还要走设置页的 Loading 节奏，压在冷启动路径上）
+  VpnAutoToggleService.instance.initialize(prefs);
+  try {
+    // 起代理前那次检查有结果就直接用，超时了再查一次
+    final initialConnectivity = startupConnectivity.isNotEmpty
+        ? startupConnectivity
+        : await ConnectivityService.safeCheckConnectivity();
+    await VpnAutoToggleService.instance.syncInitialState(initialConnectivity);
+  } catch (e) {
+    debugPrint('[Main] 初始 VPN 状态同步失败: $e');
+  }
   await NetworkSettingsService.instance.initialize(prefs);
   StartupTimeline.mark('proxy');
   // WindowsWebViewEnvironmentService 必须等 NetworkSettingsService 把本次
@@ -374,16 +386,6 @@ Future<void> main(List<String> args) async {
   // 早就 complete 了,创建时直接读到确定值,不用再赌超时。
   if (Platform.isWindows) {
     await WindowsWebViewEnvironmentService.instance.initialize();
-  }
-  VpnAutoToggleService.instance.initialize(prefs);
-  try {
-    // 起代理前那次检查有结果就直接用，超时了再查一次
-    final initialConnectivity = startupConnectivity.isNotEmpty
-        ? startupConnectivity
-        : await ConnectivityService.safeCheckConnectivity();
-    await VpnAutoToggleService.instance.syncInitialState(initialConnectivity);
-  } catch (e) {
-    debugPrint('[Main] 初始 VPN 状态同步失败: $e');
   }
   StartupTimeline.mark('network');
 

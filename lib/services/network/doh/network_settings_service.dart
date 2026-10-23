@@ -467,6 +467,17 @@ class NetworkSettingsService {
 
   String get _defaultServerUrl => _builtInServers.first.url;
 
+  /// 是否已初始化（读过偏好、起过代理）
+  bool get isInitialized => _prefs != null;
+
+  /// 初始化之前读「DoH 开关」偏好：VPN 自动切换要在起代理前决定是否压制
+  static bool storedDohEnabled(SharedPreferences prefs) =>
+      prefs.getBool(_dohEnabledKey) ?? true;
+
+  /// 初始化之前写「DoH 开关」偏好（初始化时按它起不起代理）
+  static Future<void> storeDohEnabled(SharedPreferences prefs, bool enabled) =>
+      prefs.setBool(_dohEnabledKey, enabled);
+
   Future<void> initialize(SharedPreferences prefs) async {
     if (_prefs != null) return;
     _prefs = prefs;
