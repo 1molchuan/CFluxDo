@@ -52,7 +52,6 @@ import 'services/network/proxy/proxy_settings_service.dart';
 import 'services/network/rhttp/rhttp_settings_service.dart';
 import 'services/network/webview/webview_adapter_settings_service.dart';
 import 'services/eruda_settings_service.dart';
-import 'package:rhttp/rhttp.dart' as rhttp;
 import 'services/network/vpn_auto_toggle_service.dart';
 import 'services/network/doh_proxy/proxy_certificate.dart';
 import 'services/cf_challenge_logger.dart';
@@ -101,6 +100,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:ai_model_manager/ai_model_manager.dart';
 import 'services/app_logger.dart';
 import 'services/network/adapters/platform_adapter.dart';
+import 'services/network/adapters/rhttp_adapter.dart' show RhttpRuntime;
 import 'providers/preferences_provider.dart';
 import 'providers/theme_provider.dart';
 import 'package:dynamic_color/dynamic_color.dart';
@@ -123,12 +123,6 @@ import 'providers/shortcut_provider.dart';
 import 'widgets/keyboard_shortcut_handler.dart';
 import 'utils/platform_utils.dart';
 import 'utils/discourse_url_parser.dart';
-
-/// 初始化 rhttp Rust runtime
-Future<bool> _initRhttp() async {
-  await rhttp.Rhttp.init();
-  return true;
-}
 
 /// 应用 Android 屏幕刷新率偏好。
 /// 偏好值 0 表示跟随系统（auto），非 0 则按目标刷新率从 supported 中选最匹配的 mode。
@@ -350,18 +344,9 @@ Future<void> main(List<String> args) async {
   // Eruda 调试控制台开关 (默认关)
   await ErudaSettingsService.instance.initialize(prefs);
   StartupTimeline.mark('settings');
-  try {
-    final rhttp = await Future.any([
-      _initRhttp(),
-      Future.delayed(const Duration(seconds: 5), () => false),
-    ]);
-    if (rhttp != true) {
-      debugPrint('[rhttp] 初始化超时或失败');
-      await RhttpSettingsService.instance.forceDisable();
-    }
-  } catch (e) {
-    debugPrint('[rhttp] 初始化异常: $e');
-    await RhttpSettingsService.instance.forceDisable();
+  // rhttp 默认关闭：关着就不在冷启动里初始化它的 Rust 运行时，首次用到时再初始化
+  if (RhttpSettingsService.instance.current.enabled) {
+    await RhttpRuntime.ensureInitialized();
   }
 
   // Windows 固定系统代理必须先于本地 DoH/WebView 网关读取，网关才能按
