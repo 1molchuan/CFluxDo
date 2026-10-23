@@ -289,6 +289,11 @@ Future<void> main(List<String> args) async {
     onWebProcessCrashed: _showLinuxWebViewCrashDialog,
   );
 
+  // 网络签名要在起本地代理前拿到（与阶段 1 并行）：本地优选凭它决定持久化的赢家能否直接用
+  final startupConnectivityCheck = ConnectivityService.quickCheckConnectivity(
+    const Duration(milliseconds: 300),
+  );
+
   // 阶段 1：并行执行所有不相互依赖的初始化
   final futures = <Future<dynamic>>[
     SharedPreferences.getInstance(),
@@ -355,6 +360,8 @@ Future<void> main(List<String> args) async {
     SystemProxyService.instance.start();
   }
   StartupTimeline.mark('rhttp');
+  final startupConnectivity = await startupConnectivityCheck;
+  ConnectivityService().seedInitialSignature(startupConnectivity);
   await NetworkSettingsService.instance.initialize(prefs);
   StartupTimeline.mark('proxy');
   // WindowsWebViewEnvironmentService 必须等 NetworkSettingsService 把本次
@@ -370,8 +377,10 @@ Future<void> main(List<String> args) async {
   }
   VpnAutoToggleService.instance.initialize(prefs);
   try {
-    final initialConnectivity =
-        await ConnectivityService.safeCheckConnectivity();
+    // 起代理前那次检查有结果就直接用，超时了再查一次
+    final initialConnectivity = startupConnectivity.isNotEmpty
+        ? startupConnectivity
+        : await ConnectivityService.safeCheckConnectivity();
     await VpnAutoToggleService.instance.syncInitialState(initialConnectivity);
   } catch (e) {
     debugPrint('[Main] 初始 VPN 状态同步失败: $e');

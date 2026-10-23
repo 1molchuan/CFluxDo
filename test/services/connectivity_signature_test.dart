@@ -71,4 +71,31 @@ void main() {
       expect(ConnectivityService.signatureOf(const []), '');
     });
   });
+
+  group('ConnectivityService.seedInitialSignature', () {
+    final signature = ConnectivityService().networkSignature;
+    setUp(() => signature.value = null);
+    tearDown(() => signature.value = null);
+
+    test('起代理前种下签名', () {
+      ConnectivityService().seedInitialSignature([
+        ConnectivityResult.wifi,
+        ConnectivityResult.vpn,
+      ]);
+      expect(signature.value, 'vpn|wifi');
+    });
+
+    test('超时（空列表）或瞬态 none 不种，保持未知', () {
+      ConnectivityService().seedInitialSignature(const []);
+      expect(signature.value, isNull);
+      ConnectivityService().seedInitialSignature([ConnectivityResult.none]);
+      expect(signature.value, isNull);
+    });
+
+    test('已有签名时不覆盖', () {
+      signature.value = 'mobile';
+      ConnectivityService().seedInitialSignature([ConnectivityResult.wifi]);
+      expect(signature.value, 'mobile');
+    });
+  });
 }
