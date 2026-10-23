@@ -1040,6 +1040,12 @@ class DohProxyService {
     return _enqueueFfiOp(_callFfiClearDnsCache);
   }
 
+  /// 网络引擎计数（进程级累计）；进程模式 / 库不支持返回 null。只读原子量，同步调用即可
+  Map<String, dynamic>? netStats() {
+    if (!DohProxyFfi.isAvailable || _process != null) return null;
+    return DohProxyFfi.instance.netStats();
+  }
+
   Future<DohDnsCacheStats?> dnsCacheStats() async {
     if (!DohProxyFfi.isAvailable) {
       return DohProxyFfi.instance.dnsCacheStats();

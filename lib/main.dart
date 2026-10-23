@@ -58,6 +58,7 @@ import 'services/network/doh_proxy/proxy_certificate.dart';
 import 'services/cf_challenge_logger.dart';
 import 'services/browser_trust_coordinator.dart';
 import 'services/startup/app_startup.dart';
+import 'services/startup/startup_timeline.dart';
 import 'services/update_service.dart';
 import 'services/update_checker_helper.dart';
 import 'package:fluxdo_render/fluxdo_render.dart'
@@ -194,6 +195,7 @@ void _showLinuxWebViewCrashDialog() {
 }
 
 Future<void> main(List<String> args) async {
+  StartupTimeline.start();
   DeepLinkService.instance.launchArgs = args;
 
   // 自定义 binding:接管标准图片解码入口,全局限制解码并发(= 限制
@@ -311,6 +313,7 @@ Future<void> main(List<String> args) async {
     WebViewSettings.preloadPolyfill(),
   ];
   final results = await Future.wait(futures);
+  StartupTimeline.mark('stores');
   final prefs = results[0] as SharedPreferences;
   // 启动序列阶段 1→2：存储（含 jar）已就绪，接上 _t 的服务端探测 / 自愈 /
   // 认证回调。之后无论谁先构造 DiscourseService，priming 的对账都有探测可用
@@ -346,6 +349,7 @@ Future<void> main(List<String> args) async {
   await WebViewAdapterSettingsService.instance.initialize(prefs);
   // Eruda 调试控制台开关 (默认关)
   await ErudaSettingsService.instance.initialize(prefs);
+  StartupTimeline.mark('settings');
   try {
     final rhttp = await Future.any([
       _initRhttp(),
@@ -365,7 +369,9 @@ Future<void> main(List<String> args) async {
   if (Platform.isWindows) {
     SystemProxyService.instance.start();
   }
+  StartupTimeline.mark('rhttp');
   await NetworkSettingsService.instance.initialize(prefs);
+  StartupTimeline.mark('proxy');
   // WindowsWebViewEnvironmentService 必须等 NetworkSettingsService 把本次
   // 会话真正要用的代理端口定下来之后再创建 Environment。之前放在最早那批
   // 并行初始化里,等的是"猜的"8s 超时——NetworkSettingsService 前面还排
@@ -385,6 +391,7 @@ Future<void> main(List<String> args) async {
   } catch (e) {
     debugPrint('[Main] 初始 VPN 状态同步失败: $e');
   }
+  StartupTimeline.mark('network');
 
   // 启动序列阶段 3→6：priming → 预加载（与 runApp 并行，PreheatGate 复用这个
   // 进行中的预加载）→ 会话判定 → 登录后启动项，全部在后台进行。
@@ -428,6 +435,12 @@ Future<void> main(List<String> args) async {
     'event': 'app_start',
     'message': '应用启动',
   });
+
+  unawaited(
+    WidgetsBinding.instance.waitUntilFirstFrameRasterized.then(
+      (_) => StartupTimeline.mark('first_frame'),
+    ),
+  );
 
   // 启动后台维护:迁移 trash 目录清扫(v7/v8 rename 出来的待删区)+
   // blob 缓存过期扫描(24h 节流)。都在首帧渲染完 + 60s 空闲后跑,
