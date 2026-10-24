@@ -419,4 +419,48 @@ void main() {
       ]);
     });
   });
+
+  group('插入新话题', () {
+    Topic pinned(int id, {String title = 'pinned'}) => Topic(
+      id: id,
+      title: title,
+      slug: 'topic-$id',
+      postsCount: 1,
+      replyCount: 0,
+      views: 0,
+      likeCount: 0,
+      categoryId: '2',
+      pinned: true,
+    );
+
+    List<int> ids(List<Topic> topics) => topics.map((t) => t.id).toList();
+
+    test('排在开头的置顶话题留在最前，新话题插在它们之后', () {
+      final current = [pinned(1), pinned(2), _topic(10), _topic(11)];
+      expect(ids(prependTopicUpdates(current, [_topic(20), _topic(11)])), [
+        1,
+        2,
+        20,
+        11,
+        10,
+      ]);
+    });
+
+    test('置顶话题有更新时原位换成新数据', () {
+      final current = [pinned(1), pinned(2), _topic(10)];
+      final result = prependTopicUpdates(current, [
+        pinned(2, title: 'updated'),
+        _topic(20),
+      ]);
+      expect(ids(result), [1, 2, 20, 10]);
+      expect(result[1].title, 'updated');
+    });
+
+    test('没有置顶时照旧插在最前', () {
+      expect(
+        ids(prependTopicUpdates([_topic(10), _topic(11)], [_topic(11)])),
+        [11, 10],
+      );
+    });
+  });
 }
