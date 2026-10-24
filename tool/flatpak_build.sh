@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # 打 cfluxdo 的 Flatpak 单文件包（x86_64）
 # 用法: tool/flatpak_build.sh <输出 .flatpak 路径>
+#       FLUTTER_ROOT=/root/sdk/flutter-3.47 指定 SDK；CFX_BUILD_NAME / CFX_BUILD_NUMBER 覆盖版本
 # 依赖: flatpak、flatpak-builder、flathub 上的 org.gnome.Sdk//48 与 llvm20 扩展；
 #       WPE 预编译层已解压到 $WPE_LAYER_DIR（上游 flatpak-wpe-layer-gnome48-v2 资产）
 # 只打已提交的代码（git archive，含子模块），工作区里的改动不进包
@@ -16,8 +17,9 @@ CARGO_HOME=${CARGO_HOME:-$HOME/.cargo}
 RUSTUP_HOME=${RUSTUP_HOME:-$HOME/.rustup}
 
 version=$(sed -n 's/^version: *//p' "$ROOT/pubspec.yaml")
-BUILD_NAME=${version%%+*}
-BUILD_NUMBER=${version##*+}
+# 测试包可用 CFX_BUILD_NAME / CFX_BUILD_NUMBER 覆盖 pubspec 里的版本
+BUILD_NAME=${CFX_BUILD_NAME:-${version%%+*}}
+BUILD_NUMBER=${CFX_BUILD_NUMBER:-${version##*+}}
 
 # 1. 干净源码树
 SRC=$WORK/stage/source-tree
