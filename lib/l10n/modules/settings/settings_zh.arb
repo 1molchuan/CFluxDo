@@ -114,7 +114,7 @@
   "preferences_hideBarOnScroll": "滚动收起导航栏",
   "preferences_hideBarOnScrollDesc": "首页滚动时自动收起顶栏和底栏",
   "preferences_autoLoadTopicUpdates": "自动载入新话题",
-  "preferences_autoLoadTopicUpdatesDesc": "列表停在顶部时，有新话题或更新会自动载入，不用点提示条；往下浏览时仍只显示提示条",
+  "preferences_autoLoadTopicUpdatesDesc": "列表停在顶部时自动载入新话题，往下浏览时只显示提示条",
   "preferences_longPressPreview": "长按预览",
   "preferences_longPressPreviewDesc": "长按话题卡片快速预览内容",
   "preferences_openLinksInApp": "外部链接使用内置浏览器",
