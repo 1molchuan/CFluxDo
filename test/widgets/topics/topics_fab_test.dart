@@ -10,7 +10,8 @@ import 'package:fluxdo/providers/preferences_provider.dart';
 import 'package:fluxdo/utils/platform_utils.dart';
 import 'package:fluxdo/widgets/keyboard_shortcut_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:fluxdo/pages/topics_page.dart' show barVisibilityProvider;
+import 'package:fluxdo/pages/topics_page.dart'
+    show barVisibilityProvider, fabRefreshModeProvider;
 import 'package:fluxdo/widgets/topics/topics_fab.dart';
 
 void main() {
@@ -409,6 +410,76 @@ void main() {
     expect(rect.top, greaterThanOrEqualTo(16));
     await tester.drag(scroll, const Offset(0, 150));
     await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('上滑进入刷新模式：主按钮变刷新并暂隐独立刷新钮，点击刷新后回到创作', (
+    tester,
+  ) async {
+    await pumpFab(tester);
+    expect(find.byKey(const ValueKey('topics-fab-add')), findsOneWidget);
+    expect(refresh, findsOneWidget);
+
+    container.read(fabRefreshModeProvider.notifier).state = true;
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('topics-fab-refresh')), findsOneWidget);
+    expect(find.byKey(const ValueKey('topics-fab-add')), findsNothing);
+    expect(refresh, findsNothing);
+
+    await tester.tap(trigger);
+    await tester.pumpAndSettle();
+    expect(refreshCount, 1);
+    expect(createCount, 0);
+    expect(items, findsNothing);
+    expect(container.read(fabRefreshModeProvider), isFalse);
+    expect(find.byKey(const ValueKey('topics-fab-add')), findsOneWidget);
+    expect(refresh, findsOneWidget);
+  });
+
+  testWidgets('刷新模式切换时已展开的菜单收起，退出刷新模式后菜单可再开', (
+    tester,
+  ) async {
+    await pumpFab(tester);
+    await tester.tap(trigger);
+    await tester.pumpAndSettle();
+    expect(items, findsNWidgets(2));
+
+    container.read(fabRefreshModeProvider.notifier).state = true;
+    await tester.pumpAndSettle();
+    expect(items, findsNothing);
+    expect(find.byKey(const ValueKey('topics-fab-refresh')), findsOneWidget);
+
+    container.read(fabRefreshModeProvider.notifier).state = false;
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('topics-fab-add')), findsOneWidget);
+    await tester.tap(trigger);
+    await tester.pumpAndSettle();
+    expect(items, findsNWidgets(2));
+    expect(refreshCount, 0);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('关闭「上滑变刷新」后滚动模式不再影响主按钮', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({
+      'pref_home_refresh_button': true,
+      'pref_home_fab_refresh_on_scroll_up': false,
+    });
+    final prefs = await SharedPreferences.getInstance();
+    container.dispose();
+    container = ProviderContainer(
+      overrides: [sharedPreferencesProvider.overrideWithValue(prefs)],
+    );
+    await pumpFab(tester);
+    container.read(fabRefreshModeProvider.notifier).state = true;
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('topics-fab-add')), findsOneWidget);
+    expect(refresh, findsOneWidget);
+    await tester.tap(trigger);
+    await tester.pumpAndSettle();
+    expect(items, findsNWidgets(2));
+    expect(refreshCount, 0);
     expect(tester.takeException(), isNull);
   });
 }

@@ -44,6 +44,8 @@
   "preferences_autoFillLoginDesc": "Remember credentials and auto-fill on login",
   "preferences_homeRefreshButton": "Floating home refresh button",
   "preferences_homeRefreshButtonDesc": "Show a separate refresh button above the compose button on the home page",
+  "preferences_homeFabRefreshOnScrollUp": "Compose button becomes refresh when scrolling up",
+  "preferences_homeFabRefreshOnScrollUpDesc": "While scrolling back up the home list, the compose button temporarily turns into a refresh button that jumps to the top and reloads",
   "preferences_clipboardTopicLinkDetection": "Detect clipboard topic links",
   "preferences_clipboardTopicLinkDetectionDesc": "Check for Linux.do topic links in the clipboard when returning to the app and ask before opening",
   "preferences_clipboardTopicLink_detected": "Topic link found in clipboard",

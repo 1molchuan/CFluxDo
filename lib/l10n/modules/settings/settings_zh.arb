@@ -61,6 +61,8 @@
   "preferences_autoFillLoginDesc": "记住账号密码，登录时自动填充",
   "preferences_homeRefreshButton": "首页悬浮刷新按钮",
   "preferences_homeRefreshButtonDesc": "在首页创作按钮上方显示独立刷新入口",
+  "preferences_homeFabRefreshOnScrollUp": "上滑时创作按钮变为刷新",
+  "preferences_homeFabRefreshOnScrollUpDesc": "在首页列表里往回（向上）滑动时，右下角的创作按钮临时变成刷新，点一下回到顶部并刷新",
   "preferences_clipboardTopicLinkDetection": "自动识别剪贴板话题链接",
   "preferences_clipboardTopicLinkDetectionDesc": "回到应用时检测剪贴板中的 Linux.do 话题链接，并在底部询问是否打开",
   "preferences_clipboardTopicLink_detected": "检测到剪贴板中的话题链接",

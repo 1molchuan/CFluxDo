@@ -10,7 +10,8 @@ import '../../models/shortcut_binding.dart';
 import '../../providers/shortcut_provider.dart';
 import '../../providers/preferences_provider.dart';
 import '../../utils/responsive.dart';
-import '../../pages/topics_page.dart' show barVisibilityProvider;
+import '../../pages/topics_page.dart'
+    show barVisibilityProvider, fabRefreshModeProvider;
 
 /// 首页固定创作入口与独立刷新工具。菜单不使用遮罩或背景模糊。
 class TopicsFab extends ConsumerStatefulWidget {
@@ -147,8 +148,19 @@ class _TopicsFabState extends ConsumerState<TopicsFab>
     }
   }
 
+  /// 刷新模式下主按钮的动作：回顶 + 刷新，并立刻回到创作模式。
+  void _refreshFromFab() {
+    if (!_present || _scrollVisibility < 1) return;
+    ref.read(fabRefreshModeProvider.notifier).state = false;
+    widget.onRefresh();
+  }
+
   void _toggle() {
     if (!_present || _scrollVisibility < 1) return;
+    // 键盘快捷键等绕过按钮直接开菜单时，先退出刷新模式
+    if (ref.read(fabRefreshModeProvider)) {
+      ref.read(fabRefreshModeProvider.notifier).state = false;
+    }
     if (_expanded) {
       _close();
       return;
@@ -214,9 +226,17 @@ class _TopicsFabState extends ConsumerState<TopicsFab>
     final hideBarOnScroll = ref.watch(
       preferencesProvider.select((p) => p.hideBarOnScroll),
     );
-    final showRefresh = ref.watch(
-      preferencesProvider.select((p) => p.homeRefreshButton),
+    // 上滑切换：只对有创作按钮的登录用户生效；刷新模式下独立刷新钮
+    // 暂隐，避免上下两个刷新图标。
+    final swapOnScrollUp = ref.watch(
+      preferencesProvider.select((p) => p.homeFabRefreshOnScrollUp),
     );
+    final refreshMode =
+        widget.canCreate && swapOnScrollUp && ref.watch(fabRefreshModeProvider);
+    final showRefresh =
+        ref.watch(preferencesProvider.select((p) => p.homeRefreshButton)) &&
+        !refreshMode;
+    if (refreshMode && _expanded) _queueHiddenMenuClose();
     // 与底栏使用相同规则和同一逐帧进度，不再叠加延迟动画。
     // 宽屏使用 NavigationRail，没有滚动隐藏的底栏，FAB 保持可见。
     final visibility =
@@ -305,7 +325,9 @@ class _TopicsFabState extends ConsumerState<TopicsFab>
                               key: const ValueKey('topics-create-menu'),
                               heroTag: null,
                               focusNode: _triggerFocus,
-                              tooltip: _expanded
+                              tooltip: refreshMode
+                                  ? context.l10n.common_refresh
+                                  : _expanded
                                   ? context.l10n.common_close
                                   : context.l10n.topicsScreen_createTopic,
                               elevation: _expanded ? 0 : 3,
@@ -332,10 +354,23 @@ class _TopicsFabState extends ConsumerState<TopicsFab>
                                       scheme.onPrimary,
                                       t,
                                     ),
-                              onPressed: _toggle,
-                              child: Transform.rotate(
-                                angle: t * 0.7853981633974483,
-                                child: const Icon(Symbols.add_rounded),
+                              onPressed: refreshMode
+                                  ? _refreshFromFab
+                                  : _toggle,
+                              child: AnimatedSwitcher(
+                                duration: const Duration(milliseconds: 150),
+                                switchInCurve: Curves.easeOut,
+                                switchOutCurve: Curves.easeIn,
+                                child: refreshMode
+                                    ? const Icon(
+                                        Symbols.refresh_rounded,
+                                        key: ValueKey('topics-fab-refresh'),
+                                      )
+                                    : Transform.rotate(
+                                        key: const ValueKey('topics-fab-add'),
+                                        angle: t * 0.7853981633974483,
+                                        child: const Icon(Symbols.add_rounded),
+                                      ),
                               ),
                             ),
                           );

@@ -57,6 +57,17 @@ List<SettingsGroup> buildPreferencesGroups(BuildContext context) {
               ref.read(preferencesProvider.notifier).setHomeRefreshButton(v),
         ),
         SwitchModel(
+          id: 'homeFabRefreshOnScrollUp',
+          title: l10n.preferences_homeFabRefreshOnScrollUp,
+          subtitle: l10n.preferences_homeFabRefreshOnScrollUpDesc,
+          icon: Symbols.arrow_upward_rounded,
+          getValue: (ref) =>
+              ref.watch(preferencesProvider).homeFabRefreshOnScrollUp,
+          onChanged: (ref, v) => ref
+              .read(preferencesProvider.notifier)
+              .setHomeFabRefreshOnScrollUp(v),
+        ),
+        SwitchModel(
           id: 'clipboardTopicLinkDetection',
           title: l10n.preferences_clipboardTopicLinkDetection,
           subtitle: l10n.preferences_clipboardTopicLinkDetectionDesc,

@@ -11,6 +11,17 @@ class NumberUtils {
     return count.toString();
   }
 
+  /// 千分位分组（12345 → 12,345），负数保留符号；用在要看精确值的地方
+  static String formatThousands(int value) {
+    final digits = value.abs().toString();
+    final buf = StringBuffer();
+    for (var i = 0; i < digits.length; i++) {
+      if (i > 0 && (digits.length - i) % 3 == 0) buf.write(',');
+      buf.write(digits[i]);
+    }
+    return value < 0 ? '-$buf' : buf.toString();
+  }
+
   /// 格式化带趋势符号的整数，正数加 +，负数保留 -。
   static String formatSignedInt(int value) {
     if (value > 0) return '+$value';

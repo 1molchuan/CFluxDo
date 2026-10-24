@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart' hide Category;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/physics.dart' show SpringDescription, SpringSimulation;
+import 'package:flutter/rendering.dart' show ScrollDirection;
 import 'package:app_icons/app_icons.dart';
 import 'package:flutter/scheduler.dart' show Ticker;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -53,6 +54,9 @@ import '../widgets/common/loading_dialog.dart';
 import '../widgets/common/fading_edge_scroll_view.dart';
 import 'package:common_ui/common_ui.dart';
 import '../widgets/offline_indicator.dart';
+import '../constants.dart';
+import '../utils/number_utils.dart';
+import 'webview_page.dart';
 import '../l10n/s.dart';
 import '../models/shortcut_binding.dart';
 import '../providers/shortcut_provider.dart';
@@ -81,6 +85,96 @@ final fabRefreshSignalProvider =
     StateNotifierProvider<ScrollToTopNotifier, int>((ref) {
       return ScrollToTopNotifier();
     });
+
+/// FAB 刷新模式（true = 右下角主按钮显示刷新而不是创作）。由列表滚动
+/// 方向驱动：用户主动往回（向上）滑进入，向下滑或回到顶部退出；
+/// 见 [fabRefreshModeFromScroll]。偏好 homeFabRefreshOnScrollUp 关闭时
+/// TopicsFab 忽略这个值。
+final fabRefreshModeProvider = StateProvider<bool>((ref) => false);
+
+/// 根据一条列表滚动通知推导 FAB 刷新模式；null = 这条通知不改变模式。
+/// 只认用户拖拽方向（UserScrollNotification），惯性滚动与回弹不会误切；
+/// 已经在顶部时不进入刷新模式（下拉刷新就在手边）。
+@visibleForTesting
+bool? fabRefreshModeFromScroll(ScrollNotification notification) {
+  if (notification.metrics.axis != Axis.vertical) return null;
+  if (notification is UserScrollNotification) {
+    return switch (notification.direction) {
+      ScrollDirection.forward => notification.metrics.pixels > 0,
+      ScrollDirection.reverse => false,
+      ScrollDirection.idle => null,
+    };
+  }
+  if (notification is ScrollUpdateNotification &&
+      notification.metrics.pixels <= 0) {
+    return false;
+  }
+  return null;
+}
+
+/// 首页工具栏的「点数」药丸：当前用户的社区点数（Discourse gamification
+/// 的 gamification_score，随 current_user 一起下发），点开站点排行榜。
+/// 游客或站点没开插件（字段缺失）时不占位。
+class _ScorePill extends ConsumerWidget {
+  const _ScorePill();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final score = ref.watch(
+      currentUserProvider.select((u) => u.value?.gamificationScore),
+    );
+    if (score == null) return const SizedBox.shrink();
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final mj = theme.extension<MojianTokens>();
+    final l10n = context.l10n;
+    return Padding(
+      padding: const EdgeInsets.only(right: 4),
+      child: Tooltip(
+        message: l10n.topics_scorePillTooltip,
+        child: Material(
+          key: const ValueKey('topics-score-pill'),
+          color: mj?.paper2 ?? scheme.surfaceContainerHigh,
+          shape: mj != null
+              ? RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(4),
+                  side: BorderSide(color: mj.ruleStrong),
+                )
+              : const StadiumBorder(),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: () => WebViewPage.open(
+              context,
+              '${AppConstants.baseUrl}/leaderboard',
+              title: l10n.topics_leaderboard,
+            ),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Symbols.stars_rounded,
+                    size: 16,
+                    color: mj?.accent ?? scheme.primary,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    l10n.topics_scorePill(NumberUtils.formatThousands(score)),
+                    style: theme.textTheme.labelMedium?.copyWith(
+                      color: mj?.ink ?? scheme.onSurface,
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
 
 /// Header 区域常量。
 ///
@@ -1316,6 +1410,7 @@ class _TopicsPageState extends ConsumerState<TopicsPage>
           // 同曲线张开迎接胶囊缩成的图标（胶囊本体在
           // _CollapsibleHeader 的 overlay 层绘制，这里只占位）
           _SearchSlotSpacer(controller: _headerController),
+          if (isLoggedIn) const _ScorePill(),
           if (isLoggedIn && !Responsive.showNavigationRail(context))
             const NotificationIconButton(compact: true),
           if (kDebugMode)
@@ -1584,6 +1679,12 @@ class _TopicsPageState extends ConsumerState<TopicsPage>
           (notification is ScrollEndNotification &&
               notification.dragDetails != null);
       if (!userDriven) return false;
+    }
+
+    // FAB 创作/刷新模式随用户拖拽方向切换（只在真变化时写，避免每帧通知）
+    final nextFabMode = fabRefreshModeFromScroll(notification);
+    if (nextFabMode != null && ref.read(fabRefreshModeProvider) != nextFabMode) {
+      ref.read(fabRefreshModeProvider.notifier).state = nextFabMode;
     }
 
     if (notification is ScrollUpdateNotification) {
@@ -2894,6 +2995,10 @@ class _TopicListState extends ConsumerState<_TopicList>
   double get _headerInset => widget.topInset;
 
   void scrollToTop() {
+    // 回顶就回到创作模式，不等滚动通知
+    if (ref.read(fabRefreshModeProvider)) {
+      ref.read(fabRefreshModeProvider.notifier).state = false;
+    }
     if (!_scrollController.hasClients) return;
     _scrollController.animateTo(
       0,

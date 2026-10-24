@@ -1861,6 +1861,12 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage>
             ),
           ),
         ),
+      if (_user?.gamificationScore != null)
+        _buildWideStat(
+          NumberUtils.formatCount(_user!.gamificationScore!),
+          context.l10n.userCard_score,
+          _user!.gamificationScore!,
+        ),
       if (_summary != null) ...[
         _buildWideStat(
           NumberUtils.formatCount(_summary!.likesReceived),
@@ -2553,9 +2559,10 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage>
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // 第一行：关注、粉丝
+              // 第一行：关注、粉丝、点数
               if (_user?.totalFollowing != null ||
-                  _user?.totalFollowers != null)
+                  _user?.totalFollowers != null ||
+                  _user?.gamificationScore != null)
                 Wrap(
                   spacing: 16,
                   children: [
@@ -2597,11 +2604,18 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage>
                           _user!.totalFollowers!,
                         ),
                       ),
+                    if (_user?.gamificationScore != null)
+                      _buildStatSlot(
+                        NumberUtils.formatCount(_user!.gamificationScore!),
+                        context.l10n.userCard_score,
+                        _user!.gamificationScore!,
+                      ),
                   ],
                 ),
               // 第二行：获赞、访问、话题、回复
               if (_user?.totalFollowing != null ||
-                  _user?.totalFollowers != null)
+                  _user?.totalFollowers != null ||
+                  _user?.gamificationScore != null)
                 const SizedBox(height: 8),
               Wrap(
                 spacing: 16,

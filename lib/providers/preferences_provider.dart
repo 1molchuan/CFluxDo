@@ -112,6 +112,9 @@ class AppPreferences {
   /// 在首页创作按钮上方显示独立刷新入口，默认关闭
   final bool homeRefreshButton;
 
+  /// 首页列表往回（向上）滑时，创作按钮临时变成刷新按钮；默认开启
+  final bool homeFabRefreshOnScrollUp;
+
   /// 自动识别剪贴板中的 Linux.do 话题链接
   final bool clipboardTopicLinkDetection;
 
@@ -319,6 +322,7 @@ class AppPreferences {
     required this.shareImageThemeIndex,
     required this.autoFillLogin,
     this.homeRefreshButton = false,
+    this.homeFabRefreshOnScrollUp = true,
     required this.clipboardTopicLinkDetection,
     required this.topicFilterKeywords,
     this.topicFilterWholeWord = false,
@@ -387,6 +391,7 @@ class AppPreferences {
     int? shareImageThemeIndex,
     bool? autoFillLogin,
     bool? homeRefreshButton,
+    bool? homeFabRefreshOnScrollUp,
     bool? clipboardTopicLinkDetection,
     List<String>? topicFilterKeywords,
     bool? topicFilterWholeWord,
@@ -455,6 +460,8 @@ class AppPreferences {
       shareImageThemeIndex: shareImageThemeIndex ?? this.shareImageThemeIndex,
       autoFillLogin: autoFillLogin ?? this.autoFillLogin,
       homeRefreshButton: homeRefreshButton ?? this.homeRefreshButton,
+      homeFabRefreshOnScrollUp:
+          homeFabRefreshOnScrollUp ?? this.homeFabRefreshOnScrollUp,
       clipboardTopicLinkDetection:
           clipboardTopicLinkDetection ?? this.clipboardTopicLinkDetection,
       topicFilterKeywords: topicFilterKeywords ?? this.topicFilterKeywords,
@@ -552,6 +559,8 @@ class PreferencesNotifier extends StateNotifier<AppPreferences> {
   static const String _shareImageThemeIndexKey = 'pref_share_image_theme_index';
   static const String _autoFillLoginKey = 'pref_auto_fill_login';
   static const String _homeRefreshButtonKey = 'pref_home_refresh_button';
+  static const String _homeFabRefreshOnScrollUpKey =
+      'pref_home_fab_refresh_on_scroll_up';
   static const String _clipboardTopicLinkDetectionKey =
       'pref_clipboard_topic_link_detection';
   static const String _topicFilterKeywordsKey = 'pref_topic_filter_keywords';
@@ -645,6 +654,8 @@ class PreferencesNotifier extends StateNotifier<AppPreferences> {
           shareImageThemeIndex: _prefs.getInt(_shareImageThemeIndexKey) ?? -1,
           autoFillLogin: _prefs.getBool(_autoFillLoginKey) ?? true,
           homeRefreshButton: _prefs.getBool(_homeRefreshButtonKey) ?? false,
+          homeFabRefreshOnScrollUp:
+              _prefs.getBool(_homeFabRefreshOnScrollUpKey) ?? true,
           clipboardTopicLinkDetection:
               _prefs.getBool(_clipboardTopicLinkDetectionKey) ?? false,
           topicFilterKeywords:
@@ -809,6 +820,11 @@ class PreferencesNotifier extends StateNotifier<AppPreferences> {
   Future<void> setHomeRefreshButton(bool enabled) async {
     state = state.copyWith(homeRefreshButton: enabled);
     await _prefs.setBool(_homeRefreshButtonKey, enabled);
+  }
+
+  Future<void> setHomeFabRefreshOnScrollUp(bool enabled) async {
+    state = state.copyWith(homeFabRefreshOnScrollUp: enabled);
+    await _prefs.setBool(_homeFabRefreshOnScrollUpKey, enabled);
   }
 
   Future<void> setClipboardTopicLinkDetection(bool enabled) async {

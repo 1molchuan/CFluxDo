@@ -107,4 +107,29 @@ void main() {
       expect(container.read(preferencesProvider).homeRefreshButton, enabled);
     });
   }
+
+  test('「上滑变刷新」默认开启，关闭后持久化并可恢复', () async {
+    final container = await _createContainer();
+    expect(container.read(preferencesProvider).homeFabRefreshOnScrollUp, isTrue);
+    final prefs = container.read(sharedPreferencesProvider);
+    expect(prefs.containsKey('pref_home_fab_refresh_on_scroll_up'), isFalse);
+
+    await container
+        .read(preferencesProvider.notifier)
+        .setHomeFabRefreshOnScrollUp(false);
+    expect(
+      container.read(preferencesProvider).homeFabRefreshOnScrollUp,
+      isFalse,
+    );
+    expect(prefs.getBool('pref_home_fab_refresh_on_scroll_up'), isFalse);
+
+    await prefs.reload();
+    final restored = _containerWithPreferences(prefs);
+    expect(restored.read(preferencesProvider).homeFabRefreshOnScrollUp, isFalse);
+    expect(restored.read(preferencesProvider).homeRefreshButton, isFalse);
+    expect(
+      restored.read(preferencesProvider).copyWith().homeFabRefreshOnScrollUp,
+      isFalse,
+    );
+  });
 }
