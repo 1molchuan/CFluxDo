@@ -25,6 +25,18 @@ class RelativeTimeClock extends ChangeNotifier {
 
   Timer? _timer;
 
+  /// 心跳计数：每通知一次 +1。含时间的排版快照（TopicCardLayout）把它放进
+  /// 缓存签名，跨分钟自动失效——读计数不用挂监听，不会让心跳在没有
+  /// 在屏卡片时还一直跑
+  int _tick = 0;
+  int get tick => _tick;
+
+  @override
+  void notifyListeners() {
+    _tick++;
+    super.notifyListeners();
+  }
+
   @override
   void addListener(VoidCallback listener) {
     super.addListener(listener);

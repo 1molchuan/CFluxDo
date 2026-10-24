@@ -160,16 +160,9 @@ class TopicCardLayout {
   /// 排版跨分钟自动失效,下次 build 惰性重排(消灭"自绘卡时间是
   /// 排版快照不自刷"与 widget 路径的行为差异)。渲染对象侧由
   /// PaintedTopicCard 订阅心跳触发 rebuild,失效与重建同源同帧。
-  static int _minuteEpoch = 0;
-  static bool _clockHooked = false;
-
-  static int _currentMinuteEpoch() {
-    if (!_clockHooked) {
-      _clockHooked = true;
-      RelativeTimeClock.instance.addListener(() => _minuteEpoch++);
-    }
-    return _minuteEpoch;
-  }
+  /// 只读心跳计数、不挂监听:挂了永久监听会让心跳在没有在屏卡片时
+  /// 也一直跑(widget 测试里表现为「树销毁后仍有 Timer」)。
+  static int _currentMinuteEpoch() => RelativeTimeClock.instance.tick;
 
   /// 存入缓存(替换旧实例)并按需 LRU。**内容变化必产出新实例**:
   /// PaintedTopicCard 的渲染对象用 identical 判断是否重绘,若复用同一

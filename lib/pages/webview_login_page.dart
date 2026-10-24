@@ -117,7 +117,7 @@ class _WebViewLoginPageState extends ConsumerState<WebViewLoginPage> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(context.l10n.webviewLogin_title),
+        title: Text(SiteContext.isLinuxDo ? context.l10n.webviewLogin_title : context.l10n.webviewLogin_titleSite(SiteContext.current.name)),
         actions: [
           IconButton(
             icon: const Icon(Symbols.content_paste_rounded),

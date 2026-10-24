@@ -59,6 +59,8 @@
   "profile_loggingOut": "Logging out...",
   "profile_loginForMore": "Log in for more features",
   "profile_loginLinuxDo": "Log in to LINUX.DO",
+  "profile_loginSite": "Log in to {site}",
+  "@profile_loginSite": {"placeholders": {"site": {"type": "String"}}},
   "profile_logoutContent": "Are you sure you want to log out?",
   "profile_logoutCurrentAccount": "Log out current account",
   "profile_metaverse": "Metaverse",

@@ -206,6 +206,12 @@ Future<void> main(List<String> args) async {
   // 站点必须先于 Cookie、认证和预加载单例确定，同一引擎内不再改变。
   final sitePreferences = await SharedPreferences.getInstance();
   await SiteContext.initialize(sitePreferences);
+  if (Platform.isAndroid) {
+    // 切站走 Activity.recreate() 重建引擎：新 Activity 不再自动贴边，状态栏
+    // 下面露出一条窗口底色，内容还被顶下去一截。冷启动时系统本来就是贴边的，
+    // 这里再声明一次对冷启动无影响
+    unawaited(SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge));
+  }
 
   // 墨笺标题宋体（Noto Serif SC 子集）的 OFL 许可，进「开源许可」页
   LicenseRegistry.addLicense(() async* {

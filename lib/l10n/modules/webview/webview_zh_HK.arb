@@ -16,6 +16,8 @@
   "webviewLogin_loginSuccess": "登錄成功！",
   "webviewLogin_savedPassword": "已保存的密碼",
   "webviewLogin_title": "登錄 LINUX.DO",
+  "webviewLogin_titleSite": "登錄 {site}",
+  "@webviewLogin_titleSite": {"placeholders": {"site": {"type": "String"}}},
   "webview_browser": "瀏覽器",
   "webview_cannotOpenBrowser": "無法打開外部瀏覽器",
   "webview_goBack": "後退",

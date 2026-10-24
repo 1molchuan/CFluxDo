@@ -54,6 +54,8 @@
   "profile_loggingOut": "正在退出...",
   "profile_loginForMore": "登入後體驗更多功能",
   "profile_loginLinuxDo": "登入 LINUX.DO",
+  "profile_loginSite": "登入 {site}",
+  "@profile_loginSite": {"placeholders": {"site": {"type": "String"}}},
   "profile_logoutContent": "確定要退出登入嗎？",
   "profile_logoutCurrentAccount": "退出當前賬號",
   "profile_metaverse": "元宇宙",
