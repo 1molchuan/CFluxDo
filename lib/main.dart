@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:catcher_2/catcher_2.dart';
 import 'package:chinese_font_library/chinese_font_library.dart';
+import 'package:connectivity_plus/connectivity_plus.dart' show ConnectivityResult;
 import 'package:flutter/cupertino.dart' show CupertinoPageTransitionsBuilder;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -290,9 +291,7 @@ Future<void> main(List<String> args) async {
   );
 
   // 网络签名要在起本地代理前拿到（与阶段 1 并行）：本地优选凭它决定持久化的赢家能否直接用
-  final startupConnectivityCheck = ConnectivityService.quickCheckConnectivity(
-    const Duration(milliseconds: 300),
-  );
+  final startupConnectivityCheck = ConnectivityService.safeCheckConnectivity();
 
   // 阶段 1：并行执行所有不相互依赖的初始化
   final futures = <Future<dynamic>>[
@@ -360,16 +359,26 @@ Future<void> main(List<String> args) async {
     SystemProxyService.instance.start();
   }
   StartupTimeline.mark('rhttp');
-  final startupConnectivity = await startupConnectivityCheck;
+  // 一般早就出结果了；还没出来最多再等 300 ms，晚到的结果照样补种（网络设置在监听签名，
+  // 会转告 Rust）。不能等 ConnectivityService.init()：它在首页挂载后才跑，预加载卡住时永远等不到
+  final startupConnectivity = await startupConnectivityCheck.timeout(
+    const Duration(milliseconds: 300),
+    onTimeout: () => const <ConnectivityResult>[],
+  );
   ConnectivityService().seedInitialSignature(startupConnectivity);
+  if (startupConnectivity.isEmpty) {
+    unawaited(
+      startupConnectivityCheck.then(ConnectivityService().seedInitialSignature),
+    );
+  }
   // VPN 自动切换在起代理之前决定：要压制就直接改偏好，免得先起代理再关掉
   // （关掉那一下还要走设置页的 Loading 节奏，压在冷启动路径上）
   VpnAutoToggleService.instance.initialize(prefs);
   try {
-    // 起代理前那次检查有结果就直接用，超时了再查一次
+    // 起代理前那次检查有结果就直接用，超时了就等它出结果
     final initialConnectivity = startupConnectivity.isNotEmpty
         ? startupConnectivity
-        : await ConnectivityService.safeCheckConnectivity();
+        : await startupConnectivityCheck;
     await VpnAutoToggleService.instance.syncInitialState(initialConnectivity);
   } catch (e) {
     debugPrint('[Main] 初始 VPN 状态同步失败: $e');

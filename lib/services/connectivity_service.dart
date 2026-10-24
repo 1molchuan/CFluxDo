@@ -94,19 +94,9 @@ class ConnectivityService {
     }
   }
 
-  /// 冷启动起本地代理之前用的快速检查：[timeout] 内拿不到结果返回空列表（调用方当作未知）
-  static Future<List<ConnectivityResult>> quickCheckConnectivity(
-    Duration timeout,
-  ) {
-    return safeCheckConnectivity().timeout(
-      timeout,
-      onTimeout: () => const <ConnectivityResult>[],
-    );
-  }
-
   /// 冷启动在起本地代理前先种下网络签名：Rust 的本地优选靠它判断持久化的赢家是不是
   /// 同一个网络上验证的，对得上就直接钉住、首个请求不用等校验。
-  /// 拿不到结果或只有瞬态的 [none] 时不种，保持 null，等 [init] 后的首个事件补登记
+  /// 拿不到结果或只有瞬态的 [none] 时不种，保持 null；已有签名（晚到的补种、[init] 后的事件）不覆盖
   void seedInitialSignature(List<ConnectivityResult> results) {
     if (networkSignature.value != null) return;
     final sig = signatureOf(results);
