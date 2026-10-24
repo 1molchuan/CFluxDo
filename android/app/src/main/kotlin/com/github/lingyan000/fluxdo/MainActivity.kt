@@ -89,9 +89,16 @@ class MainActivity : FlutterActivity() {
     private var siteRestartPending = false
     private val restartForSite = Runnable {
         if (!isFinishing && !isDestroyed) {
-            // 不重放启动当前 Activity 的旧 OAuth 回调。
-            intent = Intent(intent).apply { data = null }
-            recreate()
+            // 整个进程重启，不在进程内 recreate()：重建出来的 Activity 窗口不再贴边
+            // （状态栏下露出一条窗口底色、内容被顶下去一截），Rust 代理等静态状态也会残留。
+            // 由另一个进程里的跳板 Activity 拉起新进程，本进程直接退出。
+            // 跳板只带启动意图，不重放启动当前 Activity 的旧 OAuth 回调。
+            startActivity(
+                Intent(this, SiteRestartActivity::class.java)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+            )
+            finishAffinity()
+            Runtime.getRuntime().exit(0)
         }
     }
     private var interactiveKeyboardChannel: InteractiveKeyboardChannel? = null

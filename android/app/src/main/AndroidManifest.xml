@@ -158,6 +158,14 @@
             android:authorities="${applicationId}.SuperClipboardDataProvider"
             android:exported="true"
             android:grantUriPermissions="true" />
+        <!-- 切换站点的跳板：独立进程，拉起新的主进程后自行退出 -->
+        <activity
+            android:name=".SiteRestartActivity"
+            android:process=":site_restart"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and
