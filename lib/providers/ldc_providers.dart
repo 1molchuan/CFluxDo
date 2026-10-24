@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/ldc_user_info.dart';
 import '../services/ldc_oauth_service.dart';
 import '../services/network/exceptions/oauth_exception.dart';
+import '../services/site_context.dart';
 import 'core_providers.dart';
 
 final ldcOAuthServiceProvider = Provider((ref) => LdcOAuthService());
@@ -27,6 +28,7 @@ class LdcUserInfoNotifier extends AsyncNotifier<LdcUserInfo?> {
 
   @override
   Future<LdcUserInfo?> build() async {
+    if (!SiteContext.isLinuxDo) return null;
     final generation = _requestGeneration;
     final service = ref.read(ldcOAuthServiceProvider);
     ref.onDispose(() {
@@ -94,6 +96,7 @@ class LdcUserInfoNotifier extends AsyncNotifier<LdcUserInfo?> {
   }
 
   Future<LdcUserInfo?> _doFetchUserInfo() async {
+    if (!SiteContext.isLinuxDo) return null;
     final generation = _requestGeneration;
     final prefs = await SharedPreferences.getInstance();
     final enabled = prefs.getBool(_ldcEnabledKey) ?? false;
@@ -157,6 +160,7 @@ class LdcUserInfoNotifier extends AsyncNotifier<LdcUserInfo?> {
 
   /// 用户已手动通过 CF，取消旧请求并立即重新读取业务会话。
   Future<void> refreshAfterCfVerification() {
+    if (!SiteContext.isLinuxDo) return Future.value();
     _requestGeneration++;
     _inFlightFetch = null;
     ref.read(ldcOAuthServiceProvider).cancelPendingRequests();
@@ -164,6 +168,7 @@ class LdcUserInfoNotifier extends AsyncNotifier<LdcUserInfo?> {
   }
 
   Future<void> clear() async {
+    if (!SiteContext.isLinuxDo) return;
     _requestGeneration++;
     _inFlightFetch = null;
     ref.read(ldcOAuthServiceProvider).cancelPendingRequests();
@@ -173,6 +178,7 @@ class LdcUserInfoNotifier extends AsyncNotifier<LdcUserInfo?> {
   }
 
   Future<void> disable() async {
+    if (!SiteContext.isLinuxDo) return;
     _requestGeneration++;
     _inFlightFetch = null;
     ref.read(ldcOAuthServiceProvider).cancelPendingRequests();

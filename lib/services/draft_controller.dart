@@ -7,6 +7,7 @@ import '../models/draft.dart';
 import 'connectivity_service.dart';
 import 'discourse/discourse_service.dart';
 import 'local_draft_store.dart';
+import 'site_data_lifecycle.dart';
 
 enum DraftSaveStatus { idle, pending, saving, saved, local, conflict, error }
 
@@ -32,6 +33,7 @@ class DraftController {
         .listen((connected) {
           if (connected) retryPending();
         });
+    _unregisterFlush = SiteDataLifecycle.register(_flushBeforeSwitch);
   }
 
   final String draftKey;
@@ -41,6 +43,7 @@ class DraftController {
   final bool Function() _isConnected;
   final ValueChanged<DraftData>? onRemoteDraftChanged;
   final DraftData? Function()? currentEditorData;
+  late final void Function() _unregisterFlush;
   StreamSubscription<bool>? _connection;
   Future<String?>? _accountIdFuture;
   static const _debounceDelay = Duration(seconds: 2);
@@ -592,6 +595,28 @@ class DraftController {
   Future<bool> _accountMatches() async =>
       await _resolveAccountId() == await _accountIdResolver();
 
+  /// 只依赖本地保存，切站不必等待远端响应或覆盖云端冲突稿。
+  Future<void> _flushBeforeSwitch() async {
+    if (_disposed || _disabled) {
+      await _localTail;
+      return;
+    }
+    if (!_explicitDelete && currentEditorData != null) {
+      final current = currentEditorData!.call();
+      if (current == null) {
+        throw StateError('编辑器尚未准备好保存，请稍后再切换站点');
+      }
+      _accept(current);
+    }
+    if (_latestData?.hasContent == true || _pendingDelete) {
+      await _persistLatest();
+      if (_localFingerprint != _latestData?.contentFingerprint) {
+        throw StateError('本地草稿保存失败，已取消切换站点');
+      }
+    }
+    await _localTail;
+  }
+
   void disable() {
     _disabled = true;
     _cancelTimers();
@@ -618,5 +643,7 @@ class DraftController {
     unawaited(_connection?.cancel());
     // 队列继续完成已经接收的最后快照，只停止界面通知和新调度。
     _statusNotifier.dispose();
+    // 已交给队列的本地快照仍须参与切站刷盘，完成后再解绑。
+    unawaited(_localTail.whenComplete(_unregisterFlush));
   }
 }

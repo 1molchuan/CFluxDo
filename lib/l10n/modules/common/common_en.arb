@@ -1,5 +1,8 @@
 {
   "@@locale": "en",
+  "common_switchSite": "Switch site",
+  "common_switchingSite": "Switching site…",
+  "common_switchSiteFailed": "Could not switch sites. Please try again. Your original sign-in is preserved.",
   "common_about": "About",
   "common_add": "Add",
   "common_addBookmark": "Add bookmark",

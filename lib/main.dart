@@ -60,6 +60,8 @@ import 'services/cf_challenge_logger.dart';
 import 'services/browser_trust_coordinator.dart';
 import 'services/startup/app_startup.dart';
 import 'services/startup/startup_timeline.dart';
+import 'services/site_context.dart';
+import 'config/forum_site.dart';
 import 'services/update_service.dart';
 import 'services/update_checker_helper.dart';
 import 'package:fluxdo_render/fluxdo_render.dart'
@@ -201,6 +203,10 @@ Future<void> main(List<String> args) async {
   // 见 image_decode_gate.dart)。
   FluxdoWidgetsBinding.ensureInitialized();
 
+  // 站点必须先于 Cookie、认证和预加载单例确定，同一引擎内不再改变。
+  final sitePreferences = await SharedPreferences.getInstance();
+  await SiteContext.initialize(sitePreferences);
+
   // 墨笺标题宋体（Noto Serif SC 子集）的 OFL 许可，进「开源许可」页
   LicenseRegistry.addLicense(() async* {
     final text = await rootBundle.loadString(
@@ -298,7 +304,7 @@ Future<void> main(List<String> args) async {
 
   // 阶段 1：并行执行所有不相互依赖的初始化
   final futures = <Future<dynamic>>[
-    SharedPreferences.getInstance(),
+    Future<SharedPreferences>.value(sitePreferences),
     LogWriter.init(),
     ProxyCertificate.initialize(),
     // Windows 深链协议注册(discourse:// / fluxdo://):写 HKCU 免管理员,
@@ -562,6 +568,9 @@ Future<void> main(List<String> args) async {
       overrides: [
         sharedPreferencesProvider.overrideWithValue(prefs),
         aiSharedPreferencesProvider.overrideWithValue(prefs),
+        aiChatStorageServiceProvider.overrideWithValue(
+          AiChatStorageService(prefs, sessionNamespace: SiteContext.storageKey('')),
+        ),
         aiDioAdapterFactoryProvider.overrideWithValue(
           createExternalHttpAdapter,
         ),
@@ -1489,6 +1498,7 @@ class _MainPageState extends ConsumerState<MainPage>
         onAction: () {
           final topic = DiscourseUrlParser.parseTopic(candidate.uri.toString());
           if (topic != null &&
+              ForumSite.fromUri(candidate.uri) == SiteContext.current &&
               MasterDetailLayout.canShowBothPanesFor(context)) {
             ref
                 .read(selectedTopicProvider.notifier)

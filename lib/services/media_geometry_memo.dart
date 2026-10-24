@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
-import 'package:path_provider/path_provider.dart';
+import 'site_context.dart';
 
 /// url → 自然尺寸(w,h)的持久记忆。
 ///
@@ -48,7 +48,7 @@ class MediaGeometryMemo {
   static Future<void> ensureLoaded() => _loadFuture ??= _load();
 
   static Future<File> _file() async {
-    final dir = await getApplicationSupportDirectory();
+    final dir = await SiteContext.supportDirectory();
     return File('${dir.path}/media_geometry_memo.json');
   }
 

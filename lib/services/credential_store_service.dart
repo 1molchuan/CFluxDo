@@ -1,3 +1,4 @@
+import 'site_context.dart';
 import 'storage/resilient_secure_storage.dart';
 
 /// 登录凭证安全存储服务（单例）
@@ -6,8 +7,8 @@ class CredentialStoreService {
   static final CredentialStoreService _instance = CredentialStoreService._();
   factory CredentialStoreService() => _instance;
 
-  static const _keyUsername = 'login_credential_username';
-  static const _keyPassword = 'login_credential_password';
+  static String get _keyUsername => SiteContext.storageKey('login_credential_username');
+  static String get _keyPassword => SiteContext.storageKey('login_credential_password');
 
   final _storage = ResilientSecureStorage();
 

@@ -10,6 +10,8 @@
   "appearance_colorAmber": "Amber",
   "appearance_colorAutumn": "Autumn",
   "appearance_cardStyleGroup": "Card styles",
+  "appearance_showTopicCreationTime": "Show topic creation time",
+  "appearance_showTopicCreationTimeDesc": "Show the creation date before the last reply time in topic lists, colored by age",
   "appearance_colorBlue": "Blue",
   "appearance_colorCyan": "Cyan",
   "appearance_colorDefault": "Default",

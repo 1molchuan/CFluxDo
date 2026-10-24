@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
+import '../cookie_jar_service.dart';
 import '../raw_cookie_writer.dart';
 import 'platform_cookie_strategy.dart';
 
@@ -19,7 +20,20 @@ class DefaultCookieStrategy implements PlatformCookieStrategy {
     CookieManager cookieManager,
     Set<String> knownHosts,
   ) async {
-    await cookieManager.deleteAllCookies();
+    // Cookie store 由各域共享，只删除当前论坛，不触碰另一站或 OAuth 域。
+    final host = CookieJarService.appBaseHost;
+    final url = WebUri('https://$host');
+    final cookies = await readCookiesFromWebView(cookieManager, url.toString());
+    for (final cookie in cookies) {
+      final domain = CookieJarService.normalizeWebViewCookieDomain(cookie.domain);
+      if (domain != null && domain.toLowerCase() != host) continue;
+      await cookieManager.deleteCookie(
+        url: url,
+        name: cookie.name,
+        domain: cookie.domain,
+        path: cookie.path ?? '/',
+      );
+    }
   }
 
   @override

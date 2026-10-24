@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../services/discourse/discourse_service.dart';
+import '../services/site_context.dart';
 import 'bookmarks_repository.dart';
 import 'core_providers.dart';
 
@@ -86,7 +87,7 @@ class BookmarksReconciler {
 
   /// 上次完整对账的时间戳。空表示从未做过（=本地首次）。
   DateTime? lastFullSyncAt(String accountId) {
-    final iso = _preferences.getString('$_lastFullSyncKeyPrefix$accountId');
+    final iso = _preferences.getString('$_lastFullSyncKeyPrefix${SiteContext.accountKey(accountId)}');
     if (iso == null) return null;
     return DateTime.tryParse(iso);
   }
@@ -100,7 +101,7 @@ class BookmarksReconciler {
 
   Future<void> _markFullSyncCompleted(String accountId) async {
     await _preferences.setString(
-      '$_lastFullSyncKeyPrefix$accountId',
+      '$_lastFullSyncKeyPrefix${SiteContext.accountKey(accountId)}',
       DateTime.now().toUtc().toIso8601String(),
     );
   }

@@ -22,10 +22,10 @@ import '../common/perf_span_box.dart';
 import '../../services/discourse_cache_manager.dart';
 import '../common/category_tags_line.dart';
 import '../common/icon_glyph_span.dart';
-import '../common/relative_time_text.dart';
 import '../../utils/number_utils.dart';
 import '../common/emoji_text.dart';
 import 'topic_expandable_excerpt.dart';
+import 'topic_creation_time.dart';
 
 Widget _withDesktopTertiaryTap(Widget child, VoidCallback? onMiddleClick) {
   if (!PlatformUtils.isDesktop || onMiddleClick == null) return child;
@@ -243,8 +243,9 @@ class _MobileTopicTapSurfaceState extends State<_MobileTopicTapSurface> {
 
   @override
   Widget build(BuildContext context) {
-    final overlayColor = Theme.of(context).colorScheme.onSurface
-        .withValues(alpha: 0.06);
+    final overlayColor = Theme.of(
+      context,
+    ).colorScheme.onSurface.withValues(alpha: 0.06);
     return Semantics(
       onTap: widget.onTap == null ? null : _handleTap,
       onLongPress: widget.onLongPress == null ? null : _handleLongPress,
@@ -344,6 +345,7 @@ class TopicCard extends ConsumerWidget {
     // "无构建记录"盲区,补上话题卡片(监控关闭零开销)
     FrameJankMonitor.noteBuild('card#${topic.id}');
     final theme = Theme.of(context);
+    ref.watch(preferencesProvider.select((p) => p.showTopicCreationTime));
     // 新内容信号(蓝点/未读数/时间高亮):新话题或有未读回复
     final isUnread = topic.unseen || topic.unread > 0;
     // 全部读完：进入过话题且没有未读帖子
@@ -592,6 +594,24 @@ class TopicCard extends ConsumerWidget {
     );
   }
 
+  Widget _buildListTimes(
+    BuildContext context, {
+    required bool isUnread,
+    required Color metaColor,
+  }) {
+    final theme = Theme.of(context);
+    final times = TopicListTimes(
+      createdAt: topic.createdAt,
+      lastPostedAt: topic.lastPostedAt,
+      replyStyle: theme.textTheme.labelSmall?.copyWith(
+        color: isUnread ? theme.colorScheme.primary : metaColor,
+      ),
+    );
+    return TopicCreationTimeScope.enabled.value && topic.createdAt != null
+        ? Flexible(child: times)
+        : times;
+  }
+
   Widget _buildMetadataBlock(
     BuildContext context, {
     required TopicCardStyle style,
@@ -601,7 +621,6 @@ class TopicCard extends ConsumerWidget {
     required bool isFullyRead,
     required double availableWidth,
   }) {
-    final theme = Theme.of(context);
     // stats 的已读退灰走色值预乘(见 _buildStat.dim),不再外包 Opacity 层
     final stats = _buildStatsCluster(
       context,
@@ -617,12 +636,10 @@ class TopicCard extends ConsumerWidget {
       showTags: style.showTags,
       dim: isFullyRead,
     );
-    // 时间是骨架字段,恒定显示
-    final timeText = RelativeTimeText(
-      dateTime: topic.lastPostedAt,
-      style: theme.textTheme.labelSmall?.copyWith(
-        color: isUnread ? theme.colorScheme.primary : metaColor,
-      ),
+    final timeText = _buildListTimes(
+      context,
+      isUnread: isUnread,
+      metaColor: metaColor,
     );
     final authorName = style.showAuthor
         ? _buildAuthorName(context, metaColor, isFullyRead: isFullyRead)
@@ -856,11 +873,10 @@ class TopicCard extends ConsumerWidget {
                     ),
                   ),
                   const SizedBox(width: 8),
-                  RelativeTimeText(
-                    dateTime: topic.lastPostedAt,
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      color: isUnread ? theme.colorScheme.primary : metaColor,
-                    ),
+                  _buildListTimes(
+                    context,
+                    isUnread: isUnread,
+                    metaColor: metaColor,
                   ),
                   if (unreadIndicator != null) ...[
                     const SizedBox(width: 6),
@@ -1187,146 +1203,161 @@ class CompactTopicCard extends ConsumerWidget {
                 horizontal: 12,
                 vertical: mj != null ? 12 : 10,
               ),
-              child: Row(
-                children: [
-                  // 1. 置顶图标
-                  Icon(
-                    Symbols.push_pin_rounded,
-                    size: 14,
-                    color: theme.colorScheme.primary,
-                  ),
-                  const SizedBox(width: 8),
-
-                  // 2. 分类图标/Dot
-                  if (category != null) ...[
-                    if (faIcon != null)
-                      FaIcon(
-                        faIcon,
-                        size: 12,
-                        color: _parseColor(category.color),
-                      )
-                    else if (logoUrl != null && logoUrl.isNotEmpty)
-                      Image(
-                        image: discourseImageProvider(
-                          UrlHelper.resolveUrlWithCdn(logoUrl),
-                        ),
-                        width: 12,
-                        height: 12,
-                        fit: BoxFit.contain,
-                        errorBuilder: (context, error, stackTrace) {
-                          return _buildCategoryDot(category);
-                        },
-                      )
-                    else
-                      _buildCategoryDot(category),
+              child: LayoutBuilder(
+                builder: (context, bounds) => Row(
+                  children: [
+                    // 1. 置顶图标
+                    Icon(
+                      Symbols.push_pin_rounded,
+                      size: 14,
+                      color: theme.colorScheme.primary,
+                    ),
                     const SizedBox(width: 8),
-                  ],
 
-                  // 3. 标题
-                  Expanded(
-                    child: needsRichTitle
-                        ? Text.rich(
-                            TextSpan(
+                    // 2. 分类图标/Dot
+                    if (category != null) ...[
+                      if (faIcon != null)
+                        FaIcon(
+                          faIcon,
+                          size: 12,
+                          color: _parseColor(category.color),
+                        )
+                      else if (logoUrl != null && logoUrl.isNotEmpty)
+                        Image(
+                          image: discourseImageProvider(
+                            UrlHelper.resolveUrlWithCdn(logoUrl),
+                          ),
+                          width: 12,
+                          height: 12,
+                          fit: BoxFit.contain,
+                          errorBuilder: (context, error, stackTrace) {
+                            return _buildCategoryDot(category);
+                          },
+                        )
+                      else
+                        _buildCategoryDot(category),
+                      const SizedBox(width: 8),
+                    ],
+
+                    // 3. 标题
+                    Expanded(
+                      child: needsRichTitle
+                          ? Text.rich(
+                              TextSpan(
+                                style: compactTitleStyle,
+                                children: [
+                                  if (topic.closed)
+                                    iconGlyphSpan(
+                                      context,
+                                      Symbols.lock_rounded,
+                                      size: 12,
+                                      color: isUnread
+                                          ? theme.colorScheme.onSurface
+                                          : theme.colorScheme.onSurfaceVariant,
+                                      gap: 3,
+                                    ),
+                                  if (topic.hasAcceptedAnswer)
+                                    iconGlyphSpan(
+                                      context,
+                                      Symbols.check_box_rounded,
+                                      size: 12,
+                                      color: Colors.green,
+                                      gap: 3,
+                                    )
+                                  else if (topic.canHaveAnswer)
+                                    iconGlyphSpan(
+                                      context,
+                                      Symbols.check_box_outline_blank_rounded,
+                                      size: 12,
+                                      color: theme.colorScheme.outline,
+                                      gap: 3,
+                                    ),
+                                  ...EmojiText.buildEmojiSpans(
+                                    context,
+                                    topic.title,
+                                    compactTitleStyle,
+                                  ),
+                                ],
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            )
+                          : Text(
+                              topic.title,
                               style: compactTitleStyle,
-                              children: [
-                                if (topic.closed)
-                                  iconGlyphSpan(
-                                    context,
-                                    Symbols.lock_rounded,
-                                    size: 12,
-                                    color: isUnread
-                                        ? theme.colorScheme.onSurface
-                                        : theme.colorScheme.onSurfaceVariant,
-                                    gap: 3,
-                                  ),
-                                if (topic.hasAcceptedAnswer)
-                                  iconGlyphSpan(
-                                    context,
-                                    Symbols.check_box_rounded,
-                                    size: 12,
-                                    color: Colors.green,
-                                    gap: 3,
-                                  )
-                                else if (topic.canHaveAnswer)
-                                  iconGlyphSpan(
-                                    context,
-                                    Symbols.check_box_outline_blank_rounded,
-                                    size: 12,
-                                    color: theme.colorScheme.outline,
-                                    gap: 3,
-                                  ),
-                                ...EmojiText.buildEmojiSpans(
-                                  context,
-                                  topic.title,
-                                  compactTitleStyle,
-                                ),
-                              ],
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                             ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          )
-                        : Text(
-                            topic.title,
-                            style: compactTitleStyle,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                  ),
-
-                  const SizedBox(width: 8),
-
-                  // 4. 未读数或简单状态
-                  if (topic.unread > 0)
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 6,
-                        vertical: 2,
+                    ),
+                    const SizedBox(width: 8),
+                    ConstrainedBox(
+                      constraints: BoxConstraints(
+                        maxWidth: bounds.maxWidth * 0.4,
                       ),
-                      decoration: BoxDecoration(
-                        color: theme.colorScheme.primaryContainer.withValues(
-                          alpha: 0.7,
-                        ),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Text(
-                        '${topic.unread}',
-                        style: theme.textTheme.labelSmall?.copyWith(
-                          color: theme.colorScheme.onPrimaryContainer,
-                          fontWeight: FontWeight.w500,
-                          fontSize: 10,
+                      child: TopicListTimes(
+                        createdAt: topic.createdAt,
+                        lastPostedAt: topic.lastPostedAt,
+                        replyStyle: theme.textTheme.labelSmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
                         ),
                       ),
-                    )
-                  else if (topic.postsCount > 1)
-                    // 单段落:字形 span 复刻 Icon(12)+SizedBox(2)+Text
-                    Text.rich(
-                      TextSpan(
-                        children: [
-                          iconGlyphSpan(
-                            context,
-                            Symbols.chat_bubble_rounded,
-                            size: 12,
-                            color: theme.colorScheme.outline.withValues(
-                              alpha: 0.7,
-                            ),
-                            gap: 2,
-                            textStyle: theme.textTheme.labelSmall?.copyWith(
-                              fontSize: 10,
-                            ),
+                    ),
+
+                    const SizedBox(width: 8),
+
+                    // 4. 未读数或简单状态
+                    if (topic.unread > 0)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: theme.colorScheme.primaryContainer.withValues(
+                            alpha: 0.7,
                           ),
-                          TextSpan(
-                            text: '${topic.postsCount - 1}',
-                            style: theme.textTheme.labelSmall?.copyWith(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Text(
+                          '${topic.unread}',
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: theme.colorScheme.onPrimaryContainer,
+                            fontWeight: FontWeight.w500,
+                            fontSize: 10,
+                          ),
+                        ),
+                      )
+                    else if (topic.postsCount > 1)
+                      // 单段落:字形 span 复刻 Icon(12)+SizedBox(2)+Text
+                      Text.rich(
+                        TextSpan(
+                          children: [
+                            iconGlyphSpan(
+                              context,
+                              Symbols.chat_bubble_rounded,
+                              size: 12,
                               color: theme.colorScheme.outline.withValues(
                                 alpha: 0.7,
                               ),
-                              fontSize: 10,
+                              gap: 2,
+                              textStyle: theme.textTheme.labelSmall?.copyWith(
+                                fontSize: 10,
+                              ),
                             ),
-                          ),
-                        ],
+                            TextSpan(
+                              text: '${topic.postsCount - 1}',
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                color: theme.colorScheme.outline.withValues(
+                                  alpha: 0.7,
+                                ),
+                                fontSize: 10,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
-                    ),
-                ],
+                  ],
+                ),
               ),
             ),
           ),

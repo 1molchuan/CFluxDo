@@ -129,6 +129,9 @@ class BoundarySyncService {
     );
     final matches = <Cookie>[];
     for (final cookie in webViewCookies) {
+      if (cookie.domain != null &&
+          cookie.domain!.isNotEmpty &&
+          !CookieJarService.cookieDomainMatchesHost(cookie.domain, host)) continue;
       final value = cookie.value?.toString() ?? '';
       if (cookie.name != name || value.isEmpty) continue;
       if (expectedValue != null && value != expectedValue) continue;
@@ -161,6 +164,9 @@ class BoundarySyncService {
     );
     final matches = <Cookie>[];
     for (final cookie in webViewCookies) {
+      if (cookie.domain != null &&
+          cookie.domain!.isNotEmpty &&
+          !CookieJarService.cookieDomainMatchesHost(cookie.domain, host)) continue;
       final value = cookie.value?.toString() ?? '';
       if (cookie.name != CfClearanceAuthority.cookieName || value.isEmpty) {
         continue;
@@ -296,6 +302,9 @@ class BoundarySyncService {
       final freshClearanceValues = <String>{};
 
       for (final wc in webViewCookies) {
+        if (wc.domain != null &&
+            wc.domain!.isNotEmpty &&
+            !CookieJarService.cookieDomainMatchesHost(wc.domain, host)) continue;
         final value = wc.value?.toString() ?? '';
         if (value.isEmpty) continue;
         if (wc.name == CfClearanceAuthority.cookieName) {
@@ -438,10 +447,8 @@ class BoundarySyncService {
               '[BoundarySync] ${wc.name}: domain=null, 继承 jar 已有 domain=${existing.domain}',
             );
           } else {
-            // jar 也没有 → 兜底为 .{host}（domain cookie）
-            // 宁可多发到子域名，不能因为 host-only 导致子域名拿不到关键 cookie
-            domain = '.$host';
-            debugPrint('[BoundarySync] ${wc.name}: domain=null, 兜底为 .$host');
+            // 缺少域元数据时只保留当前请求的 host-only 语义，不放大到子域。
+            domain = null;
           }
         }
 

@@ -11,6 +11,7 @@ import 'package:m3e_ui/m3e_ui.dart';
 import '../../navigation/nav_action_bus.dart';
 import '../../providers/preferences_provider.dart';
 import '../../theme/mojian_theme.dart';
+import 'site_switch_button.dart';
 
 /// 导航目标项配置
 class AdaptiveDestination {
@@ -85,8 +86,9 @@ class AdaptiveNavigationRail extends StatelessWidget {
         width: extended ? 180 : 72,
         child: Column(
           children: [
-            if (leading != null) ...[leading!, const SizedBox(height: 8)],
-            const SizedBox(height: 16),
+            const SizedBox(height: 8),
+            SiteSwitchButton(extended: extended),
+            const SizedBox(height: 8),
             // 顶部导航项
             ...topDestinations.asMap().entries.map((entry) {
               final index = entry.key;
@@ -107,6 +109,7 @@ class AdaptiveNavigationRail extends StatelessWidget {
                 onTap: () => onDestinationSelected(index),
               );
             }),
+            if (leading != null) ...[leading!, const SizedBox(height: 8)],
             if (categoryShortcuts != null)
               Expanded(
                 child: SingleChildScrollView(

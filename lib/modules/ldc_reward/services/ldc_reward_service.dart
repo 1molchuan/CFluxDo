@@ -3,6 +3,7 @@ import 'dart:math';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import '../../../services/network/discourse_dio.dart';
+import '../../../services/site_context.dart';
 import '../../../l10n/s.dart';
 import '../models/reward_request.dart';
 import '../models/reward_result.dart';
@@ -36,6 +37,9 @@ class LdcRewardService {
 
   /// 执行打赏
   Future<LdcRewardResult> distribute(LdcRewardRequest request) async {
+    if (!SiteContext.isLinuxDo) {
+      return LdcRewardResult.error('当前站点不支持 LDC 打赏');
+    }
     try {
       final response = await _dio.post(
         _distributeUrl,

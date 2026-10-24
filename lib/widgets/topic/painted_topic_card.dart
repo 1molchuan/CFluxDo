@@ -11,6 +11,7 @@ import '../common/animated_avatar_overlay.dart';
 import '../common/smart_avatar.dart' show isSquareAvatarUrl;
 import 'topic_card.dart' show TopicCardInteractiveSurface;
 import 'topic_card_layout.dart';
+import 'topic_creation_time.dart';
 
 /// 标题 emoji 短代码 → 图片 URL(自绘卡排版层注入;顶层函数,避免
 /// 每个调用点手写 EmojiHandler 单例访问)
@@ -267,17 +268,20 @@ class _RenderTopicCard extends RenderBox
     _layout.refreshTime();
     _seenRevision = _layout.revision;
     markNeedsLayout();
+    markNeedsSemanticsUpdate();
   }
 
   @override
   void attach(PipelineOwner owner) {
     super.attach(owner);
     RelativeTimeClock.instance.addListener(_onClockTick);
+    TopicCreationTimeScope.enabled.addListener(_onClockTick);
   }
 
   @override
   void detach() {
     RelativeTimeClock.instance.removeListener(_onClockTick);
+    TopicCreationTimeScope.enabled.removeListener(_onClockTick);
     super.detach();
   }
 
@@ -434,6 +438,9 @@ class _RenderTopicCard extends RenderBox
     // 署名/时间可被字段开关关闭(layout 中为 null)
     if (l.author != null) {
       canvas.drawParagraph(l.author!, offset + l.authorOffset);
+    }
+    if (l.creationTime != null) {
+      canvas.drawParagraph(l.creationTime!, offset + l.creationTimeOffset);
     }
     if (l.time != null) {
       canvas.drawParagraph(l.time!, offset + l.timeOffset);

@@ -58,6 +58,16 @@ object PublicFileChannel {
         }
     }
 
+    /** 引擎销毁时断开旧 Activity 和 SAF 待处理结果，不清任何文件。 */
+    fun dispose(activity: Activity, messenger: BinaryMessenger) {
+        if (activityRef !== activity) return
+        MethodChannel(messenger, CHANNEL).setMethodCallHandler(null)
+        activityRef = null
+        val result = pendingResult
+        clearPending()
+        result?.success(null)
+    }
+
     @Suppress("UNCHECKED_CAST")
     private fun MethodCall.args(): Map<String, Any?> =
         (arguments as? Map<String, Any?>) ?: emptyMap()

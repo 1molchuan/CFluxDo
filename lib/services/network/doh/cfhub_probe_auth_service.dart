@@ -1,3 +1,4 @@
+import '../../site_context.dart';
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
@@ -125,6 +126,7 @@ class CfhubProbeAuthService extends ChangeNotifier {
 
   /// 读回上次存的令牌，并开始跟随登录账号
   void initialize(SharedPreferences prefs) {
+    if (!SiteContext.isLinuxDo) return;
     if (_prefs != null) return;
     _prefs = prefs;
     final token = prefs.getString(_tokenKey);
@@ -158,6 +160,7 @@ class CfhubProbeAuthService extends ChangeNotifier {
   }
 
   Future<CfhubEnableResult> _enable() async {
+    if (!SiteContext.isLinuxDo) return CfhubEnableResult.failed;
     if (_prefs == null) return CfhubEnableResult.failed;
     final user = _currentUser;
     if (user == null) return CfhubEnableResult.needLogin;
@@ -217,6 +220,7 @@ class CfhubProbeAuthService extends ChangeNotifier {
   /// 进行中的开启结果一并丢弃；作废请求由 [ConnectBoundToken] 记着，
   /// 重新开启时先等它落地再换码
   Future<void> disable({bool revoke = true}) async {
+    if (!SiteContext.isLinuxDo) return;
     _bound.invalidate();
     final token = _token;
     if (revoke && token != null) {

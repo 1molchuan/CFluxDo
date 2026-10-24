@@ -17,8 +17,8 @@ class AppleCookieStrategy extends DefaultCookieStrategy {
     CookieManager cookieManager,
     Set<String> knownHosts,
   ) async {
-    // 清除 WKHTTPCookieStore
-    await cookieManager.deleteAllCookies();
+    // WKWebView 多域共存，不能清空整个 cookie store。
+    await super.clearWebViewCookies(cookieManager, knownHosts);
 
     // 同时清除 HTTPCookieStorage.shared
     try {

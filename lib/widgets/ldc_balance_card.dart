@@ -1,3 +1,4 @@
+import '../services/site_context.dart';
 import 'package:flutter/material.dart';
 import 'package:app_icons/app_icons.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -36,6 +37,7 @@ class LdcBalanceCard extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    if (!SiteContext.isLinuxDo) return const SizedBox.shrink();
     return IgnorePointer(
       ignoring: isProcessing,
       child: _buildCard(context, ref),

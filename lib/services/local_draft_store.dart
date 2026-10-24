@@ -4,6 +4,7 @@ import 'package:hive_ce/hive.dart';
 
 import '../models/draft.dart';
 import '../storage/app_database.dart';
+import 'site_context.dart';
 
 typedef LocalDraftBoxFactory = Future<Box<Map>> Function();
 
@@ -159,7 +160,7 @@ class LocalDraftStore {
     for (final key in box.keys.toList()) {
       try {
         final parts = jsonDecode(key as String) as List;
-        if (parts.length == 2 && parts[0] == accountId && parts[1] is String) {
+        if (parts.length == 2 && parts[0] == SiteContext.accountKey(accountId) && parts[1] is String) {
           keys.add(parts[1] as String);
         }
       } catch (_) {
@@ -210,7 +211,7 @@ class LocalDraftStore {
   }
 
   String _entryKey(String accountId, String draftKey) {
-    return jsonEncode([accountId, draftKey]);
+    return jsonEncode([SiteContext.accountKey(accountId), draftKey]);
   }
 }
 

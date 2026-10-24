@@ -24,6 +24,22 @@ void main() {
 
     expect(service.canHandleUri(Uri.parse('https://linux.do/t/123')), isTrue);
     expect(
+      service.canHandleUri(Uri.parse('https://idcflare.com/t/123')),
+      isTrue,
+    );
+    expect(
+      service.canHandleUri(Uri.parse('https://cdn.idcflare.com/a')),
+      isTrue,
+    );
+    expect(
+      service.canHandleUri(Uri.parse('https://idcflare.com.evil.test/t/123')),
+      isFalse,
+    );
+    expect(
+      service.canHandleUri(Uri.parse('https://evilidcflare.com/t/123')),
+      isFalse,
+    );
+    expect(
       service.canHandleUri(Uri.parse('https://www.linux.do/t/123')),
       isTrue,
     );
@@ -41,6 +57,13 @@ void main() {
       isFalse,
     );
     expect(service.canHandleUri(Uri.parse('ftp://linux.do/t/123')), isFalse);
+    for (final url in [
+      'https://linux.do:80/t/123',
+      'http://idcflare.com:443/t/123',
+      'https://user@linux.do/t/123',
+    ]) {
+      expect(service.canHandleUri(Uri.parse(url)), isFalse, reason: url);
+    }
   });
 
   test('linkFromLaunchArgs 从 Linux 冷启动参数里取第一个可处理的链接', () {

@@ -19,13 +19,11 @@ void main() {
 
     test('不是 base64 时返回 null', () {
       expect(
-        ProxyLeafTrust.pemToDer('-----BEGIN CERTIFICATE-----\n@@@\n-----END CERTIFICATE-----'),
+        ProxyLeafTrust.pemToDer(
+          '-----BEGIN CERTIFICATE-----\n@@@\n-----END CERTIFICATE-----',
+        ),
         isNull,
       );
     });
-  });
-
-  test('MITM 范围只含必须走 ECH 的 linux.do', () {
-    expect(ProxyLeafTrust.mitmHosts, ['linux.do']);
   });
 }

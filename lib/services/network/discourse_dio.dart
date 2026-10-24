@@ -2,6 +2,8 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 
 import '../../constants.dart';
+import '../../config/forum_site.dart';
+import '../site_context.dart';
 import '../app_logger.dart';
 import 'adapters/platform_adapter.dart';
 import 'cookie/app_cookie_manager.dart';
@@ -141,6 +143,23 @@ class DiscourseDio {
     // 需要绕开 rhttp 走系统栈的场景(如 MessageBus 长轮询依赖系统级省电)
     // 由请求侧的 FluxRequestKeys.skipRhttpAdapter 逐请求声明,不在这里分档。
     configurePlatformAdapter(dio);
+
+    // 论坛引擎只服务一个站点，另一站（含子域）不能进入会话拦截器链。
+    dio.interceptors.add(InterceptorsWrapper(onRequest: (options, handler) {
+      final host = options.uri.host.toLowerCase();
+      final otherSite = ForumSite.values.any((site) =>
+          site != SiteContext.current &&
+          (host == site.host || host.endsWith('.${site.host}')));
+      if (otherSite) {
+        handler.reject(DioException(
+          requestOptions: options,
+          type: DioExceptionType.cancel,
+          message: '跨站请求须先切换到对应站点',
+        ));
+        return;
+      }
+      handler.next(options);
+    }));
 
     // 2. 会话代守卫（最先执行，确保过期请求不进入后续拦截器）
     dio.interceptors.add(SessionGuardInterceptor());

@@ -20,6 +20,9 @@
     }
   },
   "login_browserHint": "將在瀏覽器中打開登錄頁面",
+  "login_browserAuthorize": "瀏覽器授權登入",
+  "login_linuxDoAuthorizeHint": "在瀏覽器中選擇「使用 LINUX DO 登录」，完成後授權返回客戶端。",
+  "login_embeddedWebLogin": "內置網頁登入（備用）",
   "login_qrAccount": "帳號：{username}",
   "login_qrCameraUnavailable": "無法使用相機",
   "login_qrConfirmAction": "確認生成",

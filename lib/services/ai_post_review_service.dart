@@ -1,3 +1,4 @@
+import 'site_context.dart';
 import 'dart:async';
 import 'dart:convert';
 
@@ -95,6 +96,9 @@ class AiPostReviewService {
   final AiPostReviewGuidelinesFetcher? _guidelinesFetcher;
 
   Future<AiPostReviewResult> review(AiPostReviewRequest request) async {
+    if (!SiteContext.isLinuxDo) {
+      throw AiPostReviewException('当前站点不提供 LINUX DO 社区准则审查。');
+    }
     if (!request.model.output.contains(Modality.text)) {
       throw AiPostReviewException('请选择支持文本输出的 AI 模型。');
     }

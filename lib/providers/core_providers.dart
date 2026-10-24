@@ -8,6 +8,7 @@ import '../models/user.dart';
 import '../services/discourse/discourse_service.dart';
 import '../services/preloaded_data_service.dart';
 import '../services/startup/app_startup.dart';
+import '../services/site_context.dart';
 
 /// Discourse 服务 Provider
 final discourseServiceProvider = Provider((ref) => DiscourseService());
@@ -34,8 +35,8 @@ final appStartupProvider = Provider<AppStartup>((ref) => AppStartup.instance);
 /// 预加载的当前用户时同步返回（避免启动时短暂显示未登录），否则缓存先行、
 /// 再拉接口。
 class CurrentUserNotifier extends AsyncNotifier<User?> {
-  static const String _cacheKey = 'current_user_cache';
-  static const String _cacheUserKey = 'current_user_cache_username';
+  static String get _cacheKey => SiteContext.storageKey('current_user_cache');
+  static String get _cacheUserKey => SiteContext.storageKey('current_user_cache_username');
   static const Duration _refreshCooldown = Duration(minutes: 2);
   DateTime? _lastRefreshTime;
 
@@ -199,8 +200,8 @@ final systemUserAvatarTemplateProvider = FutureProvider<String?>((ref) async {
 
 /// 用户统计数据 Provider
 class UserSummaryNotifier extends AsyncNotifier<UserSummary?> {
-  static const String _cacheKey = 'user_summary_cache';
-  static const String _cacheUserKey = 'user_summary_cache_username';
+  static String get _cacheKey => SiteContext.storageKey('user_summary_cache');
+  static String get _cacheUserKey => SiteContext.storageKey('user_summary_cache_username');
 
   @override
   Future<UserSummary?> build() async {

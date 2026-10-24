@@ -22,6 +22,7 @@ import '../widgets/common/error_view.dart';
 import 'package:m3e_ui/m3e_ui.dart';
 import 'preheat_logo.dart';
 import '../utils/platform_utils.dart';
+import 'layout/site_switch_button.dart';
 
 class PreheatGate extends StatefulWidget {
   final Widget child;
@@ -277,6 +278,15 @@ class _PreheatLoadingState extends State<_PreheatLoading> {
               ),
             ),
           ),
+          const Positioned(
+            top: 8,
+            left: 8,
+            child: SafeArea(
+              bottom: false,
+              right: false,
+              child: SiteSwitchButton(),
+            ),
+          ),
         ],
       ),
     );
@@ -515,6 +525,12 @@ class _PreheatFailed extends StatelessWidget {
               error: error ?? TimeoutException(S.current.preheat_userSkipped),
               onRetry: onRetry,
               retryLabel: context.l10n.preheat_retryConnection,
+            ),
+            // 预加载失败时仍可切回另一站，无需退出或清理认证。
+            const Positioned(
+              top: 8,
+              left: 8,
+              child: SiteSwitchButton(),
             ),
           ],
         ),

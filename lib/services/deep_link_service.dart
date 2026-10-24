@@ -2,6 +2,10 @@ import 'dart:async';
 import 'dart:io';
 import 'package:app_links/app_links.dart';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../config/forum_site.dart';
+import 'site_context.dart';
+import 'site_switch_service.dart';
 import '../pages/topic_detail_page/topic_detail_page.dart';
 import '../pages/user_profile_page.dart';
 import '../pages/webview_login_page.dart';
@@ -58,6 +62,24 @@ class DeepLinkService {
   /// 处理初始链接（冷启动）
   Future<void> _handleInitialLink() async {
     try {
+      final prefs = await SharedPreferences.getInstance();
+      final pending = Uri.tryParse(
+        prefs.getString('pending_site_open_url') ?? '',
+      );
+      final pendingAuth =
+          pending != null &&
+          pending.scheme == 'discourse' &&
+          pending.host == 'auth_redirect' &&
+          await UserApiKeyService().resolveAuthRedirectSite(pending) ==
+              SiteContext.current;
+      final pendingForum =
+          pending != null && ForumSite.fromUri(pending) == SiteContext.current;
+      if (pending != null && (pendingAuth || pendingForum)) {
+        await prefs.remove('pending_site_open_url');
+        await Future.delayed(const Duration(milliseconds: 500));
+        _handleLink(pending);
+        return;
+      }
       var uri = await _appLinks.getInitialLink();
       if (uri == null && Platform.isLinux) {
         uri = linkFromLaunchArgs(launchArgs);
@@ -111,24 +133,34 @@ class DeepLinkService {
     if (_lastHandledUri == uri &&
         _lastHandledTime != null &&
         now.difference(_lastHandledTime!).inSeconds < 1) {
-      debugPrint('DeepLinkService: 忽略重复链接 $uri');
+      debugPrint('DeepLinkService: 忽略重复链接');
       return;
     }
     _lastHandledUri = uri;
     _lastHandledTime = now;
 
-    debugPrint('DeepLinkService: 收到链接 $url');
+    debugPrint('DeepLinkService: 收到链接 ${uri.scheme}://${uri.host}${uri.path}');
 
     // 浏览器授权登录回调:discourse://auth_redirect?payload=...
     // (discourse:// 是站点 auth_redirect 默认白名单 scheme,App 已注册)
-    if (UserApiKeyService().isAuthRedirect(uri)) {
-      UserApiKeyLoginFlow.instance.handleCallback(uri);
+    if (uri.scheme == 'discourse' && uri.host == 'auth_redirect') {
+      unawaited(_handleAuthRedirect(uri));
       return;
     }
 
     // 自定义 scheme (fluxdo://...)
     if (uri.scheme == 'fluxdo') {
       _handleCustomScheme(context, uri);
+      return;
+    }
+    final target = ForumSite.fromUri(uri);
+    if (target != null && target != SiteContext.current) {
+      unawaited(_switchForLink(target, uri));
+      return;
+    }
+    // 子域服务不是论坛，不能把其路径里的 ID 当作当前站话题。
+    if (uri.host.toLowerCase() != SiteContext.current.host) {
+      WebViewPage.open(context, url);
       return;
     }
 
@@ -165,19 +197,37 @@ class DeepLinkService {
     }
 
     // 邮箱链接登录：/session/email-login/{token}
-    if (uri.host == 'linux.do' &&
+    if (uri.host == SiteContext.current.host &&
         uri.path.startsWith('/session/email-login/')) {
       _handleEmailLogin(context, url);
       return;
     }
 
-    // 其他 linux.do 链接：使用内置浏览器
-    if (uri.host == 'linux.do' || uri.host.endsWith('.linux.do')) {
+    // 当前站其他链接使用内置浏览器。
+    if (uri.host == SiteContext.current.host) {
       WebViewPage.open(context, url);
       return;
     }
 
     debugPrint('DeepLinkService: 未知链接类型 $url');
+  }
+
+  Future<void> _handleAuthRedirect(Uri uri) async {
+    final target = await UserApiKeyService().resolveAuthRedirectSite(uri);
+    if (target == null) return;
+    if (target != SiteContext.current) {
+      await _switchForLink(target, uri);
+      return;
+    }
+    UserApiKeyLoginFlow.instance.handleCallback(uri);
+  }
+
+  Future<void> _switchForLink(ForumSite target, Uri uri) async {
+    try {
+      await SiteSwitchService.instance.switchTo(target, openUrl: uri);
+    } catch (error) {
+      debugPrint('DeepLinkService: 切换链接所属站点失败: $error');
+    }
   }
 
   /// 处理自定义 scheme
@@ -283,13 +333,14 @@ class DeepLinkService {
     // 浏览器授权登录回调(仅 auth_redirect,不接管其他 discourse:// 链接)
     if (uri.scheme == 'discourse' && uri.host == 'auth_redirect') return true;
     if (uri.scheme != 'http' && uri.scheme != 'https') return false;
-    return _isLinuxDoHost(uri.host);
-  }
-
-  static bool _isLinuxDoHost(String host) {
-    final normalizedHost = host.toLowerCase();
-    return normalizedHost == 'linux.do' ||
-        normalizedHost == 'www.linux.do' ||
-        normalizedHost.endsWith('.linux.do');
+    final expectedPort = uri.scheme == 'https' ? 443 : 80;
+    if (uri.userInfo.isNotEmpty || (uri.hasPort && uri.port != expectedPort)) {
+      return false;
+    }
+    return ForumSite.values.any(
+      (site) =>
+          uri.host.toLowerCase() == site.host ||
+          uri.host.toLowerCase().endsWith('.${site.host}'),
+    );
   }
 }

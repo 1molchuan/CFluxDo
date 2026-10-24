@@ -10,6 +10,7 @@ import '../../utils/idle_task.dart';
 import 'painted_topic_card.dart';
 import 'topic_card_layout.dart';
 import 'topic_item_builder.dart';
+import 'topic_creation_time.dart';
 
 /// 卡片排版空闲预热(通用内核):RecyclerView GapWorker / Telegram
 /// 后台预建 StaticLayout 的 Flutter 对等物。
@@ -99,9 +100,7 @@ class _CardPrewarmScopeState<T> extends State<CardPrewarmScope<T>> {
     void step() {
       if (canceled()) return;
       final items = widget.items;
-      final limit = items.length < _maxWarmCount
-          ? items.length
-          : _maxWarmCount;
+      final limit = items.length < _maxWarmCount ? items.length : _maxWarmCount;
       final stopwatch = Stopwatch()..start();
       final baked = <TopicCardLayout>[];
       while (index < limit && stopwatch.elapsedMicroseconds < _budgetMicros) {
@@ -154,8 +153,15 @@ class _CardPrewarmScopeState<T> extends State<CardPrewarmScope<T>> {
     }
 
     for (final l in layouts) {
-      for (final p in [l.band, l.title, l.excerpt, l.author, l.time,
-          l.catTags, l.stats]) {
+      for (final p in [
+        l.band,
+        l.title,
+        l.excerpt,
+        l.author,
+        l.time,
+        l.catTags,
+        l.stats,
+      ]) {
         if (p != null) draw(p);
       }
       for (final (_, p) in l.titleIcons) {
@@ -211,6 +217,7 @@ class TopicCardPrewarmScope extends StatelessWidget {
         messageStyle,
         identityHashCode(categoryMap),
         TopicCardStyleScope.current,
+        TopicCreationTimeScope.enabled.value,
       ),
       warmItem: (context, topic) {
         // 置顶走 CompactTopicCard(widget 版),无排版缓存可热

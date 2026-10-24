@@ -18,6 +18,9 @@ void main() {
     test('识别支持的话题链接格式', () {
       final cases = <String, String>{
         'https://linux.do/t/123': 'https://linux.do/t/123',
+        'https://idcflare.com/t/123': 'https://idcflare.com/t/123',
+        'https://idcflare.com/t/topic-slug/123/5':
+            'https://idcflare.com/t/topic-slug/123/5',
         'https://linux.do/t/123/5': 'https://linux.do/t/123/5',
         'https://linux.do/t/topic-slug/123':
             'https://linux.do/t/topic-slug/123',
@@ -32,6 +35,11 @@ void main() {
         expect(candidate!.normalizedUrl, entry.value);
         expect(candidate.uri.toString(), entry.value);
       }
+    });
+
+    test('不提取伪装成 IDCFlare 的外站链接', () {
+      expect(service.findFirstTopicLink('https://evilidcflare.com/t/123'), isNull);
+      expect(service.findFirstTopicLink('https://idcflare.com.evil.test/t/123'), isNull);
     });
 
     test('从任意文本中提取第一个有效话题链接', () {

@@ -17,6 +17,8 @@ import '../services/discourse/discourse_service.dart';
 import '../services/preloaded_data_service.dart';
 import '../services/network/cookie/cookie_jar_service.dart';
 import '../services/network/cookie/csrf_token_service.dart';
+import '../services/network/cookie/strategy/platform_cookie_strategy.dart';
+import '../services/site_context.dart';
 import '../services/session/webview_use.dart';
 import '../services/toast_service.dart';
 import '../services/webview_settings.dart';
@@ -227,7 +229,9 @@ class _WebViewLoginPageState extends ConsumerState<WebViewLoginPage> {
                         // 注册 JS Handler，用于在登录按钮点击时接收凭证
                         controller.addJavaScriptHandler(
                           handlerName: 'onLoginCredentials',
-                          callback: (args) {
+                          callback: (args) async {
+                            final pageUri = Uri.tryParse((await controller.getUrl())?.toString() ?? '');
+                            if (!_isCurrentSiteUri(pageUri)) return;
                             if (args.isNotEmpty &&
                                 ref.read(preferencesProvider).autoFillLogin) {
                               try {
@@ -405,7 +409,9 @@ class _WebViewLoginPageState extends ConsumerState<WebViewLoginPage> {
 
     // 验证是否为有效的邮箱登录链接
     final uri = Uri.tryParse(text);
-    if (uri == null || !uri.path.startsWith('/session/email-login/')) {
+    if (uri == null ||
+        !_isCurrentSiteUri(uri) ||
+        !uri.path.startsWith('/session/email-login/')) {
       ToastService.showError(S.current.webviewLogin_emailLoginInvalidLink);
       return;
     }
@@ -423,8 +429,8 @@ class _WebViewLoginPageState extends ConsumerState<WebViewLoginPage> {
     if (!autoFill) return;
 
     final urlStr = url?.toString() ?? '';
-    final host = Uri.tryParse(urlStr)?.host;
-    if (host == null || host != Uri.parse(AppConstants.baseUrl).host) return;
+    final pageUri = Uri.tryParse(urlStr);
+    if (!_isCurrentSiteUri(pageUri)) return;
     // 邮箱链接登录页无需自动填充
     if (urlStr.contains('/session/email-login/')) return;
 
@@ -447,6 +453,7 @@ class _WebViewLoginPageState extends ConsumerState<WebViewLoginPage> {
       source:
           '''
       (function() {
+        if (location.origin !== ${jsonEncode(AppConstants.baseUrl)}) return;
         var savedUser = $escapedUsername;
         var savedPass = $escapedPassword;
         var filled = false;
@@ -499,6 +506,8 @@ class _WebViewLoginPageState extends ConsumerState<WebViewLoginPage> {
     _loginInProgress = true;
 
     try {
+      final pageUri = Uri.tryParse((await controller.getUrl())?.toString() ?? '');
+      if (!_isCurrentSiteUri(pageUri)) return;
       final username = await _readCurrentUsername(controller);
       if (username == null || username.isEmpty) {
         if (_lastHomeResponseUrl != null &&
@@ -661,6 +670,20 @@ class _WebViewLoginPageState extends ConsumerState<WebViewLoginPage> {
     required int requestGeneration,
     required String token,
   }) async {
+    // IDCFlare 不依赖 LINUX DO 的 fingerprint 插件或专属 _rt Cookie。
+    // 仍执行真实的本站 Cookie 边界同步，再交统一登录收口处理。
+    if (!SiteContext.isLinuxDo) {
+      if (!AuthSession().isValid(requestGeneration)) return false;
+      _webViewUse.rebindGeneration(requestGeneration);
+      await _webViewUse.checkpoint(
+        WebViewUseOutcome.loginSucceeded,
+        reason: 'webview_login_runtime_cookies',
+        url: AppConstants.baseUrl,
+        controller: controller,
+      );
+      return AuthSession().isValid(requestGeneration) &&
+          await _cookieJar.getTToken() == token;
+    }
     const fingerprintWait = Duration(milliseconds: 2500);
     const bootstrapTimeout = Duration(seconds: 8);
     final startedAt = DateTime.now();
@@ -1036,19 +1059,16 @@ class _WebViewLoginPageState extends ConsumerState<WebViewLoginPage> {
   }) async {
     final cookieManager =
         WindowsWebViewEnvironmentService.instance.cookieManager;
-    final candidates = <String>{
+    final cookies = await PlatformCookieStrategy.create().readCookiesFromWebView(
+      cookieManager,
       AppConstants.baseUrl,
-      '${AppConstants.baseUrl}/',
-      if (currentUrl != null && currentUrl.isNotEmpty) currentUrl,
-    };
-
-    for (final url in candidates) {
-      final cookies = await cookieManager.getCookies(url: WebUri(url));
-
-      for (final cookie in cookies) {
-        if (cookie.name == '_t' && cookie.value.isNotEmpty) {
-          return cookie.value;
-        }
+    );
+    for (final cookie in cookies) {
+      if (cookie.name == '_t' &&
+          cookie.value.isNotEmpty &&
+          (cookie.domain == null ||
+              CookieJarService.cookieDomainMatchesHost(cookie.domain, _baseUri.host))) {
+        return cookie.value;
       }
     }
 
@@ -1076,6 +1096,13 @@ class _WebViewLoginPageState extends ConsumerState<WebViewLoginPage> {
       _checkLoginStatus(controller);
     });
   }
+
+  bool _isCurrentSiteUri(Uri? uri) =>
+      uri != null &&
+      uri.scheme == _baseUri.scheme &&
+      uri.host == _baseUri.host &&
+      uri.port == _baseUri.port &&
+      uri.userInfo.isEmpty;
 
   bool _isHomePageUrl(String? rawUrl) {
     final uri = Uri.tryParse(rawUrl ?? '');

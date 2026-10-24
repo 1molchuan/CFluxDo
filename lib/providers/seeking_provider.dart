@@ -12,6 +12,8 @@ import '../models/seeking.dart';
 import '../models/user_action.dart';
 import '../services/discourse/discourse_service.dart';
 import '../services/network/cf/cf_challenge_classifier.dart';
+import '../services/site_context.dart';
+import '../services/site_data_lifecycle.dart';
 import 'discourse_providers.dart';
 import 'theme_provider.dart';
 
@@ -127,9 +129,9 @@ class SeekingNotifier extends StateNotifier<SeekingState>
   static const List<int> paceOptions = [10, 30, 60];
   static const int defaultPaceSeconds = 30;
 
-  static const String _configKey = 'seeking_config';
-  static const String _enabledKey = 'seeking_enabled';
-  static const String _paceKey = 'seeking_pace_seconds';
+  static String get _configKey => SiteContext.storageKey('seeking_config');
+  static String get _enabledKey => SiteContext.storageKey('seeking_enabled');
+  static String get _paceKey => SiteContext.storageKey('seeking_pace_seconds');
 
   final SharedPreferences _prefs;
   final DiscourseService _service;
@@ -563,5 +565,8 @@ final seekingProvider = StateNotifierProvider<SeekingNotifier, SeekingState>((
 ) {
   final prefs = ref.watch(sharedPreferencesProvider);
   final service = ref.watch(discourseServiceProvider);
-  return SeekingNotifier(prefs, service);
+  final notifier = SeekingNotifier(prefs, service);
+  final unregister = SiteDataLifecycle.register(notifier._save);
+  ref.onDispose(unregister);
+  return notifier;
 });

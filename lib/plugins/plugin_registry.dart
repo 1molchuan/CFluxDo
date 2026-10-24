@@ -1,16 +1,13 @@
 import 'package:flutter/widgets.dart';
 
-import '../config/sites/linuxdo.dart';
+import '../constants.dart';
 import 'plugin_context.dart';
 import 'site_plugin.dart';
 
 /// 站点插件注册中心
 ///
-/// 默认取当前站点（[linuxdoCustomization]）声明的插件列表。
+/// 默认取当前站点声明的插件列表。
 /// 测试可通过 [overridePlugins] 注入，并用 [resetOverride] 还原。
-///
-/// 这里直接引用站点配置而不是 `AppConstants`，是为了避开 `constants.dart`
-/// 携带的 WebView 等重量级依赖，让插件层能在纯 widget 测试里运行。
 class PluginRegistry {
   PluginRegistry._();
 
@@ -18,7 +15,7 @@ class PluginRegistry {
 
   /// 当前生效的插件列表
   static List<SitePlugin> get plugins =>
-      _override ?? linuxdoCustomization.plugins;
+      _override ?? AppConstants.siteCustomization.plugins;
 
   /// 测试注入
   @visibleForTesting

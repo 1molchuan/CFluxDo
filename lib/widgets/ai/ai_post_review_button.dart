@@ -1,3 +1,4 @@
+import '../../services/site_context.dart';
 import 'dart:async';
 
 import 'package:ai_model_manager/ai_model_manager.dart';
@@ -121,6 +122,7 @@ class _AiPostReviewButtonState extends ConsumerState<AiPostReviewButton> {
 
   @override
   Widget build(BuildContext context) {
+    if (!SiteContext.isLinuxDo) return const SizedBox.shrink();
     final enabled = ref.watch(
       preferencesProvider.select((prefs) => prefs.aiPostReviewEnabled),
     );

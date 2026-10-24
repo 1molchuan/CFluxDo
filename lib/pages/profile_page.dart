@@ -9,6 +9,7 @@ import '../providers/selected_topic_provider.dart';
 import '../providers/shortcut_provider.dart';
 import '../widgets/desktop_refresh_indicator.dart';
 import '../services/discourse_cache_manager.dart';
+import '../services/site_context.dart';
 import 'webview_page.dart';
 import 'login_page.dart';
 import '../widgets/auth/qr_login_sheet.dart';
@@ -127,9 +128,9 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
       await Future.wait([
         ref.read(currentUserProvider.notifier).refreshSilently(force: true),
         ref.read(userSummaryProvider.notifier).refresh(),
-        if (ldcEnabled && !_ldcProcessing)
+        if (SiteContext.isLinuxDo && ldcEnabled && !_ldcProcessing)
           ref.read(ldcUserInfoProvider.notifier).refresh(),
-        if (cdkEnabled && !_cdkProcessing)
+        if (SiteContext.isLinuxDo && cdkEnabled && !_cdkProcessing)
           ref.read(cdkUserInfoProvider.notifier).refresh(),
       ]);
     } finally {
@@ -344,7 +345,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
     if (username != null && username.isNotEmpty) {
       await WebViewPage.open(
         context, 
-        'https://linux.do/u/$username/preferences/account',
+        '${SiteContext.current.baseUrl}/u/${Uri.encodeComponent(username)}/preferences/account',
         title: context.l10n.profile_editProfile,
         injectCss: '''
           .new-user-content-wrapper {
@@ -626,6 +627,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
 
   /// LDC/CDK 余额卡片（共用组件）
   Widget _buildBalanceCards() {
+    if (!SiteContext.isLinuxDo) return const SizedBox.shrink();
     // 仅本页首次成为活跃 tab 后才渲染余额卡片;未激活时返回空,不建 Consumer、
     // 不 watch provider,从而不触发 cdk/ldc user-info 请求。
     if (!_balanceEverActive) return const SizedBox.shrink();

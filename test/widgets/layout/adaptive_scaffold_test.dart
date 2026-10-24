@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:fluxdo/l10n/s.dart';
 import 'package:fluxdo/pages/topics_page.dart';
 import 'package:fluxdo/providers/theme_provider.dart';
 import 'package:fluxdo/widgets/layout/adaptive_navigation.dart';
@@ -23,27 +24,29 @@ void main() {
     await tester.pumpWidget(
       UncontrolledProviderScope(
         container: container,
-        child: MaterialApp(
-          home: MediaQuery(
-            data: const MediaQueryData(size: Size(390, 844)),
-            child: AdaptiveScaffold(
-              selectedIndex: 1,
-              onDestinationSelected: (_) {},
-              destinations: const [
-                AdaptiveDestination(
-                  id: 'home',
-                  icon: Icon(Icons.home_outlined),
-                  selectedIcon: Icon(Icons.home),
-                  label: '首页',
-                ),
-                AdaptiveDestination(
-                  id: 'bookmarks',
-                  icon: Icon(Icons.bookmark_outline_rounded),
-                  selectedIcon: Icon(Icons.bookmark_rounded),
-                  label: '书签',
-                ),
-              ],
-              body: const SizedBox.expand(child: Text('body')),
+        child: TranslationProvider(
+          child: MaterialApp(
+            home: MediaQuery(
+              data: const MediaQueryData(size: Size(390, 844)),
+              child: AdaptiveScaffold(
+                selectedIndex: 1,
+                onDestinationSelected: (_) {},
+                destinations: const [
+                  AdaptiveDestination(
+                    id: 'home',
+                    icon: Icon(Icons.home_outlined),
+                    selectedIcon: Icon(Icons.home),
+                    label: '首页',
+                  ),
+                  AdaptiveDestination(
+                    id: 'bookmarks',
+                    icon: Icon(Icons.bookmark_outline_rounded),
+                    selectedIcon: Icon(Icons.bookmark_rounded),
+                    label: '书签',
+                  ),
+                ],
+                body: const SizedBox.expand(child: Text('body')),
+              ),
             ),
           ),
         ),
@@ -89,28 +92,30 @@ void main() {
     await tester.pumpWidget(
       UncontrolledProviderScope(
         container: container,
-        child: MaterialApp(
-          home: MediaQuery(
-            data: const MediaQueryData(size: Size(1400, 900)),
-            child: AdaptiveScaffold(
-              selectedIndex: 0,
-              onDestinationSelected: (_) {},
-              hideNavigationRail: true,
-              destinations: const [
-                AdaptiveDestination(
-                  id: 'home',
-                  icon: Icon(Icons.home_outlined),
-                  selectedIcon: Icon(Icons.home),
-                  label: '首页',
-                ),
-                AdaptiveDestination(
-                  id: 'messages',
-                  icon: Icon(Icons.mail_outline),
-                  selectedIcon: Icon(Icons.mail),
-                  label: '私信',
-                ),
-              ],
-              body: const SizedBox.expand(child: Text('平行视界内容')),
+        child: TranslationProvider(
+          child: MaterialApp(
+            home: MediaQuery(
+              data: const MediaQueryData(size: Size(1400, 900)),
+              child: AdaptiveScaffold(
+                selectedIndex: 0,
+                onDestinationSelected: (_) {},
+                hideNavigationRail: true,
+                destinations: const [
+                  AdaptiveDestination(
+                    id: 'home',
+                    icon: Icon(Icons.home_outlined),
+                    selectedIcon: Icon(Icons.home),
+                    label: '首页',
+                  ),
+                  AdaptiveDestination(
+                    id: 'messages',
+                    icon: Icon(Icons.mail_outline),
+                    selectedIcon: Icon(Icons.mail),
+                    label: '私信',
+                  ),
+                ],
+                body: const SizedBox.expand(child: Text('平行视界内容')),
+              ),
             ),
           ),
         ),

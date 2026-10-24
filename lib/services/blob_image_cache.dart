@@ -11,6 +11,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'dio_http_client.dart';
+import 'site_context.dart';
 
 /// 图片的内容寻址文件缓存(Telegram ImageLoader 形态)。
 ///
@@ -40,7 +41,7 @@ import 'dio_http_client.dart';
 class BlobImageCache {
   BlobImageCache._();
 
-  /// 根目录名(Temporary 下),也是数据管理页统计/清理的口径。
+  /// 当前站 Temporary 根目录下的目录名，LinuxDO 沿用原路径。
   static const String dirName = 'blobImageCache';
 
   /// bucket → 保留期。沿用被替换的各 cache manager 的 stalePeriod 语义。
@@ -93,7 +94,8 @@ class BlobImageCache {
   static Future<Directory> _ensureRoot() =>
       _rootFuture ??= (() async {
         final tmp = await getTemporaryDirectory();
-        final dir = Directory('${tmp.path}/$dirName');
+        final scoped = SiteContext.directory(tmp);
+        final dir = Directory('${scoped.path}/$dirName');
         await dir.create(recursive: true);
         _root = dir;
         return dir;
@@ -264,7 +266,7 @@ class BlobImageCache {
   /// cache_limit 同款)。prefs 时间戳节流每 24h 一次;调用方应在首帧后
   /// 空闲时机触发。扫描/删除整体放 [Isolate.run],主 isolate 零负担。
   static Future<void> sweep(SharedPreferences prefs) async {
-    const stampKey = 'blob_image_cache_last_sweep';
+    final stampKey = SiteContext.storageKey('blob_image_cache_last_sweep');
     final now = DateTime.now().millisecondsSinceEpoch;
     final last = prefs.getInt(stampKey) ?? 0;
     if (now - last < const Duration(hours: 24).inMilliseconds) return;

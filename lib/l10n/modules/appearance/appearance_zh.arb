@@ -8,6 +8,8 @@
   "appearance_bgScrim": "遮罩透明度",
   "appearance_blackDesc": "深色模式下使用纯黑背景（AMOLED）",
   "appearance_cardStyleGroup": "卡片样式",
+  "appearance_showTopicCreationTime": "显示发帖时间",
+  "appearance_showTopicCreationTimeDesc": "在话题列表的最后回复时间左侧显示发帖日期，并按日期远近区分颜色",
   "appearance_colorAmber": "琥珀",
   "appearance_colorAutumn": "秋",
   "appearance_colorBlue": "蓝色",

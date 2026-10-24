@@ -8,9 +8,11 @@ import 'package:pointycastle/export.dart';
 import 'package:uuid/uuid.dart';
 
 import '../constants.dart';
+import '../config/forum_site.dart';
 import 'log/log_writer.dart';
 import 'network/cookie/cookie_jar_service.dart';
 import 'storage/resilient_secure_storage.dart';
+import 'site_context.dart';
 
 /// User API Key 授权与会话自愈服务
 ///
@@ -42,15 +44,15 @@ class UserApiKeyService {
   static final UserApiKeyService _instance = UserApiKeyService._();
   factory UserApiKeyService() => _instance;
 
-  static const _keyPrivateKey = 'user_api_key_rsa_private';
-  static const _keyApiKey = 'user_api_key_key';
-  static const _keyClientId = 'user_api_key_client_id';
+  static String get _keyPrivateKey => SiteContext.storageKey('user_api_key_rsa_private');
+  static String get _keyApiKey => SiteContext.storageKey('user_api_key_key');
+  static String get _keyClientId => SiteContext.storageKey('user_api_key_client_id');
   /// 跨设备扫码专用 client_id(与浏览器授权 client 隔离)。
   /// 稳定复用,使服务端 create 时 destroy_all 只清掉上一枚分享 key。
-  static const _keyQrClientId = 'user_api_key_qr_client_id';
+  static String get _keyQrClientId => SiteContext.storageKey('user_api_key_qr_client_id');
   // nonce 持久化:跨重启存活。冷启动 getInitialLink 会重放上次的
   // auth_redirect 深链,内存态 nonce 会丢失导致每次重启误报"回调解析失败"。
-  static const _keyPendingNonce = 'user_api_key_pending_nonce';
+  static String get _keyPendingNonce => SiteContext.storageKey('user_api_key_pending_nonce');
 
   static const String authRedirect = 'discourse://auth_redirect';
   static const String applicationName = 'cfluxdo';
@@ -155,8 +157,8 @@ class UserApiKeyService {
 
   // ---------- RSA ----------
 
-  Future<RSAPrivateKey?> _readPrivateKey() async {
-    final raw = await _storage.read(key: _keyPrivateKey);
+  Future<RSAPrivateKey?> _readPrivateKey({String? storageKey}) async {
+    final raw = await _storage.read(key: storageKey ?? _keyPrivateKey);
     if (raw == null || raw.isEmpty) return null;
     try {
       final map = jsonDecode(raw) as Map<String, dynamic>;
@@ -222,8 +224,11 @@ class UserApiKeyService {
   }
 
   /// 解密服务端回传的 Base64(RSA-PKCS1(data))
-  Future<String?> _decrypt(String base64Payload) async {
-    final privateKey = await _readPrivateKey();
+  Future<String?> _decrypt(
+    String base64Payload, {
+    RSAPrivateKey? privateKey,
+  }) async {
+    privateKey ??= await _readPrivateKey();
     if (privateKey == null) return null;
     try {
       // Ruby Base64.encode64 每 60 字符插入换行,URL 传输还可能引入空格
@@ -376,6 +381,33 @@ class UserApiKeyService {
   /// 是否为授权回调(discourse://auth_redirect?payload=...&oneTimePassword=...)
   bool isAuthRedirect(Uri uri) =>
       uri.scheme == 'discourse' && uri.host == 'auth_redirect';
+
+  /// 回调地址保持站点白名单中的原值，靠加密 payload 与各站 nonce
+  /// 识别目标。这里只读凭据，跨站切换完成前不消费 nonce 或写入 API Key。
+  Future<ForumSite?> resolveAuthRedirectSite(Uri uri) async {
+    if (!isAuthRedirect(uri)) return null;
+    final encrypted = uri.queryParameters['payload'];
+    if (encrypted == null || encrypted.isEmpty) return null;
+    for (final site in ForumSite.values) {
+      final pendingNonce = await _storage.read(
+        key: site.storageKey('user_api_key_pending_nonce'),
+      );
+      if (pendingNonce == null || pendingNonce.isEmpty) continue;
+      final privateKey = await _readPrivateKey(
+        storageKey: site.storageKey('user_api_key_rsa_private'),
+      );
+      if (privateKey == null) continue;
+      final decrypted = await _decrypt(encrypted, privateKey: privateKey);
+      if (decrypted == null) continue;
+      try {
+        final payload = jsonDecode(decrypted);
+        if (payload is Map && payload['nonce'] == pendingNonce) return site;
+      } catch (_) {
+        // 非本次授权 payload，不修改任何站点的待处理状态。
+      }
+    }
+    return null;
+  }
 
   /// 处理授权回调:解密 payload,校验 nonce,持久化 key。
   /// 返回 stale=true 表示"非本次授权流程"(冷启动重放的旧回调、nonce 已消费/

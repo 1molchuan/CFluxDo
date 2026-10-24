@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:fluxdo/l10n/s.dart';
 import 'package:fluxdo/widgets/layout/adaptive_navigation.dart';
 
 void main() {
@@ -12,40 +13,42 @@ void main() {
       addTearDown(tester.view.resetDevicePixelRatio);
 
       await tester.pumpWidget(
-        MaterialApp(
-          home: Scaffold(
-            body: Center(
-              child: SizedBox(
-                height: 700,
-                child: AdaptiveNavigationRail(
-                  selectedIndex: -1,
-                  onDestinationSelected: (_) {},
-                  extended: true,
-                  topDestinationCount: 1,
-                  categoryShortcuts: const SizedBox(
-                    key: ValueKey('shortcuts'),
-                    height: 80,
+        TranslationProvider(
+          child: MaterialApp(
+            home: Scaffold(
+              body: Center(
+                child: SizedBox(
+                  height: 700,
+                  child: AdaptiveNavigationRail(
+                    selectedIndex: -1,
+                    onDestinationSelected: (_) {},
+                    extended: true,
+                    topDestinationCount: 1,
+                    categoryShortcuts: const SizedBox(
+                      key: ValueKey('shortcuts'),
+                      height: 80,
+                    ),
+                    destinations: const [
+                      AdaptiveDestination(
+                        id: 'home',
+                        icon: Icon(Icons.home_outlined),
+                        selectedIcon: Icon(Icons.home),
+                        label: 'Home',
+                      ),
+                      AdaptiveDestination(
+                        id: 'profile',
+                        icon: Icon(Icons.person_outline),
+                        selectedIcon: Icon(Icons.person),
+                        label: 'Profile',
+                      ),
+                      AdaptiveDestination(
+                        id: 'bookmarks',
+                        icon: Icon(Icons.bookmark_outline),
+                        selectedIcon: Icon(Icons.bookmark),
+                        label: 'Bookmarks',
+                      ),
+                    ],
                   ),
-                  destinations: const [
-                    AdaptiveDestination(
-                      id: 'home',
-                      icon: Icon(Icons.home_outlined),
-                      selectedIcon: Icon(Icons.home),
-                      label: 'Home',
-                    ),
-                    AdaptiveDestination(
-                      id: 'profile',
-                      icon: Icon(Icons.person_outline),
-                      selectedIcon: Icon(Icons.person),
-                      label: 'Profile',
-                    ),
-                    AdaptiveDestination(
-                      id: 'bookmarks',
-                      icon: Icon(Icons.bookmark_outline),
-                      selectedIcon: Icon(Icons.bookmark),
-                      label: 'Bookmarks',
-                    ),
-                  ],
                 ),
               ),
             ),

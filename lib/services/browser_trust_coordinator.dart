@@ -390,6 +390,11 @@ class BrowserTrustCoordinator {
         'gateElapsedMs=${stopwatch.elapsedMilliseconds - gateStartedAt}',
         level: requestTrusted ? 'info' : 'warning',
       );
+      if (!WebViewSessionCookieRefreshService.instance.supportsBootstrap) {
+        _log('当前站点使用标准 Discourse 会话，跳过专属 fingerprint bootstrap');
+        _startClearanceRefreshIfLoggedIn();
+        return requestTrusted;
+      }
     } catch (e) {
       _completeRequestGate(requestGate, false);
       rethrow;
@@ -650,7 +655,9 @@ class BrowserTrustCoordinator {
       );
 
       final tToken = await _jar.getTToken();
-      if (tToken != null && tToken.isNotEmpty) {
+      if (tToken != null &&
+          tToken.isNotEmpty &&
+          WebViewSessionCookieRefreshService.instance.supportsBootstrap) {
         if (cancellation.isCancelled) return false;
         _log('startup WebView session bootstrap begin reason=$reason');
         _preloadProgress?.stage(StartupStage.webViewBootstrap);
@@ -687,7 +694,7 @@ class BrowserTrustCoordinator {
         }
         _log('startup WebView session bootstrap end reason=$reason');
       } else {
-        _log('startup WebView session bootstrap skipped: no _t');
+        _log('startup WebView session bootstrap skipped: no _t or unsupported site');
       }
 
       return hydrated;

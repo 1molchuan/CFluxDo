@@ -23,7 +23,7 @@ abstract class PlatformCookieStrategy {
   /// 默认用 CookieManager.getCookies(url:)，Linux 覆写为 getAllCookies() 过滤
   Future<List<Cookie>> readCookiesFromWebView(CookieManager cookieManager, String url);
 
-  /// 清除 WebView cookie store 中所有 cookie
+  /// 仅清除当前论坛域 Cookie，保留其他站点和 OAuth 身份域。
   Future<void> clearWebViewCookies(CookieManager cookieManager, Set<String> knownHosts);
 
   /// 将原始 Set-Cookie 头批量写入 WebView

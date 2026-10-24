@@ -85,7 +85,15 @@ class MainActivity : FlutterActivity() {
     private val RENDER_BACKEND_CHANNEL = "com.github.lingyan000.fluxdo/render_backend"
     private val ICON_CHANNEL = "com.github.lingyan000.fluxdo/app_icon"
     private val mainHandler = Handler(Looper.getMainLooper())
-    private var ownsProvidedFlutterEngine = false
+    private var siteSwitchChannel: MethodChannel? = null
+    private var siteRestartPending = false
+    private val restartForSite = Runnable {
+        if (!isFinishing && !isDestroyed) {
+            // 不重放启动当前 Activity 的旧 OAuth 回调。
+            intent = Intent(intent).apply { data = null }
+            recreate()
+        }
+    }
     private var interactiveKeyboardChannel: InteractiveKeyboardChannel? = null
 
     // Cookie IPC 专用后台线程。CookieManager 的 getCookie / setCookie /
@@ -112,10 +120,19 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun onDestroy() {
+        mainHandler.removeCallbacks(restartForSite)
+        siteSwitchChannel?.setMethodCallHandler(null)
+        siteSwitchChannel = null
         cookieThread?.quitSafely()
         cookieThread = null
         cookieHandler = null
-        super.onDestroy()
+        val ownedEngine = flutterEngine
+        try {
+            // 先由 embedding 分离视图、Activity 和插件，再销毁本 Activity 的引擎。
+            super.onDestroy()
+        } finally {
+            ownedEngine?.destroy()
+        }
     }
 
     // SAF「另存为」建档结果先给 PublicFileChannel 认领,不是它的再交给插件
@@ -125,9 +142,13 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
+        siteSwitchChannel?.setMethodCallHandler(null)
+        siteSwitchChannel = null
         interactiveKeyboardChannel?.dispose()
         interactiveKeyboardChannel = null
         FairMemoryReceiver.detachEngine(flutterEngine)
+        MediaTranscodeChannel.dispose(flutterEngine.dartExecutor.binaryMessenger)
+        PublicFileChannel.dispose(this, flutterEngine.dartExecutor.binaryMessenger)
         super.cleanUpFlutterEngine(flutterEngine)
     }
 
@@ -141,7 +162,6 @@ class MainActivity : FlutterActivity() {
     // 视为可长期复用的外部引擎而泄漏原生/GPU 资源。
     override fun provideFlutterEngine(context: Context): FlutterEngine? {
         if (!readGlesCompatEnabled()) return null
-        ownsProvidedFlutterEngine = true
         Log.i(RENDER_TAG, "启用 Skia/OpenGL ES 兼容模式（--enable-impeller=false）")
         return FlutterEngine(context, arrayOf("--enable-impeller=false"))
     }
@@ -161,13 +181,36 @@ class MainActivity : FlutterActivity() {
             .getBoolean(RENDER_GLES_PREF_KEY, false)
     }
 
-    override fun shouldDestroyEngineWithHost(): Boolean =
-        // 只接管本 Activity 自己创建的引擎；其余情况（含缓存引擎）仍委托
-        // embedding 的默认所有权语义，不能简化为直接返回 true。
-        ownsProvidedFlutterEngine || super.shouldDestroyEngineWithHost()
+    // 禁止 Intent 指定的缓存引擎复用；每个 Activity 都必须重新执行 main()。
+    override fun getCachedEngineId(): String? = null
+
+    // onDestroy 在 embedding 完成宿主分离后显式销毁，避免重复 destroy。
+    override fun shouldDestroyEngineWithHost(): Boolean = false
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        siteSwitchChannel = MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger, "fluxdo/site_switch"
+        ).also { channel ->
+            channel.setMethodCallHandler { call, result ->
+                if (call.method == "isSupported") {
+                    result.success(true)
+                } else if (call.method != "restart") {
+                    result.notImplemented()
+                } else if (siteRestartPending || isFinishing || isDestroyed) {
+                    result.error("restart_unavailable", "当前页面无法重建引擎", null)
+                } else {
+                    siteRestartPending = true
+                    // 主消息队列延后执行，先把成功响应送回旧 Dart isolate。
+                    if (mainHandler.post(restartForSite)) {
+                        result.success(null)
+                    } else {
+                        siteRestartPending = false
+                        result.error("restart_failed", "无法安排站点切换", null)
+                    }
+                }
+            }
+        }
         interactiveKeyboardChannel?.dispose()
         interactiveKeyboardChannel = InteractiveKeyboardChannel(this, flutterEngine.dartExecutor.binaryMessenger)
         // 公平内存预警 → Dart 标准 memoryPressure 的转发依赖 engine 引用

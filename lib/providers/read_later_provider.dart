@@ -5,6 +5,8 @@ import 'package:flutter_riverpod/legacy.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/read_later_item.dart';
+import '../services/site_context.dart';
+import '../services/site_data_lifecycle.dart';
 import 'theme_provider.dart'; // sharedPreferencesProvider
 
 /// 稍后阅读列表最大数量
@@ -12,7 +14,7 @@ const int maxReadLaterItems = 10;
 
 /// 稍后阅读状态管理
 class ReadLaterNotifier extends StateNotifier<List<ReadLaterItem>> {
-  static const String _storageKey = 'read_later_items';
+  static String get _storageKey => SiteContext.storageKey('read_later_items');
 
   final SharedPreferences _prefs;
 
@@ -66,9 +68,9 @@ class ReadLaterNotifier extends StateNotifier<List<ReadLaterItem>> {
   }
 
   /// 持久化到 SharedPreferences
-  void _save() {
+  Future<void> _save() async {
     final jsonStr = jsonEncode(state.map((e) => e.toJson()).toList());
-    _prefs.setString(_storageKey, jsonStr);
+    await _prefs.setString(_storageKey, jsonStr);
   }
 }
 
@@ -78,5 +80,8 @@ final appReadyProvider = StateProvider<bool>((ref) => false);
 final readLaterProvider =
     StateNotifierProvider<ReadLaterNotifier, List<ReadLaterItem>>((ref) {
   final prefs = ref.watch(sharedPreferencesProvider);
-  return ReadLaterNotifier(prefs);
+  final notifier = ReadLaterNotifier(prefs);
+  final unregister = SiteDataLifecycle.register(notifier._save);
+  ref.onDispose(unregister);
+  return notifier;
 });

@@ -192,6 +192,7 @@ flutter:
     - assets/logo_modern.svg
     - assets/logo_modern_light.svg
     - assets/images/
+    - assets/images/sites/
     - assets/certs/
     - assets/ai_brands/
     - assets/icons/thinking/

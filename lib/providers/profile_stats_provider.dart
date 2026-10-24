@@ -1,9 +1,11 @@
 import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/profile_stats_config.dart';
+import '../services/site_context.dart';
+import '../services/site_data_lifecycle.dart';
 import 'theme_provider.dart'; // sharedPreferencesProvider
 
-const String _configKey = 'profile_stats_config';
+String get _configKey => SiteContext.storageKey('profile_stats_config');
 
 /// 统计卡片配置 Provider
 class ProfileStatsConfigNotifier extends Notifier<ProfileStatsConfig> {
@@ -11,10 +13,15 @@ class ProfileStatsConfigNotifier extends Notifier<ProfileStatsConfig> {
   @override
   ProfileStatsConfig build() {
     final prefs = ref.watch(sharedPreferencesProvider);
+    final unregister = SiteDataLifecycle.register(_flush);
+    ref.onDispose(() {
+      unregister();
+      _saveTimer?.cancel();
+    });
     final jsonStr = prefs.getString(_configKey);
     if (jsonStr != null) {
       try {
-        return ProfileStatsConfig.fromJsonString(jsonStr);
+        return _supportedConfig(ProfileStatsConfig.fromJsonString(jsonStr));
       } catch (_) {
         // 配置损坏，使用默认值
       }
@@ -23,8 +30,8 @@ class ProfileStatsConfigNotifier extends Notifier<ProfileStatsConfig> {
   }
 
   void update(ProfileStatsConfig config) {
-    state = config;
-    _save(config);
+    state = _supportedConfig(config);
+    _save(state);
   }
 
   void setLayoutMode(StatsLayoutMode mode) {
@@ -72,13 +79,28 @@ class ProfileStatsConfigNotifier extends Notifier<ProfileStatsConfig> {
     update(state.copyWith(enabledStats: stats));
   }
 
-  /// 防抖保存（300ms 内多次操作只写一次磁盘）
+  ProfileStatsConfig _supportedConfig(ProfileStatsConfig config) {
+    if (SiteContext.isLinuxDo || config.dataSource == StatsDataSource.summary) {
+      return config;
+    }
+    return config.copyWith(
+      dataSource: StatsDataSource.summary,
+      enabledStats: config.enabledStats
+          .where((stat) => isStatCompatible(stat, StatsDataSource.summary))
+          .toList(),
+    );
+  }
+
+  /// 防抖保存，切站时复用同一入口立即落盘。
   void _save(ProfileStatsConfig config) {
     _saveTimer?.cancel();
-    _saveTimer = Timer(const Duration(milliseconds: 300), () {
-      final prefs = ref.read(sharedPreferencesProvider);
-      prefs.setString(_configKey, config.toJsonString());
-    });
+    _saveTimer = Timer(const Duration(milliseconds: 300), _flush);
+  }
+
+  Future<void> _flush() async {
+    _saveTimer?.cancel();
+    _saveTimer = null;
+    await ref.read(sharedPreferencesProvider).setString(_configKey, state.toJsonString());
   }
 }
 

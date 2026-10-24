@@ -15,6 +15,7 @@ import '../topic/category_tab_manager_sheet.dart';
 import '../topic/category_drawer.dart';
 import '../../utils/platform_utils.dart';
 import '../../theme/mojian_theme.dart';
+import 'site_switch_button.dart';
 
 /// 自适应 Scaffold
 ///
@@ -170,7 +171,25 @@ class AdaptiveScaffold extends ConsumerWidget {
                   color: useAcrylicRail
                       ? Theme.of(context).colorScheme.surface
                       : null,
-                  child: body,
+                  child: Column(
+                    children: [
+                      if (!showRail && !hideNavigationRail)
+                        SafeArea(
+                          bottom: false,
+                          child: Align(
+                            alignment: Alignment.centerLeft,
+                            child: SiteSwitchButton(extended: true),
+                          ),
+                        ),
+                      Expanded(
+                        child: MediaQuery.removePadding(
+                          context: context,
+                          removeTop: !showRail && !hideNavigationRail,
+                          child: body,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ],

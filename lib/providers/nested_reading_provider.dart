@@ -5,14 +5,16 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/nested_reading_position.dart';
+import '../services/site_context.dart';
+import '../services/site_data_lifecycle.dart';
 import 'core_providers.dart';
 import 'theme_provider.dart';
 
 /// 按账号隔离；最多保存最近 200 个话题，滚动停止后合并写盘。
 class NestedReadingStore {
   NestedReadingStore(this._prefs, String account)
-    : _key = 'nested_reading_v1_$account',
-      sortKey = 'nested_sort_$account' {
+    : _key = 'nested_reading_v1_${SiteContext.accountKey(account)}',
+      sortKey = 'nested_sort_${SiteContext.accountKey(account)}' {
     try {
       final raw = jsonDecode(_prefs.getString(_key) ?? '{}');
       if (raw is Map) {
@@ -27,6 +29,7 @@ class NestedReadingStore {
     } catch (_) {
       /* 旧记录损坏不影响打开话题。 */
     }
+    _unregisterFlush = SiteDataLifecycle.register(flush);
   }
 
   final SharedPreferences _prefs;
@@ -35,6 +38,7 @@ class NestedReadingStore {
   final Map<int, NestedReadingPosition> _positions = {};
   final Map<String, NestedReadingSession> _sessions = {};
   Timer? _saveTimer;
+  late final void Function() _unregisterFlush;
 
   String get sort => nestedSort(_prefs.getString(sortKey));
   Future<void> setSort(String value) =>
@@ -70,7 +74,7 @@ class NestedReadingStore {
   }
 
   void dispose() {
-    unawaited(flush());
+    unawaited(flush().whenComplete(_unregisterFlush));
   }
 }
 

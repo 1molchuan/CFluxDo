@@ -27,7 +27,7 @@ class ProxyLeafTrust {
   static const _channel = MethodChannel('cfluxdo/wpe_tls');
 
   /// 必须经 ECH 的主机（后缀匹配），传给代理作为 MITM 范围
-  static const mitmHosts = ['linux.do'];
+  static const mitmHosts = ['linux.do', 'idcflare.com'];
 
   /// 代理启动后预先放行的主机：linux.do 主站与 App 里出现过的子域
   static const _preallowHosts = [
@@ -41,6 +41,8 @@ class ProxyLeafTrust {
     'ping.linux.do',
     'auth.linux.do',
     'linuxdo-uploads.s3.linux.do',
+    'idcflare.com',
+    'www.idcflare.com',
   ];
 
   /// 证书出错时按「是否代理签发的那张叶子」裁定（Linux / Windows）

@@ -100,23 +100,23 @@ List<SettingsGroup> buildAppearanceGroups(BuildContext context) {
             // 卡片预览实时反映中性/纯黑开关（透明不影响卡片预览）
             final preview = switch (themeState.uiStyle) {
               UiStyle.mojian => MojianTheme.resolve(
-                  currentMode,
-                  themeState.mojianAccent,
-                  black: themeState.blackEnabled,
-                  accentPair: themeState.mojianAccentPair,
-                ),
+                currentMode,
+                themeState.mojianAccent,
+                black: themeState.blackEnabled,
+                accentPair: themeState.mojianAccentPair,
+              ),
               UiStyle.claude => ClaudeTheme.resolve(
-                  currentMode,
-                  black: themeState.blackEnabled,
-                ),
+                currentMode,
+                black: themeState.blackEnabled,
+              ),
               UiStyle.classic => ThemeResolver.resolve(
-                  mode: currentMode,
-                  neutral: themeState.neutralEnabled,
-                  black: themeState.blackEnabled,
-                  transparent: false,
-                  seed: themeState.effectiveSeedColor,
-                  variant: themeState.schemeVariant,
-                ),
+                mode: currentMode,
+                neutral: themeState.neutralEnabled,
+                black: themeState.blackEnabled,
+                transparent: false,
+                seed: themeState.effectiveSeedColor,
+                variant: themeState.schemeVariant,
+              ),
             };
             final lightScheme = preview.light;
             final darkScheme = preview.dark;
@@ -359,6 +359,17 @@ List<SettingsGroup> buildAppearanceGroups(BuildContext context) {
               builder: (_) => const TopicCardStyleSettingsPage(),
             ),
           ),
+        ),
+        SwitchModel(
+          id: 'showTopicCreationTime',
+          title: l10n.appearance_showTopicCreationTime,
+          subtitle: l10n.appearance_showTopicCreationTimeDesc,
+          icon: Symbols.schedule_rounded,
+          getValue: (ref) =>
+              ref.watch(preferencesProvider).showTopicCreationTime,
+          onChanged: (ref, value) => ref
+              .read(preferencesProvider.notifier)
+              .setShowTopicCreationTime(value),
         ),
       ],
     ),
@@ -897,7 +908,10 @@ class _AppIconCard extends StatelessWidget {
                         Container(
                           color: Colors.black26,
                           child: const Center(
-                            child: LoadingSpinner(size: 24, color: Colors.white),
+                            child: LoadingSpinner(
+                              size: 24,
+                              color: Colors.white,
+                            ),
                           ),
                         ),
                     ],
@@ -1984,7 +1998,10 @@ class _ThemeColorSectionState extends ConsumerState<_ThemeColorSection> {
                                 setState(() => _removableColor = null);
                               },
                               iconSize: 28,
-                              icon: Icon(Symbols.delete_rounded, color: cs.primary),
+                              icon: Icon(
+                                Symbols.delete_rounded,
+                                color: cs.primary,
+                              ),
                             ),
                           ),
                       ],
@@ -2760,10 +2777,7 @@ class _UiStyleSection extends ConsumerWidget {
                   title: l10n.appearance_styleClaude,
                   description: l10n.appearance_styleClaudeDesc,
                   preview: _ClaudeMiniPreview(
-                    tokens: ClaudeTokens.of(
-                      brightness,
-                      black: s.blackEnabled,
-                    ),
+                    tokens: ClaudeTokens.of(brightness, black: s.blackEnabled),
                   ),
                   onTap: () => notifier.setUiStyle(UiStyle.claude),
                 ),
@@ -2804,7 +2818,9 @@ class _UiStyleSection extends ConsumerWidget {
               // 系统给了壁纸取色(Android 12+)才出现:色相取壁纸,明度校正到墨笺对比度
               if (s.dynamicPrimary != null)
                 _AccentChoice(
-                  color: switch (MojianTheme.accentFromSeed(s.dynamicPrimary!)) {
+                  color: switch (MojianTheme.accentFromSeed(
+                    s.dynamicPrimary!,
+                  )) {
                     final p => brightness == Brightness.light ? p.$1 : p.$2,
                   },
                   label: l10n.appearance_accentWallpaper,
@@ -2997,6 +3013,7 @@ class _MojianMiniPreview extends StatelessWidget {
     );
   }
 }
+
 /// Claude 的迷你预览：温润底色 + 陶土星标 / 标题 + 对话卡片微缩视图。
 class _ClaudeMiniPreview extends StatelessWidget {
   const _ClaudeMiniPreview({required this.tokens});
@@ -3080,7 +3097,6 @@ class _ClaudeMiniPreview extends StatelessWidget {
     );
   }
 }
-
 
 /// 经典风格的迷你预览：顶栏色块 + 圆角卡片 + 主题色按钮。
 class _ClassicMiniPreview extends StatelessWidget {

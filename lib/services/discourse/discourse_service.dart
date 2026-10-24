@@ -59,6 +59,7 @@ import '../app_logger.dart';
 import '../log/log_writer.dart';
 import '../network/exceptions/api_exception.dart';
 import '../storage/resilient_secure_storage.dart';
+import '../site_context.dart';
 import '../user_api_key_service.dart';
 import '../user_presence_service.dart';
 import '../../l10n/s.dart';
@@ -151,8 +152,8 @@ class DiscourseService extends _DiscourseServiceBase
         _ReviewablesMixin,
         _AssignMixin,
         _ChatMixin {
-  static const String baseUrl = AppConstants.baseUrl;
-  static const String _usernameKey = 'linux_do_username';
+  static String get baseUrl => AppConstants.baseUrl;
+  static String get _usernameKey => SiteContext.storageKey('linux_do_username');
   static const _summaryCacheDuration = Duration(minutes: 5);
 
   @override

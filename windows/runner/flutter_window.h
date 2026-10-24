@@ -3,6 +3,7 @@
 
 #include <flutter/dart_project.h>
 #include <flutter/flutter_view_controller.h>
+#include <flutter/method_channel.h>
 
 #include <memory>
 
@@ -23,6 +24,12 @@ class FlutterWindow : public Win32Window {
                          LPARAM const lparam) noexcept override;
 
  private:
+  // Windows 的 WebView2 和原生代理含进程级状态，使用进程交接避免不安全的插件析构。
+  bool PrepareProcessRestart();
+  std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
+      site_switch_channel_;
+  bool restart_pending_ = false;
+
   // The project to run.
   flutter::DartProject project_;
 

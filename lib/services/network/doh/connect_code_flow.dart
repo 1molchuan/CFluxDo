@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:html/parser.dart' as html_parser;
 
 import '../../oauth_flow_helper.dart';
+import '../../site_context.dart';
 import '../cf/cf_challenge_classifier.dart';
 import '../discourse_dio.dart';
 import '../exceptions/api_exception.dart';
@@ -80,6 +81,7 @@ class ConnectCodeFlow {
     bool silent = true,
     String requestTag = 'accel_doh_connect',
   }) async {
+    if (!SiteContext.isLinuxDo) return const ConnectCodeResult.unavailable();
     try {
       // 模拟"业务页加载完成 → 跳转到授权页"的导航延迟
       await OAuthFlowHelper.humanGap(minMs: 800, maxMs: 1500);

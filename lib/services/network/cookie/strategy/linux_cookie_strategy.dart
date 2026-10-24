@@ -17,7 +17,7 @@ class LinuxCookieStrategy extends DefaultCookieStrategy {
     try {
       final allCookies = await cookieManager.getAllCookies();
       return allCookies
-          .where((c) => CookieJarService.matchesAppHost(c.domain))
+          .where((c) => CookieJarService.cookieDomainMatchesHost(c.domain, Uri.parse(url).host))
           .toList();
     } catch (e) {
       debugPrint('[CookieStrategy][Linux] getAllCookies failed, falling back: $e');

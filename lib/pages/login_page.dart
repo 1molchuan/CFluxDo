@@ -4,6 +4,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../l10n/s.dart';
 import '../services/auth_session.dart';
+import '../constants.dart';
+import '../services/site_context.dart';
 import '../services/cf_challenge_service.dart';
 import '../services/network/cf/cf_round_outcome.dart';
 import '../services/credential_store_service.dart';
@@ -23,10 +25,10 @@ import 'qr_login_scan_page.dart';
 import 'webview_login_page.dart';
 import '../theme/mojian_theme.dart';
 
-/// linux.do 原生登录页。
+/// 当前论坛登录页。
 ///
-/// 主路径走 [DiscourseService.loginWithPassword] (在 `_LoginMixin` 里),
-/// 不加载 Discourse Ember bundle, 绕开 iOS 15 的 ES2022 `static{}` 兼容问题。
+/// IDCFlare 默认使用系统浏览器授权，完整网页登录作为备用入口；
+/// LINUX DO 保留原生密码登录与已有的浏览器授权入口。
 ///
 /// 流程对齐 linux.do 网页:
 /// 1. 弹 hcaptcha 人机验证 (mini WebView, 只加载几 KB hcaptcha widget)
@@ -39,6 +41,7 @@ import '../theme/mojian_theme.dart';
 ///
 /// linux.do 的 hcaptcha sitekey 写死, 后续可从 PreloadedDataService 动态拿。
 const String _kLinuxDoHcaptchaSiteKey = 'a776b4ac-8c4c-441e-986a-c6ee9ed8cf08';
+
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
 
@@ -46,8 +49,7 @@ class LoginPage extends StatefulWidget {
   State<LoginPage> createState() => _LoginPageState();
 }
 
-class _LoginPageState extends State<LoginPage>
-    with TickerProviderStateMixin {
+class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
   String? _savedUsername;
   String? _savedPassword;
   bool _credentialsLoaded = false;
@@ -95,7 +97,7 @@ class _LoginPageState extends State<LoginPage>
 
   @override
   void dispose() {
-    if (identical(UserApiKeyLoginFlow.instance.onFlowFinished, _onBrowserAuthFinished)) {
+    if (UserApiKeyLoginFlow.instance.onFlowFinished == _onBrowserAuthFinished) {
       UserApiKeyLoginFlow.instance.onFlowFinished = null;
     }
     _entryController.dispose();
@@ -103,7 +105,7 @@ class _LoginPageState extends State<LoginPage>
   }
 
   /// 浏览器授权登录:拉起系统浏览器打开 /user-api-key/new,授权后
-  /// 深链 fluxdo://auth_redirect 回 App,由 UserApiKeyLoginFlow 完成
+  /// 深链 discourse://auth_redirect 回 App,由 UserApiKeyLoginFlow 完成
   /// OTP 兑换与登录收口,这里只负责发起和成功后 pop。
   Future<void> _loginWithBrowserAuth() async {
     if (_browserAuthLaunching) return;
@@ -190,7 +192,9 @@ class _LoginPageState extends State<LoginPage>
     // /hcaptcha/create.json)。读 prefs 直接走 SharedPreferences (不依赖
     // riverpod, LoginPage 是普通 StatefulWidget)。
     final prefs = await SharedPreferences.getInstance();
-    final hcaptchaEndpoint = prefs.getString('pref_hcaptcha_create_endpoint');
+    final hcaptchaEndpoint = prefs.getString(
+      SiteContext.storageKey('pref_hcaptcha_create_endpoint'),
+    );
     if (!mounted) return false;
 
     // Step 1-3: WebView 内 JS 全流程登录 (csrf → hcaptcha/create → session)。
@@ -205,9 +209,7 @@ class _LoginPageState extends State<LoginPage>
       hcaptchaCreateEndpoint: hcaptchaEndpoint,
       onNeedSecondFactor: (need) => showTwoFactorDialog(
         context,
-        hint: need.totpEnabled
-            ? '请输入身份验证器 App 显示的 6 位验证码'
-            : '此账号需要二步验证',
+        hint: need.totpEnabled ? '请输入身份验证器 App 显示的 6 位验证码' : '此账号需要二步验证',
         onUseBackupCode: () => _loginWithWebView(),
       ),
     );
@@ -248,8 +250,7 @@ class _LoginPageState extends State<LoginPage>
     final msg = switch (f.kind) {
       LoginErrorKind.invalidCredentials => '用户名或密码错误',
       LoginErrorKind.secondFactorRequired => f.message ?? '二步验证失败',
-      LoginErrorKind.notActivated =>
-        '账号未激活,请到邮箱 ${f.sentToEmail ?? ''} 完成激活',
+      LoginErrorKind.notActivated => '账号未激活,请到邮箱 ${f.sentToEmail ?? ''} 完成激活',
       LoginErrorKind.notApproved => '账号尚未通过审核',
       LoginErrorKind.passwordExpired => '密码已过期,请用浏览器登录重设密码',
       LoginErrorKind.network => f.message ?? '网络异常',
@@ -333,15 +334,21 @@ class _LoginPageState extends State<LoginPage>
                         children: [
                           _entry(
                             0,
-                            const Center(
-                              child: FloatingLogo(size: 88, glowSize: 80),
+                            Center(
+                              child: SiteContext.isLinuxDo
+                                  ? const FloatingLogo(size: 88, glowSize: 80)
+                                  : Image.asset(
+                                      SiteContext.current.logoAsset,
+                                      width: 88,
+                                      height: 88,
+                                    ),
                             ),
                           ),
                           const SizedBox(height: 28),
                           _entry(
                             1,
                             Text(
-                              'LINUX.DO',
+                              SiteContext.current.name,
                               textAlign: TextAlign.center,
                               style: theme.textTheme.headlineMedium?.copyWith(
                                 fontWeight: FontWeight.w700,
@@ -366,7 +373,31 @@ class _LoginPageState extends State<LoginPage>
                             ),
                           ),
                           const SizedBox(height: 32),
-                          _entry(3, _buildFormCard(theme, scheme)),
+                          _entry(
+                            3,
+                            SiteContext.isLinuxDo
+                                ? _buildFormCard(theme, scheme)
+                                : FilledButton.icon(
+                                    onPressed: _browserAuthLaunching
+                                        ? null
+                                        : _loginWithBrowserAuth,
+                                    icon: _browserAuthLaunching
+                                        ? const LoadingSpinner(size: 20)
+                                        : const Icon(
+                                            Symbols.open_in_browser_rounded,
+                                            size: 20,
+                                          ),
+                                    label: Text(
+                                      context.l10n.login_browserAuthorize,
+                                    ),
+                                    style: FilledButton.styleFrom(
+                                      minimumSize: const Size(
+                                        double.infinity,
+                                        52,
+                                      ),
+                                    ),
+                                  ),
+                          ),
                           const SizedBox(height: 24),
                           _entry(4, _buildAltLogin(context, scheme)),
                         ],
@@ -409,7 +440,7 @@ class _LoginPageState extends State<LoginPage>
             : LoginForm(
                 onSubmit: _handleSubmit,
                 onForgotPassword: () =>
-                    _loginWithWebView('https://linux.do/password-reset'),
+                    _loginWithWebView('${AppConstants.baseUrl}/password-reset'),
                 savedUsername: _savedUsername,
                 savedPassword: _savedPassword,
               ),
@@ -448,8 +479,9 @@ class _LoginPageState extends State<LoginPage>
                   )
                 : LoginForm(
                     onSubmit: _handleSubmit,
-                    onForgotPassword: () =>
-                        _loginWithWebView('https://linux.do/password-reset'),
+                    onForgotPassword: () => _loginWithWebView(
+                      '${AppConstants.baseUrl}/password-reset',
+                    ),
                     savedUsername: _savedUsername,
                     savedPassword: _savedPassword,
                   ),
@@ -462,6 +494,29 @@ class _LoginPageState extends State<LoginPage>
   /// 分割线 + 其他方式登录 (扫码 / 浏览器授权 / OAuth 等)
   Widget _buildAltLogin(BuildContext context, ColorScheme scheme) {
     final theme = Theme.of(context);
+    if (!SiteContext.isLinuxDo) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            context.l10n.login_linuxDoAuthorizeHint,
+            textAlign: TextAlign.center,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: scheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: 20),
+          OutlinedButton.icon(
+            onPressed: () => _loginWithWebView(),
+            icon: const Icon(Symbols.language_rounded, size: 20),
+            label: Text(context.l10n.login_embeddedWebLogin),
+            style: OutlinedButton.styleFrom(
+              minimumSize: const Size(double.infinity, 52),
+            ),
+          ),
+        ],
+      );
+    }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -491,7 +546,7 @@ class _LoginPageState extends State<LoginPage>
                   child: LoadingSpinner(size: 20),
                 )
               : const Icon(Symbols.verified_user_rounded, size: 20),
-          label: const Text('浏览器授权登录'),
+          label: Text(context.l10n.login_browserAuthorize),
           style: OutlinedButton.styleFrom(
             minimumSize: const Size(double.infinity, 52),
             shape: RoundedRectangleBorder(
@@ -531,9 +586,9 @@ class _LoginPageState extends State<LoginPage>
 
   /// 扫码登录:跳转扫码页,成功后 pop 登录页
   Future<void> _loginWithQrScan() async {
-    final result = await Navigator.of(context).push<bool>(
-      MaterialPageRoute(builder: (_) => const QrLoginScanPage()),
-    );
+    final result = await Navigator.of(
+      context,
+    ).push<bool>(MaterialPageRoute(builder: (_) => const QrLoginScanPage()));
     if (result == true && mounted) {
       Navigator.of(context).pop(true);
     }

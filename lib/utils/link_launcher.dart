@@ -14,6 +14,9 @@ import '../providers/preferences_provider.dart';
 import '../providers/category_provider.dart';
 import '../providers/selected_topic_provider.dart';
 import '../services/discourse/discourse_service.dart';
+import '../config/forum_site.dart';
+import '../services/site_context.dart';
+import '../services/site_switch_service.dart';
 import '../widgets/common/external_link_confirm_dialog.dart';
 import '../widgets/content/discourse_html_content/image_utils.dart';
 import '../widgets/layout/home_workspace_scope.dart';
@@ -23,24 +26,19 @@ import 'url_helper.dart';
 
 const _browserChannel = MethodChannel('com.github.lingyan000.fluxdo/browser');
 
-/// 检查 URL 是否属于站点内部链接（主域名或子域名）
+/// 检查 URL 是否属于当前论坛主域路由，不包含子域服务。
 bool isInternalUrl(Uri uri) {
-  final baseUri = Uri.tryParse(AppConstants.baseUrl);
-  if (baseUri == null) return false;
-
-  final baseHost = baseUri.host; // 如 'linux.do'
-  final host = uri.host;
-
-  final hostMatches = host == baseHost || host.endsWith('.$baseHost');
-  if (!hostMatches) return false;
+  if (ForumSite.fromUri(uri) != SiteContext.current) return false;
+  if (uri.hasPort && uri.port != (uri.scheme == 'https' ? 443 : 80)) {
+    return false;
+  }
 
   return UrlHelper.samePrefix(uri.toString());
 }
 
 /// 检查 URL 是否属于站点内部链接（字符串版本，支持相对路径）
 bool isInternalUrlString(String url) {
-  if (url.startsWith('/')) return true;
-  final uri = Uri.tryParse(url);
+  final uri = Uri.tryParse(UrlHelper.resolveUrl(url));
   if (uri == null) return false;
   return isInternalUrl(uri);
 }
@@ -135,10 +133,20 @@ Future<void> launchContentLink(
   void Function(String url)? onDownloadAttachment,
 }) async {
   if (url.isEmpty) return;
+  if (url.startsWith('//')) url = UrlHelper.resolveUrl(url);
   if (url.startsWith('upload://')) {
     url = await DiscourseService().resolveShortUrlForLink(url) ?? url;
     // 短链解析期间列表项可能已离开缓存范围并被销毁，不能再使用旧 context。
     if (!context.mounted) return;
+  }
+  // 相对链接必须由当前站解析；已知另一站主域先切站再重放导航。
+  final targetUri = Uri.tryParse(url);
+  final targetSite = targetUri == null ? null : ForumSite.fromUri(targetUri);
+  if (targetSite != null && targetSite != SiteContext.current) {
+    await SiteSwitchService.instance.switchTo(
+      targetSite, openUrl: targetUri!.replace(scheme: 'https', port: 443),
+    );
+    return;
   }
 
   // 1. 识别用户链接 /u/username

@@ -1,8 +1,11 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:package_info_plus/package_info_plus.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:fluxdo/services/data_management/data_backup_service.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
   group('DataBackupService v2 反白名单', () {
     test('用户配置默认纳入(v1 白名单时代的漏备项)', () {
       const keys = [
@@ -38,6 +41,11 @@ void main() {
           isTrue,
           reason: '$key 应被备份',
         );
+        expect(
+          DataBackupService.debugShouldBackup('site:idcflare:$key'),
+          isTrue,
+          reason: 'IF 的 $key 应被备份',
+        );
       }
     });
 
@@ -67,6 +75,8 @@ void main() {
         'per_device_cert_installed',
         'cert_use_per_device',
         'window_x',
+        'active_forum_site',
+        'pending_site_open_url',
         // 一次性标记
         'onboarding_completed',
         'crashlytics_notice_shown',
@@ -85,7 +95,70 @@ void main() {
           isFalse,
           reason: '$key 不应被备份',
         );
+        expect(
+          DataBackupService.debugShouldBackup('site:idcflare:$key'),
+          isFalse,
+          reason: 'IF 的 $key 不应被备份',
+        );
       }
+    });
+
+    test('导出导入保留原始站点键且不恢复站点切换状态', () async {
+      PackageInfo.setMockInitialValues(
+        appName: 'FluxDO',
+        packageName: 'test.fluxdo',
+        version: '1.0.0',
+        buildNumber: '1',
+        buildSignature: '',
+      );
+      SharedPreferences.setMockInitialValues({
+        'active_forum_site': 'idcflare',
+        'pending_site_open_url': 'https://example.com',
+        'font_family': 'LD 字体',
+        'site:idcflare:font_family': 'IF 字体',
+        'site:idcflare:linux_do_csrf_token': '不可备份',
+      });
+      final prefs = await SharedPreferences.getInstance();
+      final backup = await DataBackupService.exportData(prefs);
+      expect((backup['data'] as Map).keys, unorderedEquals([
+        'font_family',
+        'site:idcflare:font_family',
+      ]));
+
+      await prefs.remove('font_family');
+      await prefs.remove('site:idcflare:font_family');
+      await DataBackupService.importData(prefs, {
+        'data': {
+          ...(backup['data'] as Map<String, dynamic>),
+          'active_forum_site': {'type': 'String', 'value': 'linuxDo'},
+          'pending_site_open_url': {'type': 'String', 'value': '不应恢复'},
+          'site:idcflare:linux_do_csrf_token': {
+            'type': 'String',
+            'value': '不应恢复',
+          },
+        },
+      });
+      expect(prefs.getString('font_family'), 'LD 字体');
+      expect(prefs.getString('site:idcflare:font_family'), 'IF 字体');
+      expect(prefs.getString('active_forum_site'), 'idcflare');
+      expect(prefs.getString('pending_site_open_url'), 'https://example.com');
+      expect(prefs.getString('site:idcflare:linux_do_csrf_token'), '不可备份');
+    });
+
+    test('旧备份的 Linux DO 键不套用 IF 前缀', () async {
+      SharedPreferences.setMockInitialValues({
+        'active_forum_site': 'idcflare',
+        'site:idcflare:font_family': '保留 IF 配置',
+      });
+      final prefs = await SharedPreferences.getInstance();
+      await DataBackupService.importData(prefs, {
+        'version': 1,
+        'data': {
+          'font_family': {'type': 'String', 'value': '旧 LD 配置'},
+        },
+      });
+      expect(prefs.getString('font_family'), '旧 LD 配置');
+      expect(prefs.getString('site:idcflare:font_family'), '保留 IF 配置');
     });
   });
 }

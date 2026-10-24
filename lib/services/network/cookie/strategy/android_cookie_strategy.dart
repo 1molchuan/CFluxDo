@@ -12,8 +12,7 @@ import 'default_cookie_strategy.dart';
 ///   周期轮询/边界同步高频调用时会与 vsync 分发抢线程(ov 型掉帧来源)。
 ///   字段能力与插件路径等同(都是 GET_COOKIE_INFO,旧 WebView 同样退化到
 ///   name+value)。
-/// - deleteAllCookies 加 timeout 保护（避免 ANR）
-/// - 补充逐 host 精确删除残留 domain cookie
+/// - 清理复用默认策略，只删除当前论坛域，不清除 OAuth 或另一站会话。
 class AndroidCookieStrategy extends DefaultCookieStrategy {
   @override
   Future<List<Cookie>> readCookiesFromWebView(
@@ -53,36 +52,4 @@ class AndroidCookieStrategy extends DefaultCookieStrategy {
     return HTTPCookieSameSitePolicy.fromValue(normalized);
   }
 
-  @override
-  Future<void> clearWebViewCookies(
-    CookieManager cookieManager,
-    Set<String> knownHosts,
-  ) async {
-    // deleteAllCookies 可能 ANR，加 timeout
-    try {
-      await cookieManager
-          .deleteAllCookies()
-          .timeout(const Duration(seconds: 5));
-    } catch (e) {
-      debugPrint('[CookieStrategy][Android] deleteAllCookies failed/timeout: $e');
-    }
-
-    // 补充逐 host 精确删除残留 cookie（deleteAllCookies 在 Android 上可能不彻底）
-    for (final host in knownHosts) {
-      try {
-        final url = WebUri('https://$host');
-        final remaining = await cookieManager.getCookies(url: url);
-        for (final wc in remaining) {
-          await cookieManager.deleteCookie(
-            url: url,
-            name: wc.name,
-            domain: wc.domain,
-            path: wc.path ?? '/',
-          );
-        }
-      } catch (e) {
-        debugPrint('[CookieStrategy][Android] per-host delete failed for $host: $e');
-      }
-    }
-  }
 }

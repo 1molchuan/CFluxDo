@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:crypto/crypto.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../site_context.dart';
 
 /// 视频播放位置记忆(「看到一半退出,重进继续播」)。
 ///
@@ -21,7 +22,7 @@ class PlaybackPositionStore {
 
   static final PlaybackPositionStore instance = PlaybackPositionStore._();
 
-  static const String _prefsKey = 'media_playback_positions';
+  static String get _prefsKey => SiteContext.storageKey('media_playback_positions');
   static const int _maxEntries = 200;
   static const Duration _maxAge = Duration(days: 90);
   static const Duration _flushDelay = Duration(milliseconds: 300);
@@ -37,6 +38,7 @@ class PlaybackPositionStore {
   SharedPreferences? _prefs;
   Timer? _flushTimer;
   Future<void>? _loading;
+  Future<void> _pendingWrite = Future.value();
 
   /// 内存态与磁盘不一致时为 true。[flush] 据此短路:快速滚动中批量
   /// 销毁的暂停视频会各触发一次收尾 flush,无变更时必须是纯空操作。
@@ -93,19 +95,23 @@ class PlaybackPositionStore {
     }
   }
 
-  /// 立即落盘(Session 收尾等不容 debounce 的时机)。无脏数据时空操作。
+  /// 立即落盘并等待已经发起的写入，供会话收尾和切站使用。
   Future<void> flush() async {
-    if (!_dirty) return;
     _flushTimer?.cancel();
     _flushTimer = null;
-    final entries = _entries;
-    if (entries == null) return;
-    _dirty = false;
-    final prefs = _prefs ??= await SharedPreferences.getInstance();
-    await prefs.setString(
-      _prefsKey,
-      jsonEncode(entries.map((k, v) => MapEntry(k, v.toJson()))),
-    );
+    if (_dirty && _entries != null) {
+      final encoded = jsonEncode(
+        _entries!.map((k, v) => MapEntry(k, v.toJson())),
+      );
+      _dirty = false;
+      final previous = _pendingWrite;
+      _pendingWrite = () async {
+        await previous;
+        final prefs = _prefs ??= await SharedPreferences.getInstance();
+        await prefs.setString(_prefsKey, encoded);
+      }();
+    }
+    await _pendingWrite;
   }
 
   static String _keyFor(String url) {

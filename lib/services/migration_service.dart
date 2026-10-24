@@ -11,6 +11,7 @@ import '../constants.dart';
 import 'discourse_cache_manager.dart';
 import 'network/cookie/cookie_jar_service.dart';
 import '../utils/app_data_dir.dart';
+import 'site_context.dart';
 
 /// 迁移项定义
 class Migration {
@@ -401,6 +402,8 @@ class MigrationService {
   /// 在 main() 中调用，在所有网络服务启动之前执行
   static Future<void> runAll(SharedPreferences prefs) async {
     requiresRelogin = false;
+    // 此列表处理双站支持之前的 LINUX DO 存量目录与 Cookie，不能在新站执行。
+    if (!SiteContext.isLinuxDo) return;
 
     for (final m in _migrations) {
       if (prefs.getBool(m.key) == true) continue;

@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:hive_ce/hive.dart';
 import 'package:path/path.dart' as p;
 import '../utils/app_data_dir.dart';
+import '../services/site_context.dart';
 
 /// 应用级 Hive 存储初始化与按账号 box 工厂。
 ///
@@ -142,23 +143,36 @@ class AppDatabase {
         'AppDatabase 暂不支持 Web 平台：书签本地缓存仅在移动端与桌面端启用。',
       );
     }
-    final directory = await getAppDataDirectory();
+    final directory = SiteContext.isLinuxDo
+        ? await getAppDataDirectory()
+        : await SiteContext.supportDirectory();
     Hive.init(p.join(directory.path, 'hive'));
     _initialized = true;
   }
 
   static String _bookmarkBoxName(String accountId) {
-    return '$_bookmarkBoxPrefix${_sanitize(accountId)}';
+    return '$_bookmarkBoxPrefix${_sanitize(SiteContext.accountKey(accountId))}';
   }
 
   static String _exportHistoryBoxName(String accountId) {
-    return '$_exportHistoryBoxPrefix${_sanitize(accountId)}';
+    return '$_exportHistoryBoxPrefix${_sanitize(SiteContext.accountKey(accountId))}';
   }
 
   static String _sanitize(String accountId) {
     // Hive box 名只允许字母/数字/下划线/连字符；把其它字符（如 @、空格、中文）
     // 替换为 `_`，避免某些平台底层文件系统不接受。
     return accountId.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '_');
+  }
+
+  /// 等待已发起的 box 打开与写入落盘，供切站前保存本地数据。
+  static Future<void> flushPending() async {
+    await _initializing;
+    while (_openingBoxes.isNotEmpty) {
+      await Future.wait(_openingBoxes.values.toList(growable: false));
+    }
+    for (final box in _openBoxes.values.toList(growable: false)) {
+      if (box.isOpen) await box.flush();
+    }
   }
 
   /// 仅供 [BookmarkCacheDao.clearAccount] 在删除账号后顺手释放句柄。

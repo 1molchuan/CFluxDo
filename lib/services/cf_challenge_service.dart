@@ -1059,12 +1059,19 @@ class _CfChallengePageState extends State<CfChallengePage> {
 
   /// 读取 cookie 值：先尝试 CookieManager，Windows 上 fallback 到 DevTools
   Future<String?> _readCookieValue(String name) async {
+    final targetUri = Uri.parse(widget.verifyUrl);
     try {
       final cookie = await _cfCookieManager.getCookie(
-        url: WebUri(AppConstants.baseUrl),
+        url: WebUri(targetUri.toString()),
         name: name,
       );
-      if (cookie != null && cookie.value.isNotEmpty) {
+      if (cookie != null &&
+          cookie.value.isNotEmpty &&
+          (!io.Platform.isLinux ||
+              CookieJarService.cookieDomainMatchesHost(
+                cookie.domain,
+                targetUri.host,
+              ))) {
         return cookie.value;
       }
     } catch (e) {
@@ -1094,7 +1101,12 @@ class _CfChallengePageState extends State<CfChallengePage> {
       try {
         final allCookies = await _cfCookieManager.getAllCookies();
         for (final c in allCookies) {
-          if (c.name == name && c.value.isNotEmpty) {
+          if (c.name == name &&
+              c.value.isNotEmpty &&
+              CookieJarService.cookieDomainMatchesHost(
+                c.domain,
+                targetUri.host,
+              )) {
             return c.value;
           }
         }

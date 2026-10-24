@@ -20,6 +20,9 @@
     }
   },
   "login_browserHint": "将在浏览器中打开登录页面",
+  "login_browserAuthorize": "浏览器授权登录",
+  "login_linuxDoAuthorizeHint": "在浏览器中选择“使用 LINUX DO 登录”，完成后授权返回客户端。",
+  "login_embeddedWebLogin": "内置网页登录（备用）",
   "login_qrAccount": "账号：{username}",
   "@login_qrAccount": {
     "placeholders": {

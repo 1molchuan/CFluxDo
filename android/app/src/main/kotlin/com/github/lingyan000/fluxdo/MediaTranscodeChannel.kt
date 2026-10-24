@@ -79,6 +79,17 @@ object MediaTranscodeChannel {
         }
     }
 
+    /** 引擎销毁前取消旧站转码，不能让回调写入下一站的通道状态。 */
+    fun dispose(messenger: BinaryMessenger) {
+        MethodChannel(messenger, CHANNEL).setMethodCallHandler(null)
+        val active = transformer
+        transformer = null
+        stopTicker()
+        active?.cancel()
+        finish { it.success(false) }
+        lastProgress = 0.0
+    }
+
     private inline fun finish(crossinline reply: (MethodChannel.Result) -> Unit) {
         val r = pendingResult ?: return
         pendingResult = null

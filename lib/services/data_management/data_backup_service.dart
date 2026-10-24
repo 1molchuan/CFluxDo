@@ -25,6 +25,13 @@ import '../../utils/share_utils.dart';
 class DataBackupService {
   static final ResilientSecureStorage _secureStorage = ResilientSecureStorage();
   static const _apiKeyPrefix = 'ai_provider_key_';
+  static const _idcflareKeyPrefix = 'site:idcflare:';
+
+  /// 只用于过滤，不改写导出或导入的原始键，旧备份始终归属 Linux DO。
+  static const _excludeExactKeys = [
+    'active_forum_site',
+    'pending_site_open_url',
+  ];
 
   /// 排除前缀:命中即不备份。按类别分组,新增排除项时对号入座。
   static const _excludeKeyPrefixes = [
@@ -69,6 +76,10 @@ class DataBackupService {
 
   /// 判断 key 是否应该被备份(导出与导入同一套规则)。
   static bool _shouldBackup(String key) {
+    if (key.startsWith(_idcflareKeyPrefix)) {
+      key = key.substring(_idcflareKeyPrefix.length);
+    }
+    if (_excludeExactKeys.contains(key)) return false;
     if (_includeExactKeys.contains(key)) return true;
     // 迁移完成标记:动态从 MigrationService 派生,不抄常量
     if (MigrationService.migrationKeys.contains(key)) return false;
@@ -175,6 +186,7 @@ class DataBackupService {
   ///
   /// 导入侧同样过 [_shouldBackup]:v1 旧备份(白名单时代)与手改文件
   /// 里可能混着会话态/缓存 key,一律过滤。
+  /// 原样恢复键名，保留各站归属；不按当前站点为旧 Linux DO 键加前缀。
   static Future<void> importData(
     SharedPreferences prefs,
     Map<String, dynamic> backup,

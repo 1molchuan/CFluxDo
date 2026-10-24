@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'log/log_writer.dart';
+import 'site_context.dart';
 
 class PassiveLogoutAdvice {
   const PassiveLogoutAdvice({
@@ -25,9 +26,10 @@ class AuthIssueNoticeService {
   static final AuthIssueNoticeService instance =
       AuthIssueNoticeService._internal();
 
-  static const _passiveLogoutHistoryKey = 'auth_passive_logout_history_v1';
-  static const _clearDataSuggestionAtKey =
-      'auth_clear_data_suggestion_at_v1';
+  static String get _passiveLogoutHistoryKey =>
+      SiteContext.storageKey('auth_passive_logout_history_v1');
+  static String get _clearDataSuggestionAtKey =>
+      SiteContext.storageKey('auth_clear_data_suggestion_at_v1');
   static const Duration _frequentLogoutWindow = Duration(hours: 24);
   static const int _frequentLogoutThreshold = 3;
   static const Duration _clearDataSuggestionCooldown = Duration(hours: 12);

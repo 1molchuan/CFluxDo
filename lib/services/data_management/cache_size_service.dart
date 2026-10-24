@@ -4,7 +4,8 @@ import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../discourse_cache_manager.dart';
-import '../../utils/app_data_dir.dart';
+import '../network/cookie/cookie_jar_service.dart';
+import '../site_context.dart';
 
 /// 图片缓存分类(Telegram Storage Usage 式明细的口径)。
 ///
@@ -21,8 +22,8 @@ enum ImageCacheCategory {
 
 /// 缓存大小计算服务
 class CacheSizeService {
-  /// 统计/删除口径:blob 缓存根目录 + legacy cache_manager 残留目录
-  /// (v9 迁移后为空,防被杀断残留)。都在 `getTemporaryDirectory()` 下。
+  /// 统计/删除口径:当前站 blob 根目录 + legacy cache_manager 残留目录。
+  /// LinuxDO 沿用 Temporary 原路径，其他站限定在站点子目录。
   static const _cacheKeys = [
     BlobImageCache.dirName,
     ...kLegacyImageCacheKeys,
@@ -34,7 +35,7 @@ class CacheSizeService {
   /// 迁移产生的 `*.trash` 待删目录也计入 —— 后台清扫前的窗口期里它们
   /// 仍占磁盘,不算进来会出现"明明占几百 MB 却显示无缓存"。
   static Future<int> getImageCacheSize() async {
-    final tempDir = await getTemporaryDirectory();
+    final tempDir = SiteContext.directory(await getTemporaryDirectory());
     int totalSize = 0;
     for (final key in _cacheKeys) {
       totalSize += await _getDirectorySize(Directory('${tempDir.path}/$key'));
@@ -47,7 +48,7 @@ class CacheSizeService {
 
   /// 按分类统计图片缓存大小(六类并行)。
   static Future<Map<ImageCacheCategory, int>> getImageCacheBreakdown() async {
-    final tempDir = await getTemporaryDirectory();
+    final tempDir = SiteContext.directory(await getTemporaryDirectory());
     final t = tempDir.path;
     const blob = BlobImageCache.dirName;
 
@@ -98,7 +99,7 @@ class CacheSizeService {
   static Future<void> clearImageCacheCategory(
     ImageCacheCategory category,
   ) async {
-    final tempDir = await getTemporaryDirectory();
+    final tempDir = SiteContext.directory(await getTemporaryDirectory());
 
     Future<void> deleteDir(String key) async {
       final dir = Directory('${tempDir.path}/$key');
@@ -130,11 +131,16 @@ class CacheSizeService {
     }
   }
 
-  /// 计算 AI 聊天数据大小（SharedPreferences 中 ai_chat_ 开头的 key）
+  /// 仅统计当前站 AI 会话，不把全局模型与供应商配置算作站点缓存。
   static Future<int> getAiChatDataSize(SharedPreferences prefs) async {
+    final prefixes = [
+      SiteContext.storageKey('ai_chat_topic_sessions_'),
+      SiteContext.storageKey('ai_chat_session_messages_'),
+    ];
+    final indexKey = SiteContext.storageKey('ai_chat_all_sessions_index');
     int totalSize = 0;
     for (final key in prefs.getKeys()) {
-      if (key.startsWith('ai_chat_')) {
+      if (key == indexKey || prefixes.any(key.startsWith)) {
         final value = prefs.get(key);
         if (value is String) {
           totalSize += value.length * 2; // UTF-16 编码估算
@@ -150,8 +156,8 @@ class CacheSizeService {
 
   /// 计算 Cookie 缓存大小（.cookies 目录）
   static Future<int> getCookieCacheSize() async {
-    final docDir = await getAppDataDirectory();
-    return _getDirectorySize(Directory('${docDir.path}/.cookies'));
+    final cookiesPath = await CookieJarService().cookiesPath;
+    return _getDirectorySize(Directory(cookiesPath));
   }
 
   /// 递归计算目录大小
@@ -173,7 +179,7 @@ class CacheSizeService {
   /// 迁移遗留的 `*.trash` 待删目录一并删(用户主动清缓存 = 立即释放,
   /// 不等后台清扫)。
   static Future<void> deleteImageCacheDirs() async {
-    final tempDir = await getTemporaryDirectory();
+    final tempDir = SiteContext.directory(await getTemporaryDirectory());
     for (final key in _cacheKeys) {
       final dir = Directory('${tempDir.path}/$key');
       if (await dir.exists()) {

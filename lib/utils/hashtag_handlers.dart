@@ -9,6 +9,7 @@ import '../utils/discourse_url_parser.dart';
 import '../utils/font_awesome_helper.dart';
 import '../utils/tag_icon_list.dart';
 import '../widgets/layout/home_workspace_scope.dart';
+import 'link_launcher.dart';
 
 /// hashtag 药丸(`#分类`/`#标签`)的宿主接入 —— 子包只管画药丸,
 /// 图标解析与点击导航都在这里组装(注入点契约见子包 hashtag_icons.dart)。
@@ -54,6 +55,7 @@ IconData? _resolveIcon(BuildContext context, String? iconName, String href) {
 /// 平行视界(话题详情页等)返回 false,退回 linkHandler 走既有链路
 /// (那里同样会处理 /c/ 与 /tag/,还带 WebView 等兜底)。
 bool _handleTap(BuildContext context, String href, String? ref, String label) {
+  if (!isInternalUrlString(href)) return false;
   final workspace = HomeWorkspaceScope.maybeOf(context);
   if (workspace == null) return false;
 

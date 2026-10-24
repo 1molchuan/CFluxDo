@@ -1,5 +1,8 @@
 {
   "@@locale": "zh",
+  "common_switchSite": "切换站点",
+  "common_switchingSite": "正在切换站点…",
+  "common_switchSiteFailed": "切换站点失败，请重试。原站登录状态已保留。",
   "common_about": "关于",
   "common_add": "添加",
   "common_addBookmark": "添加书签",

@@ -34,15 +34,18 @@ import 'settings_page.dart';
 import '../theme/mojian_theme.dart';
 import '../widgets/common/mojian_section_label.dart';
 import '../widgets/topic/topic_card.dart' show mojianCardDecoration;
+import '../config/forum_site.dart';
+import '../services/site_context.dart';
+import '../utils/url_helper.dart';
 
-/// 搜索框中的站内直达链接标准化。支持完整 URL、`linux.do/...` 和相对路径；
+/// 搜索框中的站内直达链接标准化。支持两站完整 URL、主域裸链接和相对路径；
 /// 普通关键词原样返回，后续由 [isInternalUrlString] 判定后继续普通搜索。
 @visibleForTesting
 String normalizeDirectSearchLink(String rawValue) {
   final value = rawValue.trim();
   if (value.startsWith('/')) return value;
   if (RegExp(
-    r'^(?:www\.)?linux\.do(?::\d+)?/',
+    r'^(?:www\.)?(?:linux\.do|idcflare\.com)(?::\d+)?/',
     caseSensitive: false,
   ).hasMatch(value)) {
     return 'https://$value';
@@ -320,6 +323,13 @@ class _SearchPageState extends ConsumerState<SearchPage> {
 
   bool _tryOpenInternalLink(String rawValue) {
     final normalized = normalizeDirectSearchLink(rawValue);
+    final uri = Uri.tryParse(UrlHelper.resolveUrl(normalized));
+    final target = uri == null ? null : ForumSite.fromUri(uri);
+    if (target != null && target != SiteContext.current) {
+      launchContentLink(context, uri.toString());
+      _focusNode.unfocus();
+      return true;
+    }
     if (!isInternalUrlString(normalized)) return false;
 
     final topic = DiscourseUrlParser.parseTopic(normalized);

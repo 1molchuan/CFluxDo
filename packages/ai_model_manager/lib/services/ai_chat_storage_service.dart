@@ -14,18 +14,22 @@ import '../models/ai_provider.dart';
 /// - `ai_chat_max_sessions` — 最大会话总数
 /// - `ai_chat_title_model` — 标题生成模型 key
 class AiChatStorageService {
-  static const _allSessionsIndexKey = 'ai_chat_all_sessions_index';
+  final String _allSessionsIndexKey;
   static const _maxSessionsKey = 'ai_chat_max_sessions';
   static const _titleModelKey = 'ai_chat_title_model';
   static const _imagePromptOptimizerModelKey = 'ai_image_prompt_optimizer_model';
   static const _thinkingLevelKey = 'ai_thinking_level';
-  static const _topicSessionsKeyPrefix = 'ai_chat_topic_sessions_';
-  static const _sessionMessagesKeyPrefix = 'ai_chat_session_messages_';
+  final String _topicSessionsKeyPrefix;
+  final String _sessionMessagesKeyPrefix;
   static const _defaultMaxSessions = 50;
 
   final SharedPreferences _prefs;
 
-  AiChatStorageService(this._prefs);
+  /// 会话按宿主站点隔离，模型、思考配置与通用上限仍然共用。
+  AiChatStorageService(this._prefs, {String sessionNamespace = ''})
+      : _allSessionsIndexKey = '${sessionNamespace}ai_chat_all_sessions_index',
+        _topicSessionsKeyPrefix = '${sessionNamespace}ai_chat_topic_sessions_',
+        _sessionMessagesKeyPrefix = '${sessionNamespace}ai_chat_session_messages_';
 
   // ===== 最大会话数管理 =====
 

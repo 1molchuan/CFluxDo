@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/cdk_user_info.dart';
 import '../services/cdk_oauth_service.dart';
 import '../services/network/exceptions/oauth_exception.dart';
+import '../services/site_context.dart';
 import 'core_providers.dart';
 
 final cdkOAuthServiceProvider = Provider((ref) => CdkOAuthService());
@@ -27,6 +28,7 @@ class CdkUserInfoNotifier extends AsyncNotifier<CdkUserInfo?> {
 
   @override
   Future<CdkUserInfo?> build() async {
+    if (!SiteContext.isLinuxDo) return null;
     final generation = _requestGeneration;
     final service = ref.read(cdkOAuthServiceProvider);
     ref.onDispose(() {
@@ -93,6 +95,7 @@ class CdkUserInfoNotifier extends AsyncNotifier<CdkUserInfo?> {
   }
 
   Future<CdkUserInfo?> _doFetchUserInfo() async {
+    if (!SiteContext.isLinuxDo) return null;
     final generation = _requestGeneration;
     final prefs = await SharedPreferences.getInstance();
     final enabled = prefs.getBool(_cdkEnabledKey) ?? false;
@@ -156,6 +159,7 @@ class CdkUserInfoNotifier extends AsyncNotifier<CdkUserInfo?> {
 
   /// 用户已手动通过 CF，取消旧请求并立即重新读取业务会话。
   Future<void> refreshAfterCfVerification() {
+    if (!SiteContext.isLinuxDo) return Future.value();
     _requestGeneration++;
     _inFlightFetch = null;
     ref.read(cdkOAuthServiceProvider).cancelPendingRequests();
@@ -163,6 +167,7 @@ class CdkUserInfoNotifier extends AsyncNotifier<CdkUserInfo?> {
   }
 
   Future<void> clear() async {
+    if (!SiteContext.isLinuxDo) return;
     _requestGeneration++;
     _inFlightFetch = null;
     ref.read(cdkOAuthServiceProvider).cancelPendingRequests();
@@ -172,6 +177,7 @@ class CdkUserInfoNotifier extends AsyncNotifier<CdkUserInfo?> {
   }
 
   Future<void> disable() async {
+    if (!SiteContext.isLinuxDo) return;
     _requestGeneration++;
     _inFlightFetch = null;
     ref.read(cdkOAuthServiceProvider).cancelPendingRequests();

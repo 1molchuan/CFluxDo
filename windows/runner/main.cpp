@@ -1,6 +1,9 @@
 ﻿#include <flutter/dart_project.h>
 #include <flutter/flutter_view_controller.h>
 #include <windows.h>
+#include <cstdint>
+#include <cstdlib>
+#include <cstring>
 
 #include "app_links/app_links_plugin_c_api.h"
 #include "flutter_window.h"
@@ -45,7 +48,29 @@ static bool SendAppLinkToInstance(const wchar_t* command_line) {
 
 int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
                       _In_ wchar_t *command_line, _In_ int show_command) {
-  if (SendAppLinkToInstance(command_line)) {
+  std::vector<std::string> command_line_arguments = GetCommandLineArguments();
+  bool site_restart = false;
+  constexpr const char* restart_prefix = "--fluxdo-site-restart-parent=";
+  for (auto iterator = command_line_arguments.begin();
+       iterator != command_line_arguments.end();) {
+    if (iterator->rfind(restart_prefix, 0) != 0) {
+      ++iterator;
+      continue;
+    }
+    const char* value = iterator->c_str() + strlen(restart_prefix);
+    char* end = nullptr;
+    const auto handle_value = std::strtoull(value, &end, 10);
+    HANDLE parent = reinterpret_cast<HANDLE>(static_cast<uintptr_t>(handle_value));
+    if (handle_value == 0 || end == value || *end != '\0' ||
+        WaitForSingleObject(parent, INFINITE) != WAIT_OBJECT_0) {
+      MessageBoxW(nullptr, L"站点切换失败：无法等待旧进程退出。", L"cfluxdo", MB_OK | MB_ICONERROR);
+      return EXIT_FAILURE;
+    }
+    CloseHandle(parent);
+    site_restart = true;
+    iterator = command_line_arguments.erase(iterator);
+  }
+  if (!site_restart && SendAppLinkToInstance(command_line)) {
     return EXIT_SUCCESS;
   }
 
@@ -61,8 +86,6 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
 
   flutter::DartProject project(L"data");
 
-  std::vector<std::string> command_line_arguments =
-      GetCommandLineArguments();
 
   project.set_dart_entrypoint_arguments(std::move(command_line_arguments));
 
@@ -70,6 +93,8 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   Win32Window::Point origin(10, 10);
   Win32Window::Size size(1280, 720);
   if (!window.Create(L"cfluxdo", origin, size)) {
+    MessageBoxW(nullptr, L"应用初始化失败，无法创建 Flutter 窗口。请重新启动应用。",
+                L"cfluxdo", MB_OK | MB_ICONERROR);
     return EXIT_FAILURE;
   }
   window.SetQuitOnClose(true);

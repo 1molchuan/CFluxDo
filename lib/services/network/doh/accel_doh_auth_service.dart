@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../models/user.dart';
+import '../../site_context.dart';
 import '../../../pages/network_settings_page/widgets/cf_select_privacy_dialog.dart';
 import 'accel_doh_api.dart';
 import 'accel_doh_consent_dialog.dart';
@@ -188,6 +189,7 @@ class AccelDohAuthService extends ChangeNotifier {
     required String serverUrl,
     required List<String> bootstrapIps,
   }) {
+    if (!SiteContext.isLinuxDo) return;
     if (_prefs != null) return;
     _prefs = prefs;
     _defaultTransport = AccelDohApi.transport(
@@ -210,6 +212,7 @@ class AccelDohAuthService extends ChangeNotifier {
 
   /// 登录用户信息有变化时调用（DiscourseService.currentUserNotifier）
   void onUserChanged(User? user) {
+    if (!SiteContext.isLinuxDo) return;
     // 会话失效时也会变成 null，这里不动令牌；主动退出走 revoke()
     if (user == null) return;
     final previous = _user;
@@ -280,6 +283,7 @@ class AccelDohAuthService extends ChangeNotifier {
 
   /// 主动退出登录：作废令牌，清掉授权记录，改回 DNSPod
   Future<void> revoke() async {
+    if (!SiteContext.isLinuxDo) return;
     _boundToken?.invalidate();
     _user = null;
     _resetRetry();

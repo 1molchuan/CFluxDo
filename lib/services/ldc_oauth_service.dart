@@ -1,3 +1,4 @@
+import 'site_context.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:html/parser.dart' as html_parser;
@@ -27,6 +28,7 @@ class LdcOAuthService {
   void cancelPendingRequests() => _session.cancel();
 
   Future<String> getAuthUrl() async {
+    if (!SiteContext.isLinuxDo) throw UnsupportedError('仅 LINUX DO 支持 LDC 授权');
     final response = await _dio.get(
       '$baseUrl/api/v1/oauth/login',
       options: Options(extra: {'skipCsrf': true}),
@@ -35,6 +37,7 @@ class LdcOAuthService {
   }
 
   Future<void> callback(String code, String state) async {
+    if (!SiteContext.isLinuxDo) throw UnsupportedError('仅 LINUX DO 支持 LDC 授权');
     // X-Requested-With: XMLHttpRequest 是 credit.linux.do CSRF 校验的唯一依据,
     // 缺这个头服务端直接 403 "CSRF 验证失败"。
     // 实测最小集 = cookie + UA + content-type + X-Requested-With。
@@ -49,6 +52,7 @@ class LdcOAuthService {
   }
 
   Future<void> logout() async {
+    if (!SiteContext.isLinuxDo) return;
     cancelPendingRequests();
     await _dio.get(
       '$baseUrl/api/v1/oauth/logout',
@@ -60,6 +64,7 @@ class LdcOAuthService {
   Future<bool> reauthorize(BuildContext context) => authorize(context);
 
   Future<LdcUserInfo?> getUserInfo({String? expectedUsername}) async {
+    if (!SiteContext.isLinuxDo) return null;
     final data = await _session.getUserInfo(expectedUsername: expectedUsername);
     return LdcUserInfo.fromJson(data);
   }
@@ -71,6 +76,7 @@ class LdcOAuthService {
       : fallback;
 
   Future<bool> authorize(BuildContext context) async {
+    if (!SiteContext.isLinuxDo) return false;
     cancelPendingRequests();
     final String authUrl;
     try {

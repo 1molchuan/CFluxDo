@@ -10,6 +10,8 @@
   "appearance_colorAmber": "琥珀",
   "appearance_colorAutumn": "秋",
   "appearance_cardStyleGroup": "卡片樣式",
+  "appearance_showTopicCreationTime": "顯示發文時間",
+  "appearance_showTopicCreationTimeDesc": "在話題列表的最後回覆時間左側顯示發文日期，並依日期遠近區分顏色",
   "appearance_colorBlue": "藍色",
   "appearance_colorCyan": "湖藍",
   "appearance_colorDefault": "預設",

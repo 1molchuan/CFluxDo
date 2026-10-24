@@ -11,6 +11,7 @@ import '../../windows_webview_environment_service.dart';
 import 'cookie_logger.dart';
 import 'cookie_value_codec.dart';
 import 'strategy/platform_cookie_strategy.dart';
+import '../../site_context.dart';
 import '../../../utils/app_data_dir.dart';
 
 export 'cookie_value_codec.dart';
@@ -84,6 +85,16 @@ class CookieJarService {
 
   bool get isInitialized => _initialized;
 
+  /// 当前站点持久 Cookie 目录；无需先初始化 CookieJar。
+  /// linux.do 沿用原来的位置（Android 在 documents 下），升级不搬家；
+  /// 其他站点各自放在 `sites/<id>/.cookies`。
+  Future<String> get cookiesPath async {
+    final root = SiteContext.isLinuxDo
+        ? await getAppDataDirectory()
+        : await SiteContext.supportDirectory();
+    return path.join(root.path, '.cookies');
+  }
+
   /// 初始化 CookieJar（应用启动时调用）
   ///
   /// 可并发调用：启动批次与「jar 就绪前建出的 Dio」可能同时触发初始化，
@@ -97,9 +108,7 @@ class CookieJarService {
 
   Future<void> _initialize() async {
     try {
-      final directory = await getAppDataDirectory();
-      final cookiePath = path.join(directory.path, '.cookies');
-
+      final cookiePath = await cookiesPath;
       final cookieDir = io.Directory(cookiePath);
       if (!await cookieDir.exists()) {
         await cookieDir.create(recursive: true);
@@ -166,7 +175,9 @@ class CookieJarService {
             .where(
               (cookie) =>
                   cookie.name == name &&
-                  matchesAppHost(cookie.normalizedDomain ?? cookie.domain),
+                  (cookie.normalizedDomain == baseHost ||
+                      (cookie.normalizedDomain == null &&
+                          Uri.tryParse(cookie.originUrl ?? '')?.host == baseHost)),
             )
             .toList(growable: false);
         if (candidates.isEmpty) continue;
@@ -570,18 +581,17 @@ class CookieJarService {
     }
   }
 
-  /// 清除所有 Cookie（包括 WebView cookie store）
+  /// 仅清除当前论坛域 Cookie，保留其他站点与 OAuth 身份域。
   Future<void> clearAll() async {
     if (!_initialized) await initialize();
 
     try {
-      // 先扫描已知域名（必须在 deleteAll 之前，否则 jar 已空扫不到）
-      final baseHost = Uri.parse(AppConstants.baseUrl).host;
-      final knownHosts = await getKnownHostsForDomain(baseHost);
+      final baseUri = Uri.parse(AppConstants.baseUrl);
+      final knownHosts = <String>{baseUri.host};
 
-      await _cookieJar!.deleteAll();
+      await _cookieJar!.delete(baseUri, true);
 
-      // WebView cookie store 清理（平台策略处理差异）
+      // WebView 多域共存，不能调用全局 deleteAllCookies。
       await _strategy.clearWebViewCookies(webViewCookieManager, knownHosts);
       for (final name in authCookieNames) {
         await _deleteWebViewCookieVariants(name, knownHosts);
@@ -600,8 +610,7 @@ class CookieJarService {
     if (!_initialized) await initialize();
 
     try {
-      final baseHost = Uri.parse(AppConstants.baseUrl).host;
-      final hosts = await getKnownHostsForDomain(baseHost);
+      final hosts = <String>{Uri.parse(AppConstants.baseUrl).host};
       await _deleteWebViewCookieVariants(name, hosts);
     } catch (e) {
       debugPrint('[CookieJar] Failed to delete WebView cookie $name: $e');
@@ -892,6 +901,15 @@ class CookieJarService {
     return DateTime.fromMillisecondsSinceEpoch(normalizedMillis);
   }
 
+  /// 全域枚举得到的 Cookie 必须有真实域，且只能发往该域或其子域。
+  /// 不允许把无域或其他子域的 Cookie 伪装成目标站点 Cookie。
+  static bool cookieDomainMatchesHost(String? domain, String host) {
+    final normalized = normalizeWebViewCookieDomain(domain)?.toLowerCase();
+    if (normalized == null || normalized.isEmpty) return false;
+    final target = host.toLowerCase();
+    return target == normalized || target.endsWith('.$normalized');
+  }
+
   /// 是否是关键 cookie
   static bool isCriticalCookie(String name) =>
       criticalCookieNames.contains(name);
@@ -922,18 +940,17 @@ class CookieJarService {
         controller,
         currentUrl: currentUrl,
       );
-      String? fallback;
+      final requestHost = Uri.tryParse(currentUrl ?? AppConstants.baseUrl)?.host ?? appBaseHost;
       for (final raw in rawCookies) {
         final cookieName = raw['name']?.toString();
         final value = raw['value']?.toString() ?? '';
         final domain = raw['domain']?.toString();
         if (cookieName != name || value.isEmpty) continue;
-        if (matchesAppHost(domain)) {
+        if (cookieDomainMatchesHost(domain, requestHost)) {
           return value;
         }
-        fallback ??= value;
       }
-      return fallback;
+      return null;
     } catch (e) {
       debugPrint('[CookieJar][Windows] Failed to read live cookie $name: $e');
       return null;

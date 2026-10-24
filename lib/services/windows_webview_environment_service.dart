@@ -4,7 +4,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:path/path.dart' as path;
-import 'package:path_provider/path_provider.dart';
+import 'site_context.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'network/doh_proxy/cert_spki.dart';
 import 'network/doh_proxy/per_device_cert_service.dart';
@@ -167,7 +167,7 @@ class WindowsWebViewEnvironmentService {
         }
       }
       if (_userDataFolder == null) {
-        final supportDirectory = await getApplicationSupportDirectory();
+        final supportDirectory = await SiteContext.supportDirectory();
         _userDataFolder = path.join(supportDirectory.path, 'webview2');
         final userDataDirectory = Directory(_userDataFolder!);
         if (!await userDataDirectory.exists()) {

@@ -11,6 +11,7 @@ import 'log/log_writer.dart';
 import 'network/cf/cf_challenge_classifier.dart';
 import 'network/cookie/cookie_jar_service.dart';
 import 'preloaded_data_service.dart';
+import 'site_context.dart';
 import 'session/webview_use.dart';
 import 'webview_settings.dart';
 import 'windows_webview_environment_service.dart';
@@ -90,6 +91,10 @@ class WebViewSessionCookieRefreshService {
   /// 的失败,不该比成功路径(15min 免打扰)更频繁地烧 WebView。
   static const Duration _maxFailureCooldown = Duration(minutes: 15);
 
+
+  /// 轻量 fingerprint bootstrap 仅适配已确认的 LINUX DO 插件协议。
+  /// 其他论坛仍走标准完整网页登录与真实 Cookie 同步，不报告插件成功。
+  bool get supportsBootstrap => SiteContext.isLinuxDo;
   final CookieJarService _jar = CookieJarService();
 
   Future<SessionBootstrapResult>? _activeRefresh;
@@ -168,6 +173,9 @@ class WebViewSessionCookieRefreshService {
     String reason = 'unknown',
     bool force = false,
   }) async {
+    if (!supportsBootstrap) {
+      return const SessionBootstrapResult.failure(phase: 'not_applicable');
+    }
     final startedAt = DateTime.now();
     _logEnsureEvent(
       event: 'webview_session_sync_started',
@@ -511,6 +519,9 @@ class WebViewSessionCookieRefreshService {
     bool Function()? isCancelled,
     Future<void>? cancellationSignal,
   }) async {
+    if (!supportsBootstrap) {
+      return const SessionBootstrapResult.failure(phase: 'not_applicable');
+    }
     if (isCancelled?.call() == true) {
       return const SessionBootstrapResult.failure(phase: 'cancelled');
     }

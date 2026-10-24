@@ -16,6 +16,7 @@ import '../services/cf_challenge_service.dart';
 import '../services/render_backend_service.dart';
 import '../utils/blocked_user_filter.dart';
 import '../widgets/topic/topic_card_layout.dart';
+import '../widgets/topic/topic_creation_time.dart';
 import 'theme_provider.dart';
 
 /// 嵌套视图连接线样式
@@ -232,6 +233,9 @@ class AppPreferences {
   /// 帖子流末尾显示推荐话题（相关话题 / 建议话题），默认开启，对齐网页版
   final bool showSuggestedTopics;
 
+  /// 话题列表在最后回复时间左侧显示发帖时间。
+  final bool showTopicCreationTime;
+
   /// 默认使用树形视图
   final bool defaultNestedView;
 
@@ -346,6 +350,7 @@ class AppPreferences {
     this.adaptiveSignatureFrameRate = true,
     this.boostDanmaku = false,
     this.showSuggestedTopics = true,
+    this.showTopicCreationTime = true,
     this.defaultNestedView = false,
     this.nestedLineStyle = NestedLineStyle.auto,
     this.bookmarksOpenMode = BookmarksOpenMode.defaultRoute,
@@ -413,6 +418,7 @@ class AppPreferences {
     bool? adaptiveSignatureFrameRate,
     bool? boostDanmaku,
     bool? showSuggestedTopics,
+    bool? showTopicCreationTime,
     bool? defaultNestedView,
     NestedLineStyle? nestedLineStyle,
     BookmarksOpenMode? bookmarksOpenMode,
@@ -473,8 +479,7 @@ class AppPreferences {
       aiPostReviewModelKey: identical(aiPostReviewModelKey, _unset)
           ? this.aiPostReviewModelKey
           : aiPostReviewModelKey as String?,
-      aiTranslationEnabled:
-          aiTranslationEnabled ?? this.aiTranslationEnabled,
+      aiTranslationEnabled: aiTranslationEnabled ?? this.aiTranslationEnabled,
       aiTranslationTargetLanguage:
           identical(aiTranslationTargetLanguage, _unset)
           ? this.aiTranslationTargetLanguage
@@ -486,13 +491,17 @@ class AppPreferences {
           ? this.hcaptchaCreateEndpoint
           : hcaptchaCreateEndpoint as String?,
       dialogBlur: dialogBlur ?? this.dialogBlur,
-      cryptoRememberPassword: cryptoRememberPassword ?? this.cryptoRememberPassword,
-      cryptoRecentAlgorithms: cryptoRecentAlgorithms ?? this.cryptoRecentAlgorithms,
+      cryptoRememberPassword:
+          cryptoRememberPassword ?? this.cryptoRememberPassword,
+      cryptoRecentAlgorithms:
+          cryptoRecentAlgorithms ?? this.cryptoRecentAlgorithms,
       showSignatures: showSignatures ?? this.showSignatures,
       adaptiveSignatureFrameRate:
           adaptiveSignatureFrameRate ?? this.adaptiveSignatureFrameRate,
       boostDanmaku: boostDanmaku ?? this.boostDanmaku,
       showSuggestedTopics: showSuggestedTopics ?? this.showSuggestedTopics,
+      showTopicCreationTime:
+          showTopicCreationTime ?? this.showTopicCreationTime,
       defaultNestedView: defaultNestedView ?? this.defaultNestedView,
       nestedLineStyle: nestedLineStyle ?? this.nestedLineStyle,
       bookmarksOpenMode: bookmarksOpenMode ?? this.bookmarksOpenMode,
@@ -549,6 +558,7 @@ class PreferencesNotifier extends StateNotifier<AppPreferences> {
   static const String _topicFilterWholeWordKey = 'pref_topic_filter_whole_word';
   static const String _blockedUsernamesKey = 'pref_blocked_usernames';
   static const String _showFilterHintKey = 'pref_show_filter_hint';
+
   /// 渲染兼容模式的键**不带 `pref_` 前缀**：Android 原生侧在引擎创建前
   /// 直接读 `FlutterSharedPreferences` 文件里的 `flutter.renderer_gles`，
   /// 这是跨 Dart/native 的持久化契约。改这里必须同步
@@ -577,13 +587,17 @@ class PreferencesNotifier extends StateNotifier<AppPreferences> {
   static const String _hcaptchaCreateEndpointKey =
       'pref_hcaptcha_create_endpoint';
   static const String _dialogBlurKey = 'pref_dialog_blur';
-  static const String _cryptoRememberPasswordKey = 'pref_crypto_remember_password';
-  static const String _cryptoRecentAlgorithmsKey = 'pref_crypto_recent_algorithms';
+  static const String _cryptoRememberPasswordKey =
+      'pref_crypto_remember_password';
+  static const String _cryptoRecentAlgorithmsKey =
+      'pref_crypto_recent_algorithms';
   static const String _showSignaturesKey = 'pref_show_signatures';
   static const String _adaptiveSignatureFrameRateKey =
       'pref_adaptive_signature_frame_rate';
   static const String _boostDanmakuKey = 'pref_boost_danmaku';
   static const String _showSuggestedTopicsKey = 'pref_show_suggested_topics';
+  static const String _showTopicCreationTimeKey =
+      'pref_show_topic_creation_time';
   static const String _defaultNestedViewKey = 'pref_default_nested_view';
   static const String _nestedLineStyleKey = 'pref_nested_line_style';
   static const String _bookmarksOpenModeKey = 'pref_bookmarks_open_mode';
@@ -640,11 +654,9 @@ class PreferencesNotifier extends StateNotifier<AppPreferences> {
           blockedUsernames:
               _prefs.getStringList(_blockedUsernamesKey) ?? const [],
           showFilterHint: _prefs.getBool(_showFilterHintKey) ?? true,
-          renderGlesBackend:
-              _prefs.getBool(_renderGlesBackendKey) ?? false,
+          renderGlesBackend: _prefs.getBool(_renderGlesBackendKey) ?? false,
           portraitLock: _prefs.getBool(_portraitLockKey) ?? false,
-          fullscreenSwipeBack:
-              _prefs.getBool(_fullscreenSwipeBackKey) ?? false,
+          fullscreenSwipeBack: _prefs.getBool(_fullscreenSwipeBackKey) ?? false,
           exitOnSingleBack: _prefs.getBool(_exitOnSingleBackKey) ?? false,
           hideBarOnScroll: _prefs.getBool(_hideBarOnScrollKey) ?? true,
           autoLoadTopicUpdates:
@@ -667,15 +679,17 @@ class PreferencesNotifier extends StateNotifier<AppPreferences> {
           aiTranslationModelKey: _prefs.getString(_aiTranslationModelPrefKey),
           hcaptchaCreateEndpoint: _prefs.getString(_hcaptchaCreateEndpointKey),
           dialogBlur: _prefs.getBool(_dialogBlurKey) ?? true,
-          cryptoRememberPassword: _prefs.getBool(_cryptoRememberPasswordKey) ?? false,
+          cryptoRememberPassword:
+              _prefs.getBool(_cryptoRememberPasswordKey) ?? false,
           cryptoRecentAlgorithms:
               _prefs.getStringList(_cryptoRecentAlgorithmsKey) ?? const [],
           showSignatures: _prefs.getBool(_showSignaturesKey) ?? false,
           adaptiveSignatureFrameRate:
               _prefs.getBool(_adaptiveSignatureFrameRateKey) ?? true,
           boostDanmaku: _prefs.getBool(_boostDanmakuKey) ?? false,
-          showSuggestedTopics:
-              _prefs.getBool(_showSuggestedTopicsKey) ?? true,
+          showSuggestedTopics: _prefs.getBool(_showSuggestedTopicsKey) ?? true,
+          showTopicCreationTime:
+              _prefs.getBool(_showTopicCreationTimeKey) ?? true,
           defaultNestedView: _prefs.getBool(_defaultNestedViewKey) ?? false,
           nestedLineStyle: NestedLineStyle.fromString(
             _prefs.getString(_nestedLineStyleKey),
@@ -739,6 +753,7 @@ class PreferencesNotifier extends StateNotifier<AppPreferences> {
       ) {
     isPortraitLocked = state.portraitLock;
     TopicCardStyleScope.current = state.topicCardStyle;
+    TopicCreationTimeScope.enabled.value = state.showTopicCreationTime;
     CfChallengeService().autoVerifyEnabled = state.autoCfChallenge;
     // CF 服务在「切兼容」询问里给用户第二条出路(关掉自动过盾),但它拿不到
     // Riverpod 容器,也不该自己写 SharedPreferences —— 这里把持久化通道注入。
@@ -992,6 +1007,14 @@ class PreferencesNotifier extends StateNotifier<AppPreferences> {
     TopicCardStyleScope.current = style;
     TopicCardLayout.evictAll();
     await _prefs.setString(_topicCardStyleKey, style.toJsonString());
+  }
+
+  Future<void> setShowTopicCreationTime(bool enabled) async {
+    if (state.showTopicCreationTime == enabled) return;
+    state = state.copyWith(showTopicCreationTime: enabled);
+    TopicCreationTimeScope.enabled.value = enabled;
+    TopicCardLayout.evictAll();
+    await _prefs.setBool(_showTopicCreationTimeKey, enabled);
   }
 
   Future<void> setShowSignatures(bool enabled) async {

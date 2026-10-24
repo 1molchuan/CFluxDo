@@ -172,8 +172,7 @@ class _CacheManagementSectionState
 
     setState(() => _isClearing = true);
     try {
-      final prefs = ref.read(sharedPreferencesProvider);
-      await AiChatStorageService(prefs).deleteAllSessions();
+      await ref.read(aiChatStorageServiceProvider).deleteAllSessions();
       setState(() => _aiChatDataSize = 0);
       ToastService.showSuccess(S.current.dataManagement_aiChatCleared);
     } catch (e) {
