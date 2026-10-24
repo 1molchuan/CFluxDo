@@ -12,6 +12,9 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 WORK=${FLATPAK_WORK:-/srv/flatpak}
 WPE_LAYER_DIR=${WPE_LAYER_DIR:-$WORK/wpe-layer}
 FLUTTER_ROOT=${FLUTTER_ROOT:-$(dirname "$(dirname "$(readlink -f "$(command -v flutter)")")")}
+# SDK 若是 git worktree（如 /root/sdk/flutter-3.47），它的 .git 指向主仓库的 .git，
+# 沙箱里也要挂上，否则 flutter 读不到版本
+FLUTTER_GIT_DIR=$(cd "$FLUTTER_ROOT" && readlink -f "$(git rev-parse --git-common-dir)")
 PUB_CACHE=${PUB_CACHE:-$HOME/.pub-cache}
 CARGO_HOME=${CARGO_HOME:-$HOME/.cargo}
 RUSTUP_HOME=${RUSTUP_HOME:-$HOME/.rustup}
@@ -32,7 +35,8 @@ echo "==> 源码树 $(git -C "$ROOT" rev-parse --short HEAD) → $SRC（$BUILD_N
 # 2. 填清单占位符
 MANIFEST=$WORK/stage/com.github.molchuan.cfluxdo.yml
 sed -e "s#@WPE_LAYER_DIR@#$WPE_LAYER_DIR#g" -e "s#@SOURCE_TREE@#$SRC#g" \
-    -e "s#@FLUTTER_ROOT@#$FLUTTER_ROOT#g" -e "s#@PUB_CACHE@#$PUB_CACHE#g" \
+    -e "s#@FLUTTER_ROOT@#$FLUTTER_ROOT#g" -e "s#@FLUTTER_GIT_DIR@#$FLUTTER_GIT_DIR#g" \
+    -e "s#@PUB_CACHE@#$PUB_CACHE#g" \
     -e "s#@CARGO_HOME@#$CARGO_HOME#g" -e "s#@RUSTUP_HOME@#$RUSTUP_HOME#g" \
     -e "s#@BUILD_NAME@#$BUILD_NAME#g" -e "s#@BUILD_NUMBER@#$BUILD_NUMBER#g" \
     "$ROOT/flatpak/com.github.molchuan.cfluxdo.yml" > "$MANIFEST"

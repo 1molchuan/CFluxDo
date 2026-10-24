@@ -47,6 +47,7 @@ modules:
       build-args:
         - --share=network
         - --filesystem=@FLUTTER_ROOT@
+        - --filesystem=@FLUTTER_GIT_DIR@
         - --filesystem=@PUB_CACHE@
         - --filesystem=@CARGO_HOME@
         - --filesystem=@RUSTUP_HOME@
