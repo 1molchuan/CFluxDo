@@ -386,6 +386,8 @@ class DohProxyFfi {
   int Function(Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>, int, Pointer<Utf8>)?
   _dohProxyReportHostFailure;
   Pointer<Utf8> Function()? _dohProxyDnsCacheStats;
+  // 网络引擎计数（只读原子量，不阻塞），旧版本库没有
+  Pointer<Utf8> Function()? _dohProxyNetStats;
   Pointer<Utf8> Function()? _dohProxyDnsCacheRecords;
   Pointer<Utf8> Function()? _dohProxyGenerateCa;
   Pointer<Utf8> Function()? _dohProxyGetEmbeddedCaPem;
@@ -513,6 +515,16 @@ class DohProxyFfi {
             .asFunction();
       } catch (_) {
         _dohProxyDnsCacheStats = null;
+      }
+
+      try {
+        _dohProxyNetStats = _lib!
+            .lookup<NativeFunction<Pointer<Utf8> Function()>>(
+              'doh_proxy_net_stats',
+            )
+            .asFunction();
+      } catch (_) {
+        _dohProxyNetStats = null;
       }
 
       try {
@@ -793,6 +805,7 @@ class DohProxyFfi {
     List<String> extraCoveredHosts = const [],
     String? appVersion,
     String? networkSig,
+    List<String> preconnectHosts = const [],
   }) {
     if (!_initialized && !initialize()) {
       return -1;
@@ -863,6 +876,7 @@ class DohProxyFfi {
       if (extraCoveredHosts.isNotEmpty) 'extra_covered_hosts': extraCoveredHosts,
       if (appVersion != null && appVersion.isNotEmpty) 'app_version': appVersion,
       if (networkSig != null && networkSig.isNotEmpty) 'network_sig': networkSig,
+      if (preconnectHosts.isNotEmpty) 'preconnect_hosts': preconnectHosts,
     });
     final configPtr = configJson.toNativeUtf8();
     try {
@@ -1213,6 +1227,25 @@ class DohProxyFfi {
         calloc.free(bodyPtr);
       }
     }
+  }
+
+  /// 网络引擎计数（建连、握手、网关转发、解析等待，进程级累计）；库不支持返回 null。
+  /// 只读原子量、不阻塞，可以在主 isolate 直接调
+  Map<String, dynamic>? netStats() {
+    if (!_initialized && !initialize()) return null;
+    final fn = _dohProxyNetStats;
+    if (fn == null) return null;
+
+    final resultPtr = fn();
+    if (resultPtr == nullptr) return null;
+
+    final jsonStr = resultPtr.toDartString();
+    _dohProxyFreeString(resultPtr);
+
+    final decoded = jsonDecode(jsonStr);
+    if (decoded is! Map<String, dynamic> || decoded['ok'] != true) return null;
+    final stats = decoded['stats'];
+    return stats is Map<String, dynamic> ? stats : null;
   }
 
   DohDnsCacheStats? dnsCacheStats() {

@@ -94,6 +94,16 @@ class ConnectivityService {
     }
   }
 
+  /// 冷启动在起本地代理前先种下网络签名：Rust 的本地优选靠它判断持久化的赢家是不是
+  /// 同一个网络上验证的，对得上就直接钉住、首个请求不用等校验。
+  /// 拿不到结果或只有瞬态的 [none] 时不种，保持 null；已有签名（晚到的补种、[init] 后的事件）不覆盖
+  void seedInitialSignature(List<ConnectivityResult> results) {
+    if (networkSignature.value != null) return;
+    final sig = signatureOf(results);
+    if (sig.isEmpty) return;
+    networkSignature.value = sig;
+  }
+
   /// 初始化服务
   void init() {
     if (_initialized) return;

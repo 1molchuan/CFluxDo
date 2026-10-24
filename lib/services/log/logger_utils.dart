@@ -8,6 +8,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 import '../../constants.dart';
 import '../network/adapters/platform_adapter.dart';
 import '../network/doh/network_settings_service.dart';
+import '../network/doh_proxy/doh_proxy_service.dart';
 import '../network/health/network_health_controller.dart';
 import '../network/proxy/proxy_settings_service.dart';
 import '../../l10n/s.dart';
@@ -218,6 +219,12 @@ class LoggerUtils {
       );
     }
 
+    // 网络引擎计数（建连 / 握手 / 连接复用 / 等待），看连接效率
+    final netStats = DohProxyService.instance.netStats();
+    if (netStats != null) {
+      lines.add('引擎: ${netStatsSummary(netStats)}');
+    }
+
     // HTTP 代理
     final proxy = ProxySettingsService.instance.current;
     if (proxy.isValid) {
@@ -227,6 +234,25 @@ class LoggerUtils {
     }
 
     return lines;
+  }
+
+  /// 网络引擎计数的一行摘要：建连成功/失败、握手（会话恢复）、赛跑白做的握手、
+  /// h2 新建/复用、h1、502、等赢家最长、回环入站
+  @visibleForTesting
+  static String netStatsSummary(Map<String, dynamic> stats) {
+    int count(String key) => (stats[key] as num?)?.toInt() ?? 0;
+    int timerMax(String key) =>
+        ((stats[key] as Map?)?['max_ms'] as num?)?.toInt() ?? 0;
+    final handshakes =
+        count('tls_full') + count('tls_hrr') + count('tls_resumed');
+    final wasted = count('race_handshake_ok') - count('race_won');
+    return '建连 ${count('connect_ok')}/${count('connect_fail')}败 '
+        '握手 $handshakes(恢复 ${count('tls_resumed')}) '
+        '赛跑白做 $wasted '
+        'h2 新${count('gw_h2_new')}/复用${count('gw_h2_reuse')} '
+        'h1 ${count('gw_h1_new')} 502 ${count('gw_502')} '
+        '等pin≤${timerMax('pin_wait')}ms '
+        '回环 ${count('loopback_accepts')}';
   }
 
   /// 获取网络配置的 Map（用于分享日志头）
@@ -252,6 +278,11 @@ class LoggerUtils {
     final publicDoh = select?.activePublicDoh ?? const [];
     if (publicDoh.isNotEmpty) {
       map['cfSelectPublicDoh'] = [for (final stat in publicDoh) stat.toJson()];
+    }
+
+    final netStats = DohProxyService.instance.netStats();
+    if (netStats != null) {
+      map['netStats'] = netStats;
     }
 
     final proxy = ProxySettingsService.instance.current;

@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:catcher_2/catcher_2.dart';
 import 'package:chinese_font_library/chinese_font_library.dart';
+import 'package:connectivity_plus/connectivity_plus.dart' show ConnectivityResult;
 import 'package:flutter/cupertino.dart' show CupertinoPageTransitionsBuilder;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -52,12 +53,12 @@ import 'services/network/proxy/proxy_settings_service.dart';
 import 'services/network/rhttp/rhttp_settings_service.dart';
 import 'services/network/webview/webview_adapter_settings_service.dart';
 import 'services/eruda_settings_service.dart';
-import 'package:rhttp/rhttp.dart' as rhttp;
 import 'services/network/vpn_auto_toggle_service.dart';
 import 'services/network/doh_proxy/proxy_certificate.dart';
 import 'services/cf_challenge_logger.dart';
 import 'services/browser_trust_coordinator.dart';
 import 'services/startup/app_startup.dart';
+import 'services/startup/startup_timeline.dart';
 import 'services/update_service.dart';
 import 'services/update_checker_helper.dart';
 import 'package:fluxdo_render/fluxdo_render.dart'
@@ -100,6 +101,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:ai_model_manager/ai_model_manager.dart';
 import 'services/app_logger.dart';
 import 'services/network/adapters/platform_adapter.dart';
+import 'services/network/adapters/rhttp_adapter.dart' show RhttpRuntime;
 import 'providers/preferences_provider.dart';
 import 'providers/theme_provider.dart';
 import 'package:dynamic_color/dynamic_color.dart';
@@ -123,12 +125,6 @@ import 'providers/shortcut_provider.dart';
 import 'widgets/keyboard_shortcut_handler.dart';
 import 'utils/platform_utils.dart';
 import 'utils/discourse_url_parser.dart';
-
-/// 初始化 rhttp Rust runtime
-Future<bool> _initRhttp() async {
-  await rhttp.Rhttp.init();
-  return true;
-}
 
 /// 应用 Android 屏幕刷新率偏好。
 /// 偏好值 0 表示跟随系统（auto），非 0 则按目标刷新率从 supported 中选最匹配的 mode。
@@ -195,6 +191,7 @@ void _showLinuxWebViewCrashDialog() {
 }
 
 Future<void> main(List<String> args) async {
+  StartupTimeline.start();
   DeepLinkService.instance.launchArgs = args;
 
   // 自定义 binding:接管标准图片解码入口,全局限制解码并发(= 限制
@@ -294,6 +291,9 @@ Future<void> main(List<String> args) async {
     onWebProcessCrashed: _showLinuxWebViewCrashDialog,
   );
 
+  // 网络签名要在起本地代理前拿到（与阶段 1 并行）：本地优选凭它决定持久化的赢家能否直接用
+  final startupConnectivityCheck = ConnectivityService.safeCheckConnectivity();
+
   // 阶段 1：并行执行所有不相互依赖的初始化
   final futures = <Future<dynamic>>[
     SharedPreferences.getInstance(),
@@ -312,6 +312,7 @@ Future<void> main(List<String> args) async {
     WebViewSettings.preloadPolyfill(),
   ];
   final results = await Future.wait(futures);
+  StartupTimeline.mark('stores');
   final prefs = results[0] as SharedPreferences;
   // 启动序列阶段 1→2：存储（含 jar）已就绪，接上 _t 的服务端探测 / 自愈 /
   // 认证回调。之后无论谁先构造 DiscourseService，priming 的对账都有探测可用
@@ -347,18 +348,10 @@ Future<void> main(List<String> args) async {
   await WebViewAdapterSettingsService.instance.initialize(prefs);
   // Eruda 调试控制台开关 (默认关)
   await ErudaSettingsService.instance.initialize(prefs);
-  try {
-    final rhttp = await Future.any([
-      _initRhttp(),
-      Future.delayed(const Duration(seconds: 5), () => false),
-    ]);
-    if (rhttp != true) {
-      debugPrint('[rhttp] 初始化超时或失败');
-      await RhttpSettingsService.instance.forceDisable();
-    }
-  } catch (e) {
-    debugPrint('[rhttp] 初始化异常: $e');
-    await RhttpSettingsService.instance.forceDisable();
+  StartupTimeline.mark('settings');
+  // rhttp 默认关闭：关着就不在冷启动里初始化它的 Rust 运行时，首次用到时再初始化
+  if (RhttpSettingsService.instance.current.enabled) {
+    await RhttpRuntime.ensureInitialized();
   }
 
   // Windows 固定系统代理必须先于本地 DoH/WebView 网关读取，网关才能按
@@ -366,7 +359,33 @@ Future<void> main(List<String> args) async {
   if (Platform.isWindows) {
     SystemProxyService.instance.start();
   }
+  StartupTimeline.mark('rhttp');
+  // 一般早就出结果了；还没出来最多再等 300 ms，晚到的结果照样补种（网络设置在监听签名，
+  // 会转告 Rust）。不能等 ConnectivityService.init()：它在首页挂载后才跑，预加载卡住时永远等不到
+  final startupConnectivity = await startupConnectivityCheck.timeout(
+    const Duration(milliseconds: 300),
+    onTimeout: () => const <ConnectivityResult>[],
+  );
+  ConnectivityService().seedInitialSignature(startupConnectivity);
+  if (startupConnectivity.isEmpty) {
+    unawaited(
+      startupConnectivityCheck.then(ConnectivityService().seedInitialSignature),
+    );
+  }
+  // VPN 自动切换在起代理之前决定：要压制就直接改偏好，免得先起代理再关掉
+  // （关掉那一下还要走设置页的 Loading 节奏，压在冷启动路径上）
+  VpnAutoToggleService.instance.initialize(prefs);
+  try {
+    // 起代理前那次检查有结果就直接用，超时了就等它出结果
+    final initialConnectivity = startupConnectivity.isNotEmpty
+        ? startupConnectivity
+        : await startupConnectivityCheck;
+    await VpnAutoToggleService.instance.syncInitialState(initialConnectivity);
+  } catch (e) {
+    debugPrint('[Main] 初始 VPN 状态同步失败: $e');
+  }
   await NetworkSettingsService.instance.initialize(prefs);
+  StartupTimeline.mark('proxy');
   // WindowsWebViewEnvironmentService 必须等 NetworkSettingsService 把本次
   // 会话真正要用的代理端口定下来之后再创建 Environment。之前放在最早那批
   // 并行初始化里,等的是"猜的"8s 超时——NetworkSettingsService 前面还排
@@ -378,14 +397,7 @@ Future<void> main(List<String> args) async {
   if (Platform.isWindows) {
     await WindowsWebViewEnvironmentService.instance.initialize();
   }
-  VpnAutoToggleService.instance.initialize(prefs);
-  try {
-    final initialConnectivity =
-        await ConnectivityService.safeCheckConnectivity();
-    await VpnAutoToggleService.instance.syncInitialState(initialConnectivity);
-  } catch (e) {
-    debugPrint('[Main] 初始 VPN 状态同步失败: $e');
-  }
+  StartupTimeline.mark('network');
 
   // 启动序列阶段 3→6：priming → 预加载（与 runApp 并行，PreheatGate 复用这个
   // 进行中的预加载）→ 会话判定 → 登录后启动项，全部在后台进行。
@@ -429,6 +441,12 @@ Future<void> main(List<String> args) async {
     'event': 'app_start',
     'message': '应用启动',
   });
+
+  unawaited(
+    WidgetsBinding.instance.waitUntilFirstFrameRasterized.then(
+      (_) => StartupTimeline.mark('first_frame'),
+    ),
+  );
 
   // 启动后台维护:迁移 trash 目录清扫(v7/v8 rename 出来的待删区)+
   // blob 缓存过期扫描(24h 节流)。都在首帧渲染完 + 60s 空闲后跑,

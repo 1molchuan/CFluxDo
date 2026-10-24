@@ -280,10 +280,18 @@ class VpnAutoToggleService {
       final dohService = NetworkSettingsService.instance;
       final proxyService = ProxySettingsService.instance;
 
-      // 检查 DOH 是否开启，开启则压制
-      if (dohService.notifier.value.dohEnabled) {
+      // 检查 DOH 是否开启，开启则压制。冷启动时网络设置还没初始化（还没起代理）：
+      // 直接改偏好，初始化时就按关着来，不用先起代理再关掉
+      final dohEnabled = dohService.isInitialized
+          ? dohService.notifier.value.dohEnabled
+          : NetworkSettingsService.storedDohEnabled(_prefs);
+      if (dohEnabled) {
         await _prefs.setBool(_keySuppressedDoh, true);
-        await dohService.setDohEnabled(false);
+        if (dohService.isInitialized) {
+          await dohService.setDohEnabled(false);
+        } else {
+          await NetworkSettingsService.storeDohEnabled(_prefs, false);
+        }
         debugPrint('[VpnAutoToggle] 压制 DOH');
       }
 
@@ -305,10 +313,15 @@ class VpnAutoToggleService {
     _isSuppressing = true;
 
     try {
-      // 恢复 DOH
+      // 恢复 DOH（冷启动时网络设置还没初始化：直接改偏好）
       if (isDohSuppressed) {
         await _prefs.remove(_keySuppressedDoh);
-        await NetworkSettingsService.instance.setDohEnabled(true);
+        final dohService = NetworkSettingsService.instance;
+        if (dohService.isInitialized) {
+          await dohService.setDohEnabled(true);
+        } else {
+          await NetworkSettingsService.storeDohEnabled(_prefs, true);
+        }
         debugPrint('[VpnAutoToggle] 恢复 DOH');
       }
 

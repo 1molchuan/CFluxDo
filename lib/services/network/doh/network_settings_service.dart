@@ -271,6 +271,7 @@ class NetworkSettingsService {
   static const selectNoticeVersionKey = 'doh_select_notice_version';
 
   /// atlas（CF 橙云入口）的路由表接口，只回源 hk2，表按线路选池
+  static const _linuxDoHost = 'linux.do';
   static const _atlasHost = 'atlas.1molchuan.top';
   static const accelAtlasRoutesUrl = 'https://$_atlasHost/v1/routes';
 
@@ -466,6 +467,17 @@ class NetworkSettingsService {
 
   String get _defaultServerUrl => _builtInServers.first.url;
 
+  /// 是否已初始化（读过偏好、起过代理）
+  bool get isInitialized => _prefs != null;
+
+  /// 初始化之前读「DoH 开关」偏好：VPN 自动切换要在起代理前决定是否压制
+  static bool storedDohEnabled(SharedPreferences prefs) =>
+      prefs.getBool(_dohEnabledKey) ?? true;
+
+  /// 初始化之前写「DoH 开关」偏好（初始化时按它起不起代理）
+  static Future<void> storeDohEnabled(SharedPreferences prefs, bool enabled) =>
+      prefs.setBool(_dohEnabledKey, enabled);
+
   Future<void> initialize(SharedPreferences prefs) async {
     if (_prefs != null) return;
     _prefs = prefs;
@@ -525,8 +537,7 @@ class NetworkSettingsService {
     ConnectivityService().networkSignature.addListener(
       _handleNetworkSignatureChanged,
     );
-    await _applyProxyState();
-    await refreshDnsCacheStats();
+    await _applyProxyState(startup: true);
     _touch();
   }
 
@@ -786,7 +797,9 @@ class NetworkSettingsService {
     }
   }
 
-  Future<void> _applyProxyState() async {
+  /// [startup] 为冷启动：没有界面在等 Loading，跳过给 UI 留的一帧和最短 400 ms，
+  /// DNS 缓存统计也不等（冷启动这里排在首个请求之前）
+  Future<void> _applyProxyState({bool startup = false}) async {
     final startedAt = DateTime.now();
     _syncAccelPolling();
     _applyDepth++;
@@ -796,7 +809,9 @@ class NetworkSettingsService {
         isApplying.value = true;
       }
       // 给 UI 一帧时间渲染 Loading
-      await Future<void>.delayed(const Duration(milliseconds: 16));
+      if (!startup) {
+        await Future<void>.delayed(const Duration(milliseconds: 16));
+      }
     }
     if (!shouldRunLocalProxy) {
       try {
@@ -813,11 +828,15 @@ class NetworkSettingsService {
         if (_applyDepth == 0) {
           final elapsed = DateTime.now().difference(startedAt);
           const minDuration = Duration(milliseconds: 400);
-          if (elapsed < minDuration) {
+          if (!startup && elapsed < minDuration) {
             await Future<void>.delayed(minDuration - elapsed);
           }
           isApplying.value = false;
-          await refreshDnsCacheStats();
+          if (startup) {
+            unawaited(refreshDnsCacheStats());
+          } else {
+            await refreshDnsCacheStats();
+          }
         }
       }
       return;
@@ -956,6 +975,8 @@ class NetworkSettingsService {
         extraCoveredHosts: const [_atlasHost, cfhubHost],
         appVersion: _appVersion,
         networkSig: ConnectivityService().networkSignature.value,
+        // 优选出结果后先预建一条到 linux.do 的上游连接，首个请求不用再等握手
+        preconnectHosts: const [_linuxDoHost],
       );
 
       if (!success) {
@@ -1003,11 +1024,15 @@ class NetworkSettingsService {
       if (_applyDepth == 0) {
         final elapsed = DateTime.now().difference(startedAt);
         const minDuration = Duration(milliseconds: 400);
-        if (elapsed < minDuration) {
+        if (!startup && elapsed < minDuration) {
           await Future<void>.delayed(minDuration - elapsed);
         }
         isApplying.value = false;
-        await refreshDnsCacheStats();
+        if (startup) {
+          unawaited(refreshDnsCacheStats());
+        } else {
+          await refreshDnsCacheStats();
+        }
         unawaited(refreshSelectStatus());
         _touch();
       }
@@ -1245,9 +1270,12 @@ class NetworkSettingsService {
         // 服务器地址变了时，下次解析会按签名自动清掉旧缓存
         _scheduleApplyProxyState();
       }
+      _touch();
+      return;
     }
-    // 只是提示文字变了也要刷新设置页
-    _touch();
+    // 只是提示文字变了（回前台时的令牌检查都会走到这里）：只刷新设置页，不动版本号——
+    // 版本号一变 Dart 侧会重建 HTTP 客户端、丢掉所有连接
+    notifier.value = notifier.value.copyWith();
   }
 
   /// 正在用加速服务器（专属或公共）时，定时问 Rust 代理：令牌有没有被拒、有没有新拉到路由表 / 节点列表
