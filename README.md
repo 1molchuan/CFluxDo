@@ -1,20 +1,22 @@
 # cfluxdo
 
-> 面向国内网络环境的 [Linux.do](https://linux.do/) 第三方 Android 客户端，基于 [FluxDO](https://github.com/Lingyan000/fluxdo) 独立发行
+> 面向国内网络环境的 [Linux.do](https://linux.do/) 第三方 Android 客户端（另有 Windows / Linux 桌面预览版），基于 [FluxDO](https://github.com/Lingyan000/fluxdo) 独立发行
 
 [![GitHub Release](https://img.shields.io/github/v/release/1molchuan/fluxdo?style=for-the-badge&logo=github&label=GitHub%20Releases)](https://github.com/1molchuan/fluxdo/releases)
-[![Platform](https://img.shields.io/badge/platform-Android%20arm64%20%7C%20armv7-3DDC84?style=for-the-badge&logo=android&logoColor=white)](https://github.com/1molchuan/fluxdo/releases)
+[![Platform](https://img.shields.io/badge/platform-Android%20arm64%20%7C%20armv7%20%7C%20Windows%20%7C%20Linux-3DDC84?style=for-the-badge&logo=android&logoColor=white)](https://github.com/1molchuan/fluxdo/releases)
 [![License](https://img.shields.io/badge/license-GPL--3.0-blue?style=for-the-badge)](LICENSE)
 
-cfluxdo 源自 FluxDO 0.2.28，已脱离 fork 关系独立维护。它保留了 FluxDO 的全部论坛功能与界面，重点解决国内网络下访问 linux.do 时遇到的 DNS 污染、频繁弹 Cloudflare 验证、无征兆掉登录等问题，并且只做 Android。
+cfluxdo 源自 FluxDO 0.2.28，已脱离 fork 关系独立维护，并持续同步上游（目前到 v0.2.29）。它保留了 FluxDO 的全部论坛功能，重点解决国内网络下访问 linux.do 时遇到的 DNS 污染、频繁弹 Cloudflare 验证、无征兆掉登录等问题。以 Android 为主，Windows、Linux 桌面端为预览版。
 
 ## 下载安装
 
-- 到 [Releases](https://github.com/1molchuan/fluxdo/releases) 下载对应架构的安装包，旁边有同名的 `.sha256` 校验文件：
+- 到 [Releases](https://github.com/1molchuan/fluxdo/releases) 下载对应平台和架构的安装包，旁边有同名的 `.sha256` 校验文件：
   - `cfluxdo-<版本>-arm64-v8a.apk`：64 位 ARM，2015 年以后的手机几乎都是，优先选这个。
   - `cfluxdo-<版本>-armeabi-v7a.apk`：32 位 ARM，只给装不上 arm64 包（报 `INSTALL_FAILED_NO_MATCHING_ABIS`）的老机器。
+  - `cfluxdo-<版本>-windows-x86_64.zip`：Windows 10/11 64 位桌面预览版，解压后运行 `cfluxdo.exe`，需要 WebView2 运行时（Windows 11 自带）。没有代码签名，第一次运行如果出现「Windows 已保护你的电脑」，点「更多信息 → 仍要运行」。
+  - `cfluxdo-<版本>-linux-x86_64.flatpak`：Linux 桌面预览版，`flatpak install --user <文件名>` 安装，第一次会从 Flathub 下载 GNOME 运行时。
 - 包名是 `com.github.molchuan.cfluxdo`，与官方 FluxDO 不同：两者可以并存，但不能互相覆盖安装，登录态和设置也互不相通。
-- 应用内「关于 → 检查更新」会从本仓库的 Releases 获取新版本，并按手机架构挑选安装包。
+- 应用内「关于 → 检查更新」会从本仓库的 Releases 获取正式版：Android 按手机架构挑选安装包在应用内下载；桌面版只提示并打开下载页面。
 
 ## 它怎么连接 linux.do
 
@@ -31,7 +33,8 @@ cfluxdo 源自 FluxDO 0.2.28，已脱离 fork 关系独立维护。它保留了 
 
 - **连接方式**：上面的本地优选替代了对加速服务端的依赖；原有的 DoH 加速线路降为兜底。
 - **弹盾与掉登录**：针对 Cloudflare 验证页、`cf_clearance` 与登录 Cookie `_t` 的轮换做了一系列修复，详见各版本的 Release 说明。
-- **仅 Android**：移除了 iOS、桌面、Web 的平台代码，以及 Cronet 网络引擎和 Firebase 崩溃上报。崩溃排查依靠应用内的日志导出。
+- **界面**：默认「墨笺」阅读风格（纸色底、宋体标题、细线分隔）；原来的界面保留为「经典」，在「我的 → 应用设置 → 外观 → 界面风格」切换。
+- **平台**：以 Android 为主；Windows、Linux 桌面端为预览版，和 Android 共用同一套连接层，视频楼层播放等功能还不完整。移除了 iOS、macOS、Web 的平台代码，以及 Cronet 网络引擎和 Firebase 崩溃上报，崩溃排查依靠应用内的日志导出。
 - **上游补丁**：挑选上游尚未合并的 PR 一并接入，保留原作者署名。
 
 ## 隐私
@@ -45,7 +48,7 @@ cfluxdo 源自 FluxDO 0.2.28，已脱离 fork 关系独立维护。它保留了 
 
 前置要求：
 
-- Flutter 3.44（Dart SDK ^3.10.4）、Android SDK、NDK 27.3
+- Flutter 3.47（Dart SDK ^3.13）、Android SDK、NDK 27.3
 - Rust 工具链、`cargo-ndk`，以及 `aarch64-linux-android`、`armv7-linux-androideabi` 两个 target，用于编译 `core/doh_proxy`
 - `just`（可选，仅作为本地命令入口）
 
@@ -55,19 +58,21 @@ cd fluxdo
 dart run melos bootstrap                 # 初始化 workspace
 dart run tool/project_prep.dart app      # pub get、l10n 生成、代理证书同步，等价于 just sync
 dart tool/flutterw.dart build apk --release --target-platform android-arm64 \
-  --build-name 1.1.0 --build-number 2026101505
+  --build-name 1.2.1 --build-number 2026102408
 dart tool/flutterw.dart build apk --release --target-platform android-arm \
-  --build-name 1.1.0 --build-number 2026101505
+  --build-name 1.2.1 --build-number 2026102408
 ```
 
 `flutterw` 会在构建前用 `cargo ndk` 编译对应架构的 Rust 库并放进 `android/app/src/main/jniLibs/`。两个架构各出一个 APK，不出合并包。
+
+桌面预览版：Linux 用 `tool/flatpak_build.sh <输出.flatpak>` 打 Flatpak 包（设计说明见 [docs/desktop/linux-design.md](docs/desktop/linux-design.md)）；Windows 在 Windows 上用 `dart tool/flutterw.dart build windows --release` 构建，开发虚拟机脚本在 `tool/windows_vm/`。
 
 版本号约定：`--build-name` 是用户可见的版本号，`--build-number` 用「日期 + 两位序号」且只增不减。Git tag 与版本号一致，不带 `v` 前缀。预发布版本带 `-beta` 一类后缀，GitHub Release 标为 Pre-release；App 内的更新检查只看正式版（Latest），不会推送预发布版本。
 
 子模块：
 
 - `core/doh_proxy`：Rust 实现的本地优选、ECH、DoH 代理与本地网关，来自 [1molchuan/fluxdo_doh](https://github.com/1molchuan/fluxdo_doh) 的 `cfluxdo` 分支。`cargo run --example race --features ech` 可以在电脑上跑一轮竞速看结果。
-- `packages/fluxdo_render`：上游的渲染包
+- `packages/fluxdo_render`：帖子渲染包，来自 [1molchuan/fluxdo_render](https://github.com/1molchuan/fluxdo_render) 的 `cfluxdo` 分支（上游渲染包的 fork）
 
 更多开发细节见 [docs/development.md](docs/development.md)。部分文档仍是上游多平台时期的内容，正在整理。
 
