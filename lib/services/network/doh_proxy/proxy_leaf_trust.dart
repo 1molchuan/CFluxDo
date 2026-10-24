@@ -26,8 +26,11 @@ class ProxyLeafTrust {
 
   static const _channel = MethodChannel('cfluxdo/wpe_tls');
 
-  /// 必须经 ECH 的主机（后缀匹配），传给代理作为 MITM 范围
-  static const mitmHosts = ['linux.do', 'idcflare.com'];
+  /// 必须经 ECH 的主机（后缀匹配），传给代理作为 MITM 范围。
+  /// ldstatic.com 是 linux.do 的静态资源域（cdn / cdn3 图片与表情、ping 消息总线、
+  /// linuxdo-uploads.s3 直传）：高墙地区对它的明文 SNI 同样是 RST，只做隧道
+  /// 的话图片、通知、上传全挂，所以和主站一样由代理终结 TLS、经 ECH 上游
+  static const mitmHosts = ['linux.do', 'idcflare.com', 'ldstatic.com'];
 
   /// 代理启动后预先放行的主机：linux.do 主站与 App 里出现过的子域
   static const _preallowHosts = [
@@ -43,7 +46,14 @@ class ProxyLeafTrust {
     'linuxdo-uploads.s3.linux.do',
     'idcflare.com',
     'www.idcflare.com',
+    'cdn.ldstatic.com',
+    'cdn3.ldstatic.com',
+    'ping.ldstatic.com',
+    'linuxdo-uploads.s3.ldstatic.com',
   ];
+
+  @visibleForTesting
+  static List<String> get preallowHosts => _preallowHosts;
 
   /// 证书出错时按「是否代理签发的那张叶子」裁定（Linux / Windows）
   static bool get isApplicable => Platform.isLinux || Platform.isWindows;

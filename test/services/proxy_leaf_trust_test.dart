@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:fluxdo/services/network/doh_proxy/proxy_leaf_trust.dart';
 
 void main() {
+  _hostLists();
   group('ProxyLeafTrust.pemToDer', () {
     test('去掉 PEM 头尾与换行后按 base64 解码', () {
       final der = List<int>.generate(300, (i) => i % 256);
@@ -23,6 +24,29 @@ void main() {
           '-----BEGIN CERTIFICATE-----\n@@@\n-----END CERTIFICATE-----',
         ),
         isNull,
+      );
+    });
+  });
+}
+
+void _hostLists() {
+  group('ProxyLeafTrust 主机范围', () {
+    test('MITM 范围含两个论坛主域与 linux.do 的静态资源域 ldstatic.com', () {
+      expect(
+        ProxyLeafTrust.mitmHosts,
+        containsAll(['linux.do', 'idcflare.com', 'ldstatic.com']),
+      );
+    });
+
+    test('预放行列表含 ldstatic 的图片、消息总线与直传主机', () {
+      expect(
+        ProxyLeafTrust.preallowHosts,
+        containsAll([
+          'cdn.ldstatic.com',
+          'cdn3.ldstatic.com',
+          'ping.ldstatic.com',
+          'linuxdo-uploads.s3.ldstatic.com',
+        ]),
       );
     });
   });

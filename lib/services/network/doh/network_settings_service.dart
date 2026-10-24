@@ -274,6 +274,9 @@ class NetworkSettingsService {
 
   /// atlas（CF 橙云入口）的路由表接口，只回源 hk2，表按线路选池
   static const _atlasHost = 'atlas.1molchuan.top';
+
+  /// linux.do 的静态资源域（cdn / cdn3 / ping / linuxdo-uploads.s3 都在它下面）
+  static const _ldstaticHost = 'ldstatic.com';
   static const accelAtlasRoutesUrl = 'https://$_atlasHost/v1/routes';
 
   /// cfhub：众包 ECH 测速分池，探针上报与探针令牌都在这里
@@ -980,6 +983,9 @@ class NetworkSettingsService {
           cfhubHost,
           for (final site in ForumSite.values)
             if (!site.isLinuxDo) site.host,
+          // linux.do 的静态资源域（图片 / 表情 / 消息总线 / 直传）：和主站同一个
+          // 赢家 + ECH，高墙地区的明文 SNI 会被 RST（福建实测图片全 502）
+          _ldstaticHost,
         ],
         appVersion: _appVersion,
         networkSig: ConnectivityService().networkSignature.value,
