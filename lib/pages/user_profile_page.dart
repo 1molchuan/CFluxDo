@@ -1863,7 +1863,7 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage>
         ),
       if (_user?.gamificationScore != null)
         _buildWideStat(
-          NumberUtils.formatCount(_user!.gamificationScore!),
+          NumberUtils.formatThousands(_user!.gamificationScore!),
           context.l10n.userCard_score,
           _user!.gamificationScore!,
         ),
@@ -2606,7 +2606,7 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage>
                       ),
                     if (_user?.gamificationScore != null)
                       _buildStatSlot(
-                        NumberUtils.formatCount(_user!.gamificationScore!),
+                        NumberUtils.formatThousands(_user!.gamificationScore!),
                         context.l10n.userCard_score,
                         _user!.gamificationScore!,
                       ),

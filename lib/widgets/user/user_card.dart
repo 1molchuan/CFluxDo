@@ -1013,8 +1013,9 @@ class _UserCardContentState extends ConsumerState<_UserCardContent> {
           NumberUtils.formatCount(user.totalFollowers!), bold: true));
     }
     if (user.gamificationScore != null) {
+      // 点数要看精确值（1,512 而不是 1.5k）
       items.add(_metaItem(theme, S.current.userCard_score,
-          NumberUtils.formatCount(user.gamificationScore!),
+          NumberUtils.formatThousands(user.gamificationScore!),
           bold: true, valueColor: theme.colorScheme.primary));
     }
 
