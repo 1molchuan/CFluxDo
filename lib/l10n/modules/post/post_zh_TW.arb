@@ -347,5 +347,8 @@
       }
     }
   },
-  "nested_restoreFailed": "暫時無法恢復此位置，請重試"
+  "nested_restoreFailed": "暫時無法恢復此位置，請重試",
+  "post_deviceSource": "來自 {device}",
+  "@post_deviceSource": {"placeholders": {"device": {"type": "String"}}},
+  "post_deviceSourceTitle": "貼文來源"
 }

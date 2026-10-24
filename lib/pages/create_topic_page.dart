@@ -1,16 +1,30 @@
+import 'package:fluxdo/widgets/markdown_editor/composer_submission_snapshot.dart';
+
+import '../widgets/markdown_editor/uploads/upload_task_labels.dart';
+
+import 'package:fluxdo/widgets/markdown_editor/composer_draft_status.dart';
+
+import '../widgets/markdown_editor/composer_chrome.dart';
+import '../utils/platform_utils.dart';
+
 import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:app_icons/app_icons.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../providers/draft_store_provider.dart';
+
 import 'package:fluxdo/widgets/common/error_view.dart';
 import 'package:fluxdo/widgets/common/progressive_top_blur.dart';
 import 'package:m3e_ui/m3e_ui.dart';
 import 'package:fluxdo/providers/preferences_provider.dart';
-import 'package:fluxdo/widgets/markdown_editor/composer_draft_status.dart';
 import 'package:fluxdo/widgets/markdown_editor/composer_shortcuts.dart';
 import 'package:fluxdo/widgets/markdown_editor/composer_switch_fade.dart';
+import 'package:fluxdo/widgets/markdown_editor/composer_workbench.dart';
+import 'package:fluxdo/widgets/markdown_editor/composer_page_chrome.dart';
+import 'package:fluxdo/widgets/markdown_editor/composer_header_actions.dart';
+import 'package:fluxdo/widgets/markdown_editor/composer_view_mode_switcher.dart';
 import 'package:fluxdo/widgets/markdown_editor/markdown_editor.dart';
 import 'package:fluxdo/widgets/markdown_editor/rich_composer/rich_composer_editor.dart';
 import 'package:fluxdo/models/category.dart';
@@ -18,7 +32,6 @@ import 'package:fluxdo/models/draft.dart';
 import 'package:fluxdo/models/shortcut_binding.dart';
 
 import 'package:fluxdo/providers/discourse_providers.dart';
-import 'package:fluxdo/providers/draft_store_provider.dart';
 import 'package:fluxdo/services/composer_min_length_resolver.dart';
 import 'package:fluxdo/widgets/common/character_counts_overlay.dart';
 import 'package:fluxdo/services/toast_service.dart';
@@ -34,13 +47,12 @@ import 'package:fluxdo/providers/shortcut_provider.dart';
 import 'package:fluxdo/widgets/topic/topic_editor_helpers.dart';
 import 'package:fluxdo/services/local_notification_service.dart'
     show navigatorKey;
+
 import '../constants.dart';
 import '../l10n/s.dart';
 import '../utils/dialog_utils.dart';
 import '../utils/discourse_url_parser.dart';
-import '../utils/platform_utils.dart';
 import 'pending_posts_page.dart';
-import '../theme/mojian_theme.dart';
 
 class CreateTopicPage extends ConsumerStatefulWidget {
   final int? initialCategoryId;
@@ -68,9 +80,42 @@ class CreateTopicPage extends ConsumerStatefulWidget {
 class _CreateTopicPageState extends ConsumerState<CreateTopicPage> {
   /// 富文本导入失败时本次会话降级纯文本
   bool _richFallback = false;
+  bool _allowClose = false;
+  bool _richModeEnabled = false;
+
+  void _closeWithCurrentContent(dynamic result) {
+    if (!_submitted && !_discarded && !_flushRichContent()) return;
+    setState(() => _allowClose = true);
+    // 等待 PopScope 更新许可；dispose 随后保存刚刚同步的草稿。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) Navigator.of(context).pop(result);
+    });
+  }
+
+  /// 富文本未就绪或导出失败时，绝不能消费 controller 中的旧镜像。
+  bool _flushRichContent() {
+    final rich = _richKey.currentState;
+    final ready = rich != null
+        ? rich.flushToController()
+        : (_showPreview ||
+              _richFallback ||
+              !ref.read(preferencesProvider).useRichComposer);
+    if (!ready) {
+      ToastService.showError('正文尚未同步，已停止操作；请稍后重试，勿关闭编辑器');
+    }
+    return ready;
+  }
+
   var _richKey = GlobalKey<RichComposerEditorState>();
 
   final _formKey = GlobalKey<FormState>();
+  final _chrome = ComposerChromeController();
+  double get _topChromeInset =>
+      ProgressiveTopBlur.heightFor(context) +
+      (PlatformUtils.isDesktop && MediaQuery.sizeOf(context).width < 900
+          ? 56
+          : 0);
+
   final _titleController = TextEditingController();
   final _contentController = TextEditingController();
   final _contentFocusNode = FocusNode();
@@ -105,7 +150,6 @@ class _CreateTopicPageState extends ConsumerState<CreateTopicPage> {
   bool _featuredLinkAutoPosted = false;
   String? _featuredLink;
 
-  final PageController _pageController = PageController();
   int _contentLength = 0;
 
   // 草稿控制器
@@ -115,7 +159,6 @@ class _CreateTopicPageState extends ConsumerState<CreateTopicPage> {
   bool _hasRestoredDraft = false;
   int? _draftCategoryId;
   ProviderSubscription<AsyncValue<List<Category>>>? _draftCategorySubscription;
-  AppLifecycleListener? _draftLifecycle;
 
   @override
   void initState() {
@@ -126,7 +169,6 @@ class _CreateTopicPageState extends ConsumerState<CreateTopicPage> {
     _draftController = DraftController(
       draftKey: widget.draftKey,
       localStore: ref.read(localDraftStoreProvider),
-      // 其他设备改了云端草稿、本机又没有未上传的修改时，直接换成云端内容
       onRemoteDraftChanged: (data) {
         if (mounted &&
             !_submitted &&
@@ -137,7 +179,7 @@ class _CreateTopicPageState extends ConsumerState<CreateTopicPage> {
       },
       currentEditorData: () {
         if (!mounted || (_isLoadingDraft && !_reloadingDraft)) return null;
-        _richKey.currentState?.flushToController();
+        if (!_flushRichContent()) return null;
         return _currentDraftData();
       },
     );
@@ -169,7 +211,6 @@ class _CreateTopicPageState extends ConsumerState<CreateTopicPage> {
     WidgetsBinding.instance.addPostFrameCallback((_) => _applyCurrentFilter());
     // 先按站点默认算一版下限，_applyCurrentFilter 选中分类后会再刷新
     _refreshMinContentLength();
-    // 切后台先存一版；回前台再核对其他设备有没有改过
     _draftLifecycle = AppLifecycleListener(
       onInactive: _flushDraftForLifecycle,
       onPause: _flushDraftForLifecycle,
@@ -208,7 +249,6 @@ class _CreateTopicPageState extends ConsumerState<CreateTopicPage> {
         // 弹出恢复草稿对话框
         final restore = await _showRestoreDraftDialog();
         if (restore == true && mounted) {
-          // 弹窗期间云端可能又有更新，取控制器手里最新的一份
           final latest = _draftController.currentDraft;
           if (latest != null) _restoreDraft(latest);
         } else if (restore == false && mounted) {
@@ -246,10 +286,9 @@ class _CreateTopicPageState extends ConsumerState<CreateTopicPage> {
     );
   }
 
-  /// 恢复草稿内容（整份替换：标题、正文、分类、标签都以草稿为准）
+  /// 恢复草稿内容
   void _restoreDraft(Draft draft) {
     _restoringDraft = true;
-    // 富文本编辑器换新文档：旧编辑器卸载时不能把旧正文写回来
     _richKey.currentState?.prepareForDocumentReplacement();
     _richKey = GlobalKey<RichComposerEditorState>();
     _editorKey = GlobalKey<MarkdownEditorState>();
@@ -261,14 +300,13 @@ class _CreateTopicPageState extends ConsumerState<CreateTopicPage> {
       _titleController.text = draft.data.title ?? '';
       _contentController.text = draft.data.reply ?? '';
       setState(() {
-        _templateContent = null; // 恢复草稿后清除模板标记
+        _templateContent = null;
         _selectedTags = List.of(draft.data.tags ?? const []);
         _selectedCategory = null;
         _draftCategoryId = draft.data.categoryId;
         _featuredLink = null;
         _featuredLinkAutoPosted = false;
       });
-      // 分类要等 categories 加载完才能落到 _selectedCategory
       if (_draftCategoryId != null) {
         _restoreCategoryFromDraft(_draftCategoryId!);
       }
@@ -304,13 +342,13 @@ class _CreateTopicPageState extends ConsumerState<CreateTopicPage> {
   DraftData _currentDraftData() => DraftData(
     title: _titleController.text,
     reply: _contentController.text,
-    // 草稿里的分类还没等到 categories 加载时，先原样带着
     categoryId: _selectedCategory?.id ?? _draftCategoryId,
     tags: _selectedTags.isNotEmpty ? _selectedTags : null,
     action: 'createTopic',
     archetypeId: 'regular',
   );
 
+  AppLifecycleListener? _draftLifecycle;
   void _flushDraftForLifecycle({bool refresh = false}) {
     if (!mounted ||
         _isSubmitting ||
@@ -319,7 +357,7 @@ class _CreateTopicPageState extends ConsumerState<CreateTopicPage> {
         _discarded) {
       return;
     }
-    _richKey.currentState?.flushToController();
+    if (!_flushRichContent()) return;
     if (refresh) {
       _draftController.scheduleSave(_currentDraftData());
       _draftController.retryPending();
@@ -328,7 +366,6 @@ class _CreateTopicPageState extends ConsumerState<CreateTopicPage> {
     }
   }
 
-  /// 冲突时选了「使用云端版本」
   Future<void> _reloadRemoteDraft() async {
     setState(() {
       _reloadingDraft = true;
@@ -349,13 +386,11 @@ class _CreateTopicPageState extends ConsumerState<CreateTopicPage> {
   }
 
   bool _retryingDraft = false;
-
-  /// 点草稿状态图标：失败/存本机时重试，冲突时让用户选版本
   Future<void> _retryDraftSave() async {
     if (_isSubmitting || _retryingDraft) return;
     _retryingDraft = true;
     try {
-      _richKey.currentState?.flushToController();
+      if (!_flushRichContent()) return;
       final force = _draftController.hasConflict;
       if (force &&
           !await confirmComposerDraftOverwrite(
@@ -393,7 +428,6 @@ class _CreateTopicPageState extends ConsumerState<CreateTopicPage> {
 
     if (confirm == true && mounted) {
       _discarded = true;
-      // 先停自动保存：编辑器里还留着旧正文，不能在删除排队时又被存回去
       _draftController.disable();
       await _draftController.deleteDraft();
       if (mounted) Navigator.of(context).pop();
@@ -401,7 +435,6 @@ class _CreateTopicPageState extends ConsumerState<CreateTopicPage> {
   }
 
   void _applyCurrentFilter() async {
-    // 草稿还在加载、或已恢复草稿时，分类标签以草稿为准
     if (_isLoadingDraft || _hasRestoredDraft) return;
     // 优先使用传入的分类，否则使用站点默认分类
     int? targetCategoryId = widget.initialCategoryId;
@@ -436,20 +469,32 @@ class _CreateTopicPageState extends ConsumerState<CreateTopicPage> {
 
   @override
   void dispose() {
+    final rich = _richKey.currentState;
+    final currentContentSafe = rich != null
+        ? rich.flushToController()
+        : (_allowClose || _showPreview || _richFallback || !_richModeEnabled);
     _draftCategorySubscription?.close();
     _draftLifecycle?.dispose();
+    _chrome.dispose();
     _shortcutSurfaceBinding.disposeDeferred();
     _featuredLinkDebounce?.cancel();
     // 移除草稿监听器
     _titleController.removeListener(_onTitleInputChanged);
     _contentController.removeListener(_onDraftContentChanged);
 
-    // 关闭时处理草稿：已提交则跳过，有内容则保存，无内容则删除。
-    // 草稿还没加载完就关页时，编辑器里的空内容不代表用户清空了草稿。
-    if (!_submitted && !_discarded && !_isLoadingDraft) {
+    // 关闭时处理草稿：已提交则跳过，有内容则保存，无内容则删除
+    if (currentContentSafe && !_submitted && !_discarded && !_isLoadingDraft) {
       if (_titleController.text.trim().isNotEmpty ||
           _contentController.text.trim().isNotEmpty) {
-        _draftController.saveNow(_currentDraftData());
+        final data = DraftData(
+          title: _titleController.text,
+          reply: _contentController.text,
+          categoryId: _selectedCategory?.id ?? _draftCategoryId,
+          tags: _selectedTags.isNotEmpty ? _selectedTags : null,
+          action: 'createTopic',
+          archetypeId: 'regular',
+        );
+        _draftController.saveNow(data);
       } else {
         // 内容为空，删除草稿
         _draftController.deleteDraft();
@@ -457,7 +502,6 @@ class _CreateTopicPageState extends ConsumerState<CreateTopicPage> {
     }
     _draftController.dispose();
 
-    _pageController.dispose();
     _contentController.removeListener(_updateContentLength);
     _titleController.dispose();
     _contentController.dispose();
@@ -654,9 +698,7 @@ class _CreateTopicPageState extends ConsumerState<CreateTopicPage> {
     if (!_featuredLinkEnabled) return;
 
     final candidate = DiscourseUrlParser.parseTitleUrl(_titleController.text);
-    if (candidate == null ||
-        _isSameSiteUrl(candidate) ||
-        !_bodyIsDefault()) {
+    if (candidate == null || _isSameSiteUrl(candidate) || !_bodyIsDefault()) {
       return;
     }
     // 推进 generation 使飞在路上的解析回调失效，避免它在提交途中改标题。
@@ -775,28 +817,104 @@ class _CreateTopicPageState extends ConsumerState<CreateTopicPage> {
     _onDraftContentChanged();
   }
 
-  void _togglePreview() {
-    if (_showPreview) {
-      _pageController.animateToPage(
-        0,
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.easeInOut,
-      );
-    } else {
-      _pageController.animateToPage(
-        1,
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.easeInOut,
-      );
-      FocusScope.of(context).unfocus();
+  /// 当前视图档位（富文本/源码/预览）。
+  ///
+  /// 预览独立覆盖，富/源由 _richFallback 与偏好共同决定。
+  ComposerViewMode get _viewMode {
+    if (_showPreview) return ComposerViewMode.preview;
+    final rich = ref.read(preferencesProvider).useRichComposer;
+    return (rich && !_richFallback)
+        ? ComposerViewMode.rich
+        : ComposerViewMode.source;
+  }
+
+  /// 可选档位：富文本开关未开时不给「富文本」这一档。
+  void _setViewMode(ComposerViewMode next) {
+    if (next == _viewMode) return;
+    if (next == ComposerViewMode.preview) {
+      _togglePreview();
+      return;
+    }
+    final hadFocus = _contentFocusNode.hasFocus;
+    if (!_flushRichContent()) return;
+    _editorKey.currentState?.closeEmojiPanel();
+    _richKey.currentState?.closeEmojiPanel();
+    _contentFocusNode.unfocus();
+    setState(() {
+      _showPreview = false;
+      _richFallback = next == ComposerViewMode.source;
+    });
+    if (hadFocus) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _contentFocusNode.requestFocus();
+      });
     }
   }
 
+  bool _previewHadFocus = false;
+
+  void _togglePreview() {
+    final leaving = _showPreview;
+    if (!leaving) {
+      _previewHadFocus = _contentFocusNode.hasFocus;
+      if (!_flushRichContent()) return;
+      _editorKey.currentState?.closeEmojiPanel();
+      _richKey.currentState?.closeEmojiPanel();
+      FocusScope.of(context).unfocus();
+    }
+    setState(() => _showPreview = !leaving);
+    if (leaving && _previewHadFocus) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _editorKey.currentState?.resumeEditing();
+        _richKey.currentState?.resumeEditing();
+      });
+    }
+  }
+
+  void _showQuickPanel() {
+    if (_showPreview) _togglePreview();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _editorKey.currentState?.showQuickPanel();
+      _richKey.currentState?.showQuickPanel();
+    });
+  }
+
+  List<Object?> _submissionValues() => [
+    _contentController.text,
+    _titleController.text,
+    _selectedCategory?.id,
+    ..._selectedTags,
+    _featuredLink,
+    _createAsPostVoting,
+  ];
+
+  bool _submissionPending = false;
+
   Future<void> _submit() async {
+    if (_submissionPending || _isSubmitting) return;
+    _submissionPending = true;
+    try {
+      await _submitChecked();
+    } finally {
+      _submissionPending = false;
+    }
+  }
+
+  Future<void> _submitChecked() async {
+    if ((_editorKey.currentState?.hasPendingUploads ?? false) ||
+        (_richKey.currentState?.hasPendingUploads ?? false)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(UploadTaskLabels.of(context).pendingSubmit)),
+      );
+      return;
+    }
+
     // 富文本模式:先强制序列化镜像。
     // 必须排在下面两步**之前**：它俩都要读 _contentController 判断正文是否
     // 仍为默认态，而富文本的内容在 flush 前还在 EditorState 里。
-    _richKey.currentState?.flushToController();
+    if (!_flushRichContent()) return;
     // 标题是纯 URL 但 onebox 还在飞（或还在 debounce 窗口内）时，不阻断提交：
     // featured link 本身不依赖 onebox 结果，直接用当前标题里的 URL 定案。
     _settlePendingFeaturedLink();
@@ -806,8 +924,9 @@ class _CreateTopicPageState extends ConsumerState<CreateTopicPage> {
     if (pendingLink != null) {
       await _applyFeaturedLinkToContent(pendingLink);
       // 富文本插入后需要重新序列化，否则 controller 拿不到刚插的链接。
-      _richKey.currentState?.flushToController();
+      if (!_flushRichContent()) return;
     }
+    final approved = ComposerSubmissionSnapshot(_submissionValues());
     if (!_formKey.currentState!.validate()) {
       // 预览模式下验证错误不可见，切回编辑模式并提示
       if (_showPreview) {
@@ -883,7 +1002,6 @@ class _CreateTopicPageState extends ConsumerState<CreateTopicPage> {
     }
 
     if (!mounted) return;
-    // 草稿冲突没解决就发：先让用户确认用本机内容
     if (_draftController.hasConflict &&
         !await confirmComposerDraftOverwrite(
           context,
@@ -892,9 +1010,14 @@ class _CreateTopicPageState extends ConsumerState<CreateTopicPage> {
       return;
     }
     if (!mounted) return;
+    if (!mounted) return;
+    if (!approved.verify(
+      synchronize: _flushRichContent,
+      read: _submissionValues,
+    )) {
+      return;
+    }
     setState(() => _isSubmitting = true);
-    // 对齐 Discourse 前端 composer.set("disableDrafts", true):
-    // 发送途中关掉自动保存,避免与 PostCreator 推进的 draft_sequence 撞 409
     _draftController.disable();
 
     try {
@@ -933,7 +1056,7 @@ class _CreateTopicPageState extends ConsumerState<CreateTopicPage> {
       );
       Navigator.of(context).pop();
     } on DioException catch (_) {
-      // 网络错误已由 ErrorInterceptor 处理:发送失败,恢复草稿保存
+      // 网络错误已由 ErrorInterceptor 处理
       _draftController.enable();
     } catch (e, s) {
       _draftController.enable();
@@ -944,100 +1067,106 @@ class _CreateTopicPageState extends ConsumerState<CreateTopicPage> {
   }
 
   /// 滚动头部:顶部透明 AppBar 避让 + 标题输入。写作流只留标题+正文
-  /// (分类/标签/字数在底部 ComposerMetaBar 常驻);标题与正文同滚,
+  /// 分类/标签在顶栏或底部浮岛常驻；标题与正文同滚,
   /// 写正文时自然滚出屏,想改标题滚回顶部即可。
   Widget _buildComposerHeader(ThemeData theme, int minTitleLength) {
     // extendBodyBehindAppBar 后滚动内容从屏顶开始,首屏让出渐变模糊层
     // 全高(含消散尾巴 —— 初始态标题不被尾巴遮,滚动上移时才进入
     // 消散区被渐次溶解)
-    final topInset = ProgressiveTopBlur.heightFor(context);
-    return Padding(
-      padding: EdgeInsets.fromLTRB(20, topInset + 10, 20, 0),
+    final topInset = _topChromeInset;
+    return ComposerReadingPadding(
+      vertical: EdgeInsets.only(top: topInset + 20),
       // 标题字数提示悬浮在输入框右下角(与正文同一套做法):
-      // 不占布局空间,标题为空或已达标时完全不出现
-      child: Stack(
+      // 不占布局空间，字数达标后自动隐藏
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          TextFormField(
-            controller: _titleController,
-            decoration: InputDecoration(
-              // 对齐官方 `titlePlaceholder`：允许精选链接时提示可以粘链接
-              hintText: _featuredLinkEnabled
-                  ? context.l10n.createTopic_titleOrLinkHint
-                  : context.l10n.createTopic_titleHint,
-              hintStyle: TextStyle(
-                color: theme.colorScheme.onSurfaceVariant.withValues(
-                  alpha: 0.5,
+          Stack(
+            children: [
+              TextFormField(
+                controller: _titleController,
+                decoration: InputDecoration(
+                  hintMaxLines: 1,
+                  // 对齐官方 `titlePlaceholder`：允许精选链接时提示可以粘链接
+                  hintText: _featuredLinkEnabled
+                      ? context.l10n.createTopic_titleOrLinkHint
+                      : context.l10n.createTopic_titleHint,
+                  hintStyle: TextStyle(
+                    color: theme.colorScheme.onSurfaceVariant.withValues(
+                      alpha: 0.5,
+                    ),
+                    fontWeight: FontWeight.normal,
+                  ),
+                  border: InputBorder.none,
+                  contentPadding: EdgeInsets.zero,
+                  isDense: true,
                 ),
-                fontWeight: FontWeight.normal,
-              ),
-              border: InputBorder.none,
-              contentPadding: EdgeInsets.zero,
-              isDense: true,
-            ),
-            // 墨笺:宋体标题本就够重,不要收紧字距
-            style: theme.textTheme.headlineSmall?.copyWith(
-              fontWeight: FontWeight.w900,
-              letterSpacing: theme.extension<MojianTokens>() != null
-                  ? 0.3
-                  : -0.5,
-            ),
-            maxLines: null,
-            // 对齐官方 `titleMaxLength`：允许精选链接时不设 maxLength，否则会
-            // 把粘贴进来的长链接截断（超长交由校验提示，不靠硬截）。
-            maxLength: _featuredLinkEnabled
-                ? null
-                : PreloadedDataService().maxTopicTitleLengthSync,
-            // 计数改用悬浮层(见下方 Stack),这里不占位
-            buildCounter:
-                (
+                style: theme.textTheme.headlineSmall?.copyWith(
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 0,
+                ),
+                maxLines: null,
+                // 对齐官方 `titleMaxLength`：允许精选链接时不设 maxLength，否则会
+                // 把粘贴进来的长链接截断（超长交由校验提示，不靠硬截）。
+                maxLength: _featuredLinkEnabled
+                    ? null
+                    : PreloadedDataService().maxTopicTitleLengthSync,
+                // 计数改用悬浮层(见下方 Stack),这里不占位
+                buildCounter: (
                   context, {
                   required currentLength,
                   required isFocused,
                   maxLength,
                 }) => null,
-            validator: (value) {
-              if (value == null || value.trim().isEmpty) {
-                return context.l10n.createTopic_enterTitle;
-              }
-              if (value.trim().length < minTitleLength) {
-                return context.l10n.createTopic_minTitleLength(minTitleLength);
-              }
-              // 允许精选链接时不靠 maxLength 硬截，改由校验抦（对齐官方
-              // `composer.error.title_too_long`）。
-              final maxTitleLength = PreloadedDataService()
-                  .maxTopicTitleLengthSync;
-              if (value.trim().length > maxTitleLength) {
-                return context.l10n.createTopic_maxTitleLength(maxTitleLength);
-              }
-              return null;
-            },
-            onTap: () {
-              _editorKey.currentState?.closeEmojiPanel();
-              _richKey.currentState?.closeEmojiPanel();
-            },
+                validator: (value) {
+                  if (value == null || value.trim().isEmpty) {
+                    return context.l10n.createTopic_enterTitle;
+                  }
+                  if (value.trim().length < minTitleLength) {
+                    return context.l10n.createTopic_minTitleLength(
+                      minTitleLength,
+                    );
+                  }
+                  // 允许精选链接时不靠 maxLength 硬截，改由校验抦（对齐官方
+                  // `composer.error.title_too_long`）。
+                  final maxTitleLength =
+                      PreloadedDataService().maxTopicTitleLengthSync;
+                  if (value.trim().length > maxTitleLength) {
+                    return context.l10n.createTopic_maxTitleLength(
+                      maxTitleLength,
+                    );
+                  }
+                  return null;
+                },
+                onTap: () {
+                  _editorKey.currentState?.closeEmojiPanel();
+                  _richKey.currentState?.closeEmojiPanel();
+                },
+              ),
+              // 空白时也显示字数要求，达到门槛后由提示组件自动隐藏。
+              Positioned(
+                right: 0,
+                bottom: 0,
+                child: CharacterCountsOverlay(
+                  length: _titleLength,
+                  minimumLength: minTitleLength,
+                  // 标题不带社区警告文案（对齐主题组件 showWarning=false）
+                  showWarning: false,
+                ),
+              ),
+              // 正在解析标题里的链接。官方是把整个 composer 置 loading 态，这里
+              // 不阻断输入，只在标题右上角提示「在拿网页标题」。
+              // 用 LoadingSpinner：它内部跟随 M3eFlags，M3E 开启走 Expressive
+              // 形变环，关闭自动回退经典转圈（线宽按 size 等比缩放）。
+              if (_isResolvingFeaturedLink)
+                const Positioned(
+                  right: 0,
+                  top: 0,
+                  child: LoadingSpinner(size: 16),
+                ),
+            ],
           ),
-          // 标题为空时同样提示（对齐 missingReplyCharacters > 0）：
-          // 一进来就知道标题有字数门槛，不用先打字才发现
-          Positioned(
-            right: 0,
-            bottom: 0,
-            child: CharacterCountsOverlay(
-              length: _titleLength,
-              minimumLength: minTitleLength,
-              // 标题不带社区警告文案（对齐主题组件 showWarning=false）
-              showWarning: false,
-            ),
-          ),
-          // 正在解析标题里的链接。官方是把整个 composer 置 loading 态，这里
-          // 不阻断输入，只在标题右上角提示「在拿网页标题」。
-          // 用 LoadingSpinner：它内部跟随 M3eFlags，M3E 开启走 Expressive
-          // 形变环，关闭自动回退经典转圈（线宽按 size 等比缩放）。
-          if (_isResolvingFeaturedLink)
-            const Positioned(
-              right: 0,
-              top: 0,
-              child: LoadingSpinner(size: 16),
-            ),
+          const SizedBox(height: 16),
         ],
       ),
     );
@@ -1056,7 +1185,6 @@ class _CreateTopicPageState extends ConsumerState<CreateTopicPage> {
     AsyncValue<List<String>> tagsAsync,
   ) {
     // 站点是否装 post-voting 插件:从分类 JSON 是否下发插件字段派生
-    final sitePostVoting = categories.any((c) => c.hasPostVotingFields);
     final locked = _selectedCategory?.onlyPostVotingInThisCategory ?? false;
     return ComposerMetaBar(
       category: _selectedCategory,
@@ -1066,15 +1194,36 @@ class _CreateTopicPageState extends ConsumerState<CreateTopicPage> {
       selectedTags: _selectedTags,
       allTags: tagsAsync.value ?? const [],
       onTagsChanged: _onTagsChanged,
-      showPostVotingToggle: sitePostVoting,
+      showPostVotingToggle: false,
       postVotingEnabled: _createAsPostVoting || locked,
       postVotingLocked: locked,
       onPostVotingChanged: (v) => setState(() => _createAsPostVoting = v),
     );
   }
 
+  Widget _buildPageTitle(bool supportsQuestions) {
+    if (!supportsQuestions) {
+      return Text(
+        context.l10n.createTopic_title,
+        overflow: TextOverflow.ellipsis,
+      );
+    }
+    return ComposerTopicKindPicker(
+      question:
+          _createAsPostVoting ||
+          (_selectedCategory?.onlyPostVotingInThisCategory ?? false),
+      enabled: !_isSubmitting,
+      locked: _selectedCategory?.onlyPostVotingInThisCategory ?? false,
+      onChanged: (value) {
+        setState(() => _createAsPostVoting = value);
+        _onDraftContentChanged();
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    _richModeEnabled = ref.watch(preferencesProvider).useRichComposer;
     final categoriesAsync = ref.watch(categoriesProvider);
     final tagsAsync = ref.watch(tagsProvider);
     final canTagTopics = ref.watch(canTagTopicsProvider).value ?? false;
@@ -1083,10 +1232,26 @@ class _CreateTopicPageState extends ConsumerState<CreateTopicPage> {
     // 获取站点配置的最小长度
     final minTitleLength = ref.watch(minTopicTitleLengthProvider).value ?? 15;
 
+    final desktop = PlatformUtils.isDesktop;
+    final inlineProperties = desktop && MediaQuery.sizeOf(context).width >= 900;
+    final supportsQuestions =
+        categoriesAsync.value?.any((c) => c.hasPostVotingFields) ?? false;
+    Widget metadata() => TextFieldTapRegion(
+      child: _buildMetaBar(
+        categoriesAsync.value ?? const [],
+        canTagTopics,
+        tagsAsync,
+      ),
+    );
+
     final page = PopScope(
-      canPop: !_showEmojiPanel,
+      canPop: _allowClose && !_showEmojiPanel,
       onPopInvokedWithResult: (bool didPop, dynamic result) async {
         if (didPop) return;
+        if (!_showEmojiPanel) {
+          _closeWithCurrentContent(result);
+          return;
+        }
         _editorKey.currentState?.closeEmojiPanel();
         _richKey.currentState?.closeEmojiPanel();
       },
@@ -1096,80 +1261,79 @@ class _CreateTopicPageState extends ConsumerState<CreateTopicPage> {
         // Stack 顶部的 ProgressiveTopBlur 提供(从上到下消散到全透明,
         // 无均匀毛玻璃的硬下边);分类/标签/字数在底部 ComposerMetaBar
         extendBodyBehindAppBar: true,
-        appBar: AppBar(
-          title: Text(context.l10n.createTopic_title),
-          backgroundColor: Colors.transparent,
-          surfaceTintColor: Colors.transparent,
-          elevation: 0,
-          scrolledUnderElevation: 0,
-          // 透明背景下 Material 推导不出状态栏图标亮暗(会给成浅色
-          // 图标,浅色主题下隐形),按主题显式指定
-          systemOverlayStyle: theme.brightness == Brightness.dark
-              ? SystemUiOverlayStyle.light
-              : SystemUiOverlayStyle.dark,
-          actions: [
-            // 草稿保存状态:保存中转圈;存本机待同步/失败/冲突常驻,点它
-            // 重试或选版本;已保存不常驻 —— 成功无需一直宣告
-            ComposerDraftStatusIndicator(
-              status: _draftController.statusNotifier,
-              onResolve: _isSubmitting ? null : _retryDraftSave,
-            ),
-            // 功能按钮全部图标直出不折叠(⋯ 菜单藏舍弃太难用):
-            // 舍弃 🗑 / AI 审核 ✨,tooltip 兜底语义
-            IconButton(
-              onPressed: _isSubmitting ? null : _discardDraft,
-              tooltip: context.l10n.common_discard,
-              icon: const Icon(Symbols.delete_rounded, size: 22),
-            ),
-            // AiPostReviewButton builder 形态:图标按钮即审核结果
-            // popover 的锚
-            AiPostReviewButton(
-              titleBuilder: () => _titleController.text,
-              contentBuilder: () => _contentController.text,
-              target: AiPostReviewTarget.topic,
-              enabled: !_isSubmitting,
-              categoryNameBuilder: () => _selectedCategory?.name,
-              categoryDescriptionBuilder: () => _selectedCategory?.description,
-              tagsBuilder: () => _selectedTags,
-              builder: (anchorContext, isReviewing, trigger) {
-                // 功能关闭(trigger null 且非审核中)时不占位
-                if (trigger == null && !isReviewing) {
-                  return const SizedBox.shrink();
-                }
-                return IconButton(
-                  onPressed: trigger,
-                  tooltip: context.l10n.aiPostReview_button,
-                  icon: isReviewing
-                      ? LoadingSpinner(
-                          size: 18,
-                          color: theme.colorScheme.primary,
-                        )
-                      : const Icon(Symbols.auto_awesome_rounded, size: 22),
-                );
-              },
-            ),
-            const SizedBox(width: 2),
-            Padding(
-              padding: const EdgeInsets.only(right: 16),
-              child: FilledButton(
-                onPressed: _isSubmitting ? null : _submit,
-                style: FilledButton.styleFrom(
-                  visualDensity: VisualDensity.compact,
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                ),
-                child: _isSubmitting
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: Colors.white,
+        appBar: ComposerAutoHideAppBar(
+          child: AppBar(
+            centerTitle: false,
+            title: inlineProperties
+                ? Row(
+                    children: [
+                      _buildPageTitle(supportsQuestions),
+                      const SizedBox(width: 20),
+                      Flexible(
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 390),
+                          child: metadata(),
                         ),
+                      ),
+                    ],
+                  )
+                : _buildPageTitle(supportsQuestions),
+            bottom: desktop && !inlineProperties
+                ? PreferredSize(
+                    preferredSize: const Size.fromHeight(56),
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: metadata(),
+                      ),
+                    ),
+                  )
+                : null,
+            backgroundColor: Colors.transparent,
+            surfaceTintColor: Colors.transparent,
+            elevation: 0,
+            scrolledUnderElevation: 0,
+            // 透明背景下 Material 推导不出状态栏图标亮暗(会给成浅色
+            // 图标,浅色主题下隐形),按主题显式指定
+            systemOverlayStyle: theme.brightness == Brightness.dark
+                ? SystemUiOverlayStyle.light
+                : SystemUiOverlayStyle.dark,
+            actions: [
+              ComposerHeaderActions(
+                availableWidth:
+                    MediaQuery.sizeOf(context).width -
+                    MediaQuery.paddingOf(context).horizontal,
+                submitLabel: context.l10n.common_publish,
+                onSubmit: _isSubmitting ? null : _submit,
+                submitting: _isSubmitting,
+                previewing: _showPreview,
+                onTogglePreview: !_isSubmitting ? _togglePreview : null,
+                draftStatus: _draftController.statusNotifier,
+                onRetryDraft: _isSubmitting ? null : _retryDraftSave,
+                showDiscard: true,
+                onDiscard: _isSubmitting ? null : _discardDraft,
+                reviewBuilder:
+                    ref.watch(preferencesProvider).aiPostReviewEnabled
+                    ? (builder) => AiPostReviewButton(
+                        titleBuilder: () => _titleController.text,
+                        contentBuilder: () {
+                          if (!_flushRichContent()) return '';
+                          return _contentController.text;
+                        },
+                        target: AiPostReviewTarget.topic,
+                        enabled: !_isSubmitting,
+                        categoryNameBuilder: () => _selectedCategory?.name,
+                        categoryDescriptionBuilder: () =>
+                            _selectedCategory?.description,
+                        tagsBuilder: () => _selectedTags,
+                        builder: (_, reviewing, trigger) =>
+                            builder(reviewing, trigger),
                       )
-                    : Text(context.l10n.common_publish),
+                    : null,
               ),
-            ),
-          ],
+            ],
+          ),
         ),
         body: Stack(
           children: [
@@ -1180,166 +1344,142 @@ class _CreateTopicPageState extends ConsumerState<CreateTopicPage> {
                     Column(
                       children: [
                         Expanded(
-                          child: PageView(
-                            controller: _pageController,
-                            allowImplicitScrolling: true,
-                            onPageChanged: (index) {
-                              setState(() {
-                                _showPreview = index == 1;
-                              });
-                              if (_showPreview) {
-                                FocusScope.of(context).unfocus();
-                                _editorKey.currentState?.closeEmojiPanel();
-                                _richKey.currentState?.closeEmojiPanel();
-                              }
-                            },
-                            children: [
-                              // Page 0: 编辑模式 —— 标题/标签/字数打包为
-                              // header 注入编辑器滚动流,与正文同滚(手机
-                              // 写正文时头部随内容滚出屏,编辑区满格;分类
-                              // 已上收 AppBar)。
-                              // 双模切换 = 无并存直切 + 新编辑器淡入:
-                              // AnimatedSwitcher 会让富/源并存 150ms ——
-                              // 共享 focusNode + 输入模型异构(自管 IME
-                              // vs TextField),并存窗口里 TextInput 交接
-                              // 必然竞态(切后无法删除/快捷键失灵反复
-                              // 复发)。ComposerSwitchFade 旧编辑器同帧
-                              // dispose,新的从透明淡入(丝滑不并存)。
-                              Form(
-                                key: _formKey,
-                                child: ComposerSwitchFade(
-                                  child:
-                                      (ref
-                                              .watch(preferencesProvider)
-                                              .useRichComposer &&
-                                          !_richFallback)
-                                      // 草稿加载完成前不挂富 composer:初始导入
-                                      // 一次性,提前挂会以空文档镜像覆盖草稿。
-                                      // 占位留空 —— 加载视觉由页面级草稿遮罩
-                                      // 统一提供(双 spinner 叠影)
-                                      ? (_isLoadingDraft && !_reloadingDraft
-                                            ? const SizedBox.shrink()
-                                            : RichComposerEditor(
-                                                key: _richKey,
-                                                // 手机进入页面时不自动跳到文末：键盘弹起
-                                                // 和长草稿定位同时改可视区域，正文偶尔
-                                                // 整块空白
-                                                autofocus:
-                                                    PlatformUtils.isDesktop,
-                                                header: _buildComposerHeader(
-                                                  theme,
-                                                  minTitleLength,
-                                                ),
-                                                metaBar: _buildMetaBar(
-                                                  categories,
-                                                  canTagTopics,
-                                                  tagsAsync,
-                                                ),
-                                                bodyOverlay:
-                                                    _buildCharCountOverlay(),
-                                                controller: _contentController,
-                                                focusNode: _contentFocusNode,
-                                                hintText: context
-                                                    .l10n
-                                                    .createTopic_contentHint,
-                                                emojiPanelHeight: 350,
-                                                onEmojiPanelChanged: (show) {
-                                                  setState(
-                                                    () =>
-                                                        _showEmojiPanel = show,
-                                                  );
-                                                },
-                                                mentionDataSource: (term) => ref
-                                                    .read(
-                                                      discourseServiceProvider,
-                                                    )
-                                                    .searchUsers(
-                                                      term: term,
-                                                      categoryId:
-                                                          _selectedCategory?.id,
-                                                      includeGroups: true,
-                                                    ),
-                                                onFallbackToPlain: () {
-                                                  if (mounted) {
-                                                    setState(
-                                                      () =>
-                                                          _richFallback = true,
-                                                    );
-                                                  }
-                                                },
-                                                // 主动切源码(可经工具栏
-                                                // 「富文本模式」切回)
-                                                onSwitchToSource: () {
-                                                  if (mounted) {
-                                                    setState(
-                                                      () =>
-                                                          _richFallback = true,
-                                                    );
-                                                  }
-                                                },
-                                              ))
-                                      : MarkdownEditor(
-                                          key: _editorKey,
-                                          header: _buildComposerHeader(
-                                            theme,
-                                            minTitleLength,
-                                          ),
-                                          metaBar: _buildMetaBar(
-                                            categories,
-                                            canTagTopics,
-                                            tagsAsync,
-                                          ),
-                                          bodyOverlay: _buildCharCountOverlay(),
-                                          controller: _contentController,
-                                          focusNode: _contentFocusNode,
-                                          hintText: context
-                                              .l10n
-                                              .createTopic_contentHint,
-                                          expands: true,
-                                          emojiPanelHeight: 350,
-                                          onTogglePreview: _togglePreview,
-                                          isPreview: _showPreview,
-                                          onEmojiPanelChanged: (show) {
-                                            setState(
-                                              () => _showEmojiPanel = show,
-                                            );
-                                          },
-                                          // 源码 → 富文本(开关开着即可,
-                                          // 门禁降级后也允许重试)
-                                          onSwitchToRich:
-                                              ref
-                                                  .watch(preferencesProvider)
-                                                  .useRichComposer
-                                              ? () {
-                                                  if (mounted) {
-                                                    setState(
-                                                      () =>
-                                                          _richFallback = false,
-                                                    );
-                                                  }
-                                                }
-                                              : null,
-                                          mentionDataSource: (term) => ref
-                                              .read(discourseServiceProvider)
-                                              .searchUsers(
-                                                term: term,
-                                                categoryId:
-                                                    _selectedCategory?.id,
-                                                includeGroups: true,
-                                              ),
-                                        ),
-                                ),
+                          child: ComposerPreviewPane(
+                            previewing: _showPreview,
+                            previewFooter: ComposerPreviewFooter(
+                              metadata: _buildMetaBar(
+                                categories,
+                                canTagTopics,
+                                tagsAsync,
                               ),
-
-                              // Page 1: 预览模式
-                              SingleChildScrollView(
-                                padding: EdgeInsets.fromLTRB(
-                                  24,
-                                  // 透明 AppBar+消散尾巴避让
-                                  ProgressiveTopBlur.heightFor(context) + 16,
-                                  24,
-                                  MediaQuery.paddingOf(context).bottom + 80,
-                                ),
+                              rich:
+                                  ref
+                                      .watch(preferencesProvider)
+                                      .useRichComposer &&
+                                  !_richFallback,
+                            ),
+                            editor: Form(
+                              key: _formKey,
+                              child: ComposerSwitchFade(
+                                child:
+                                    (ref
+                                            .watch(preferencesProvider)
+                                            .useRichComposer &&
+                                        !_richFallback)
+                                    // 草稿加载完成前不挂富 composer:初始导入
+                                    // 一次性,提前挂会以空文档镜像覆盖草稿。
+                                    // 占位留空 —— 加载视觉由页面级草稿遮罩
+                                    // 统一提供(双 spinner 叠影)
+                                    ? (_isLoadingDraft && !_reloadingDraft
+                                          ? const SizedBox.shrink()
+                                          : RichComposerEditor(
+                                              key: _richKey,
+                                              // 手机进入页面时不自动跳到文末，避免
+                                              // 键盘弹起与正文定位同时改变可视区域。
+                                              autofocus: desktop,
+                                              onSwitchToSource: () =>
+                                                  _setViewMode(
+                                                    ComposerViewMode.source,
+                                                  ),
+                                              header: _buildComposerHeader(
+                                                theme,
+                                                minTitleLength,
+                                              ),
+                                              metaBar: desktop
+                                                  ? null
+                                                  : _buildMetaBar(
+                                                      categories,
+                                                      canTagTopics,
+                                                      tagsAsync,
+                                                    ),
+                                              bodyOverlay:
+                                                  _buildCharCountOverlay(),
+                                              controller: _contentController,
+                                              focusNode: _contentFocusNode,
+                                              hintText: context
+                                                  .l10n
+                                                  .createTopic_contentHint,
+                                              emojiPanelHeight: 350,
+                                              onEmojiPanelChanged: (show) {
+                                                setState(
+                                                  () => _showEmojiPanel = show,
+                                                );
+                                              },
+                                              mentionDataSource: (term) => ref
+                                                  .read(
+                                                    discourseServiceProvider,
+                                                  )
+                                                  .searchUsers(
+                                                    term: term,
+                                                    categoryId:
+                                                        _selectedCategory?.id,
+                                                    includeGroups: true,
+                                                  ),
+                                              onFallbackToPlain: () {
+                                                if (mounted) {
+                                                  setState(
+                                                    () => _richFallback = true,
+                                                  );
+                                                }
+                                              },
+                                              // 模式切换由编辑台承载。
+                                              // 工具栏不再出 MD 徽标
+                                            ))
+                                    : MarkdownEditor(
+                                        key: _editorKey,
+                                        onSwitchToRich:
+                                            ref
+                                                .watch(preferencesProvider)
+                                                .useRichComposer
+                                            ? () => _setViewMode(
+                                                ComposerViewMode.rich,
+                                              )
+                                            : null,
+                                        header: _buildComposerHeader(
+                                          theme,
+                                          minTitleLength,
+                                        ),
+                                        metaBar: desktop
+                                            ? null
+                                            : _buildMetaBar(
+                                                categories,
+                                                canTagTopics,
+                                                tagsAsync,
+                                              ),
+                                        bodyOverlay: _buildCharCountOverlay(),
+                                        controller: _contentController,
+                                        focusNode: _contentFocusNode,
+                                        hintText: context
+                                            .l10n
+                                            .createTopic_contentHint,
+                                        expands: true,
+                                        emojiPanelHeight: 350,
+                                        // 预览入口由顶部承载。
+                                        showPreviewButton: false,
+                                        onEmojiPanelChanged: (show) {
+                                          setState(
+                                            () => _showEmojiPanel = show,
+                                          );
+                                        },
+                                        // 源码 → 富文本(开关开着即可,
+                                        // 门禁降级后也允许重试)
+                                        mentionDataSource: (term) => ref
+                                            .read(discourseServiceProvider)
+                                            .searchUsers(
+                                              term: term,
+                                              categoryId: _selectedCategory?.id,
+                                              includeGroups: true,
+                                            ),
+                                      ),
+                              ),
+                            ),
+                            preview: SingleChildScrollView(
+                              padding: EdgeInsets.only(
+                                top: _topChromeInset + 20,
+                                bottom:
+                                    MediaQuery.paddingOf(context).bottom + 80,
+                              ),
+                              child: ComposerReadingPadding(
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
@@ -1349,24 +1489,25 @@ class _CreateTopicPageState extends ConsumerState<CreateTopicPage> {
                                           : _titleController.text,
                                       style: theme.textTheme.headlineSmall
                                           ?.copyWith(
-                                            fontWeight: FontWeight.w900,
-                                            letterSpacing: -0.5,
+                                            fontWeight: FontWeight.w600,
+                                            letterSpacing: 0,
                                           ),
                                     ),
                                     const SizedBox(height: 16),
-                                    Wrap(
-                                      spacing: 8,
-                                      runSpacing: 8,
-                                      children: [
-                                        if (_selectedCategory != null)
-                                          CategoryTrigger(
-                                            category: _selectedCategory,
-                                            categories: categories,
-                                            onSelected: _onCategorySelected,
-                                          ),
-                                        PreviewTagsList(tags: _selectedTags),
-                                      ],
-                                    ),
+                                    if (!desktop)
+                                      Wrap(
+                                        spacing: 8,
+                                        runSpacing: 8,
+                                        children: [
+                                          if (_selectedCategory != null)
+                                            CategoryTrigger(
+                                              category: _selectedCategory,
+                                              categories: categories,
+                                              onSelected: _onCategorySelected,
+                                            ),
+                                          PreviewTagsList(tags: _selectedTags),
+                                        ],
+                                      ),
                                     const Padding(
                                       padding: EdgeInsets.symmetric(
                                         vertical: 24,
@@ -1400,22 +1541,12 @@ class _CreateTopicPageState extends ConsumerState<CreateTopicPage> {
                                   ],
                                 ),
                               ),
-                            ],
+                            ),
                           ),
                         ),
                       ],
                     ),
-                    // 预览模式下的退出预览按钮
-                    if (_showPreview)
-                      Positioned(
-                        right: 16,
-                        bottom: MediaQuery.paddingOf(context).bottom + 16,
-                        child: FloatingActionButton.small(
-                          onPressed: _togglePreview,
-                          tooltip: context.l10n.common_exitPreview,
-                          child: const Icon(Symbols.edit_rounded),
-                        ),
-                      ),
+
                     // 草稿加载遮罩
                     if (_isLoadingDraft)
                       Positioned.fill(
@@ -1442,8 +1573,9 @@ class _CreateTopicPageState extends ConsumerState<CreateTopicPage> {
               top: 0,
               left: 0,
               right: 0,
-              child: ProgressiveTopBlur(
-                height: ProgressiveTopBlur.heightFor(context),
+              child: ComposerTopFade(
+                height: _topChromeInset,
+                statusBarHeight: MediaQuery.viewPaddingOf(context).top,
               ),
             ),
           ],
@@ -1455,12 +1587,18 @@ class _CreateTopicPageState extends ConsumerState<CreateTopicPage> {
     // 标题/标签输入框时同样生效;守卫与发布按钮一致。
     return CallbackShortcuts(
       bindings: {
+        for (final activator in composerQuickPanelActivators())
+          activator: _showQuickPanel,
         for (final activator in composerSubmitActivators())
           activator: () {
             if (!_isSubmitting) _submit();
           },
       },
-      child: page,
+      child: ComposerChromeScope(
+        controller: _chrome,
+        topInset: _topChromeInset,
+        child: page,
+      ),
     );
   }
 }

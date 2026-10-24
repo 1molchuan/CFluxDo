@@ -188,5 +188,9 @@
   "shortcuts_switchToProfile": "切換到個人",
   "shortcuts_switchToTopics": "切換到話題",
   "shortcuts_toggleAiPanel": "AI 助手面板",
-  "shortcuts_toggleNotifications": "通知面板"
+  "shortcuts_toggleNotifications": "通知面板",
+  "preferences_crashlytics": "崩潰日誌上報",
+  "preferences_crashlyticsDesc": "發生崩潰時自動上報日誌，幫助開發者定位問題",
+  "preferences_enableCrashlyticsContent": "本應用使用 Firebase Crashlytics 收集崩潰信息以改進應用穩定性。\n\n收集嘅數據包括設備信息同崩潰詳情，唔包含個人隱私數據。您可以喺設置中關閉此功能。",
+  "preferences_enableCrashlyticsTitle": "數據收集說明"
 }

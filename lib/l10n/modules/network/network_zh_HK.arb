@@ -119,5 +119,21 @@
   "rhttpEngine_initFailedHint": "rhttp 引擎初始化失敗，已退回至備用網絡適配器，下次啓動將自動重試",
   "networkSettings_upload": "檔案上傳",
   "networkSettings_forceDisableMultipart": "強制關閉分片上傳",
-  "networkSettings_forceDisableMultipartDescription": "開啟後，所有檔案均使用一般上傳，忽略站點分片設定。伺服器分片異常時可開啟，對下一次上傳生效。"
+  "networkSettings_forceDisableMultipartDescription": "開啟後，所有檔案均使用一般上傳，忽略站點分片設定。伺服器分片異常時可開啟，對下一次上傳生效。",
+  "engineStatus_reasonFallback": "Cronet 已降級，使用備用適配器",
+  "networkAdapter_autoFallback": "已自動降級",
+  "networkAdapter_autoFallbackDesc": "檢測到 Cronet 不可用，已切換到備用適配器",
+  "networkAdapter_degradeReason": "Cronet 降級原因",
+  "networkAdapter_fallback": "備用",
+  "networkAdapter_fallbackStatus": "降級狀態",
+  "networkAdapter_forceFallback": "強制使用備用適配器",
+  "networkAdapter_forceFallbackDesc": "禁用 Cronet，使用 NetworkHttpAdapter",
+  "networkAdapter_resetFallback": "重置降級狀態",
+  "networkAdapter_resetFallbackDesc": "清除降級記錄，下次啓動重新嘗試 Cronet",
+  "networkAdapter_resetSuccess": "已重置，重啓應用後生效",
+  "networkAdapter_settingSaved": "設置已保存，重啓應用後生效",
+  "networkAdapter_simulateError": "模擬 Cronet 錯誤",
+  "networkAdapter_simulateErrorDesc": "觸發降級流程，測試自動降級功能",
+  "networkAdapter_simulateSuccess": "已觸發模擬降級，請查看降級狀態",
+  "networkAdapter_viewReason": "查看降級原因"
 }

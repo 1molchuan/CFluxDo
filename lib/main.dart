@@ -103,6 +103,7 @@ import 'services/network/adapters/platform_adapter.dart';
 import 'providers/preferences_provider.dart';
 import 'providers/theme_provider.dart';
 import 'package:dynamic_color/dynamic_color.dart';
+import 'widgets/common/app_glass_settings.dart';
 import 'widgets/preheat_gate.dart';
 import 'widgets/onboarding_gate.dart';
 import 'widgets/layout/adaptive_scaffold.dart';
@@ -776,6 +777,7 @@ class MainApp extends ConsumerWidget {
         return TranslationProvider(
           child: Builder(
             builder: (context) => MaterialApp(
+              scrollBehavior: const DesktopScrollInteractionBehavior(),
               navigatorKey: navigatorKey,
               // JankNavObserver 给 [JANK] 日志加导航归因(debug/profile 观测用)
               // KeyboardFocusGuard 压掉浮层关闭后键盘自弹(移动端)
@@ -910,7 +912,7 @@ class MainApp extends ConsumerWidget {
                   }
                 }
 
-                return result;
+                return AppGlassSettings(child: result);
               },
               home: const OnboardingGate(child: PreheatGate(child: MainPage())),
             ),

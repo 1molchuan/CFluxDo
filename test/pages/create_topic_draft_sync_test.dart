@@ -127,9 +127,8 @@ void main() {
     final editor = tester.widget<MarkdownEditor>(find.byType(MarkdownEditor));
     expect(editor.controller.text, remote.data.reply);
     expect(find.text(remote.data.title!), findsOneWidget);
-    // cfluxdo 的属性条把标签渲染成 `#标签` 胶囊
-    expect(find.text('#旧标签'), findsOneWidget);
-    expect(find.text('#{name: 旧标签}'), findsNothing);
+    expect(find.text('旧标签'), findsOneWidget);
+    expect(find.text('{name: 旧标签}'), findsNothing);
     expect(writes, isEmpty, reason: '标题、正文、分类恢复过程不能上传半份草稿');
 
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
@@ -148,9 +147,13 @@ void main() {
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
     await tester.pump();
     await tester.pump(const Duration(seconds: 3));
-    expect(find.text('#纯水 #快问快答'), findsOneWidget);
-    expect(find.textContaining('{name: 纯水}'), findsNothing);
-    expect(find.textContaining('旧标签'), findsNothing);
+    expect(find.text('纯水'), findsOneWidget);
+    expect(
+      find.byTooltip('${S.current.tag_tabTags}: #纯水 #快问快答'),
+      findsOneWidget,
+    );
+    expect(find.text('{name: 纯水}'), findsNothing);
+    expect(find.text('旧标签'), findsNothing);
     expect(store.entry?.data.tags, ['纯水', '快问快答']);
     expect(store.entry?.synced, isTrue);
     expect(writes, isEmpty, reason: '采用云端标签后不能触发多余回写');
@@ -174,11 +177,11 @@ void main() {
     expect(editor.controller.text, remote.data.reply);
     expect(find.text(remote.data.title!), findsOneWidget);
     expect(find.text('云端原始标题'), findsNothing);
-    expect(find.textContaining('旧标签'), findsNothing);
+    expect(find.text('旧标签'), findsNothing);
     expect(store.entry?.data.categoryId, 2);
     expect(store.entry?.data.tags, isEmpty);
-    expect(find.textContaining('纯水'), findsNothing);
-    expect(find.textContaining('快问快答'), findsNothing);
+    expect(find.text('纯水'), findsNothing);
+    expect(find.text('快问快答'), findsNothing);
     expect(store.entry?.sequence, 3);
     expect(writes, isEmpty);
     expect(tester.takeException(), isNull);

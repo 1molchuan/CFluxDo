@@ -176,5 +176,17 @@
   "appearance_accentOchre": "赭石",
   "appearance_mojianSwitched": "介面已換成新的「墨箋」風格，可在「外觀 → 介面風格」改回「經典」",
   "appearance_accentWallpaper": "桌布",
-  "appearance_mojianClassicOnlyHint": "背景圖、主題色與 M3E 動效屬於「經典」風格，切回經典即可使用，之前的設定都保留着。"
+  "appearance_mojianClassicOnlyHint": "背景圖、主題色與 M3E 動效屬於「經典」風格，切回經典即可使用，之前的設定都保留着。",
+  "appearance_glass": "玻璃效果",
+  "appearance_glassEnabled": "啟用玻璃效果",
+  "appearance_glassScope": "統一控制底欄與編輯工具島的玻璃效果，不影響頂欄、彈窗模糊或桌布模糊。關閉後使用實色表面。",
+  "appearance_glassEffectLevel": "效果級別",
+  "appearance_glassAuto": "自動",
+  "appearance_glassAutoDesc": "預設選項：按目前的渲染後端選擇完整玻璃或基礎磨砂，不評估裝置效能。",
+  "appearance_glassBasic": "基礎磨砂",
+  "appearance_glassBasicDesc": "保留背景模糊與色罩，不使用光學折射。",
+  "appearance_glassFull": "完整玻璃",
+  "appearance_glassFullDesc": "啟用光學折射；後端不支援或着色器無法使用時退回基礎磨砂。",
+  "appearance_glassUnsupported": "目前的渲染後端不支援着色器濾鏡，自動和完整玻璃均使用基礎磨砂。",
+  "appearance_glassSettingsEntry": "前往外觀設定，統一調整底欄與編輯工具島的玻璃效果。"
 }

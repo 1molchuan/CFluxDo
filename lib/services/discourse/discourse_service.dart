@@ -53,6 +53,7 @@ import '../uploads/media_upload_limits.dart';
 import '../uploads/s3_multipart_upload.dart';
 import '../uploads/upload_settings.dart';
 import '../uploads/upload_trace.dart';
+import '../uploads/upload_progress.dart';
 import '../webview_session_cookie_refresh_service.dart';
 import '../app_logger.dart';
 import '../log/log_writer.dart';

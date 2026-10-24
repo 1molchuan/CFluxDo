@@ -7,6 +7,8 @@ import 'package:image_picker_platform_interface/image_picker_platform_interface.
 import 'package:fluxdo/widgets/markdown_editor/image_upload_dialog.dart';
 
 import 'package:m3e_ui/m3e_ui.dart';
+import 'package:common_ui/common_ui.dart';
+import 'package:fluxdo/widgets/markdown_editor/composer_submit_button.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
@@ -87,6 +89,18 @@ class _Messages extends ChatMessagesNotifier {
   int futureCalls = 0;
   Completer<void>? _pastRequest;
   Completer<void>? _futureRequest;
+
+  Completer<void>? sendRequest;
+  int sendCalls = 0;
+  @override
+  Future<void> send(
+    String raw, {
+    int? inReplyToId,
+    List<int> uploadIds = const [],
+  }) async {
+    sendCalls++;
+    await sendRequest!.future;
+  }
 
   Completer<ChatMessagesState>? reloadRequest;
   @override
@@ -217,6 +231,8 @@ Future<ScrollController> _pumpPage(
   WidgetTester tester,
   _Messages messages, {
   TargetPlatform platform = TargetPlatform.android,
+  ThemeData? theme,
+  TextScaler textScaler = TextScaler.noScaling,
 }) async {
   final prefs = await SharedPreferences.getInstance();
   await tester.pumpWidget(
@@ -230,7 +246,11 @@ Future<ScrollController> _pumpPage(
       child: TranslationProvider(
         child: MaterialApp(
           navigatorKey: navigatorKey,
-          theme: ThemeData(platform: platform),
+          theme: theme ?? ThemeData(platform: platform),
+          builder: (context, child) => MediaQuery(
+            data: MediaQuery.of(context).copyWith(textScaler: textScaler),
+            child: child!,
+          ),
           locale: const Locale('zh'),
           localizationsDelegates: const [
             GlobalMaterialLocalizations.delegate,
@@ -316,6 +336,110 @@ void main() {
       expect(find.text('image.gif'), findsNothing);
       await _disposePage(tester);
     });
+  }
+
+  testWidgets('聊天工具条玻璃与发送忙碌状态不重复提交', (tester) async {
+    final messages = _Messages()..sendRequest = Completer<void>();
+    await _pumpPage(tester, messages);
+    final surface = tester.widget<GlassSurfaceFrame>(
+      find.byKey(const ValueKey('chat-composer-surface')),
+    );
+    expect(surface.recipe, GlassRecipe.toolbar);
+    tester.widget<TextField>(find.byType(TextField)).controller!.text = '测试发送';
+    await tester.pumpAndSettle();
+    final submit = find.byType(ComposerSubmitButton);
+    expect(tester.getSize(submit), const Size.square(48));
+    expect(
+      tester.getSize(
+        find.descendant(of: submit, matching: find.byType(Material)),
+      ),
+      const Size.square(36),
+      reason: '圆形外观仍紧凑，只恢复触控区域',
+    );
+    final fieldRect = tester.getRect(find.byType(TextField));
+    expect(
+      (tester.getCenter(submit).dy - fieldRect.center.dy).abs(),
+      lessThanOrEqualTo(3),
+    );
+    await tester.tap(submit);
+    await tester.pump();
+    expect(messages.sendCalls, 1);
+    expect(tester.widget<ComposerSubmitButton>(submit).busy, true);
+    await tester.tap(submit);
+    await tester.pump();
+    expect(messages.sendCalls, 1);
+    messages.sendRequest!.complete();
+    await tester.pumpAndSettle();
+    expect(tester.widget<ComposerSubmitButton>(submit).busy, false);
+    await _disposePage(tester);
+  });
+
+  for (final (platform, size) in [
+    (TargetPlatform.android, const Size(400, 870)),
+    (TargetPlatform.iOS, const Size(375, 812)),
+    (TargetPlatform.macOS, const Size(900, 600)),
+    (TargetPlatform.android, const Size(870, 400)),
+  ]) {
+    for (final scale in [1.0, 1.4, 2.0]) {
+      testWidgets('聊天按钮单多行中线对齐 $platform $size scale=$scale', (tester) async {
+        final desktop = platform == TargetPlatform.macOS;
+        PlatformUtils.debugDesktopOverride = desktop;
+        await tester.binding.setSurfaceSize(size);
+        addTearDown(() => tester.binding.setSurfaceSize(null));
+        final theme = ThemeData(
+          platform: platform,
+          brightness: desktop ? Brightness.dark : Brightness.light,
+          visualDensity: desktop
+              ? VisualDensity.compact
+              : VisualDensity.standard,
+          materialTapTargetSize: desktop
+              ? MaterialTapTargetSize.shrinkWrap
+              : MaterialTapTargetSize.padded,
+          textTheme: const TextTheme(
+            bodyLarge: TextStyle(fontSize: 16, height: 1.5),
+          ),
+        );
+        await _pumpPage(
+          tester,
+          _Messages(),
+          theme: theme,
+          textScaler: TextScaler.linear(scale),
+        );
+        final field = find.byType(TextField);
+        final send = find.byType(ComposerSubmitButton);
+        final emoji = find.byTooltip(S.current.chat_emoji);
+        final attachment = find.byTooltip(S.current.chat_attach);
+
+        void expectAligned() {
+          expect(
+            tester.getCenter(send).dy,
+            closeTo(tester.getCenter(emoji).dy, 0.5),
+          );
+          expect(
+            tester.getCenter(send).dy,
+            closeTo(tester.getCenter(attachment).dy, 0.5),
+          );
+          expect(tester.takeException(), isNull);
+        }
+
+        expectAligned();
+        expect(
+          tester.getCenter(send).dy,
+          closeTo(tester.getCenter(field).dy, 0.5),
+        );
+        final distanceFromBottom =
+            tester.getBottomLeft(field).dy - tester.getCenter(send).dy;
+        tester.widget<TextField>(field).controller!.text = '第一行\n第二行\n第三行';
+        await tester.pumpAndSettle();
+        expectAligned();
+        expect(
+          tester.getBottomLeft(field).dy - tester.getCenter(send).dy,
+          closeTo(distanceFromBottom, 0.5),
+          reason: '多行输入时操作键仍跟随最下一行，不浮到输入框中间',
+        );
+        await _disposePage(tester);
+      });
+    }
   }
 
   testWidgets('首屏布局和程序定位不触发分页', (tester) async {

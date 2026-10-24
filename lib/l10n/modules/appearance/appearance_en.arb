@@ -176,5 +176,17 @@
   "appearance_accentOchre": "Ochre",
   "appearance_mojianSwitched": "The app now uses the new \"Ink & Paper\" style. You can switch back to \"Classic\" in Appearance → UI style.",
   "appearance_accentWallpaper": "Wallpaper",
-  "appearance_mojianClassicOnlyHint": "Background image, theme colors and M3E motion belong to the Classic style. Switch back to Classic to use them; your previous settings are kept."
+  "appearance_mojianClassicOnlyHint": "Background image, theme colors and M3E motion belong to the Classic style. Switch back to Classic to use them; your previous settings are kept.",
+  "appearance_glass": "Glass effects",
+  "appearance_glassEnabled": "Enable glass effects",
+  "appearance_glassScope": "Applies to the bottom navigation bar and editor tool island only. Does not affect the top bar, dialog blur, or wallpaper blur. Uses solid surfaces when off.",
+  "appearance_glassEffectLevel": "Effect level",
+  "appearance_glassAuto": "Auto",
+  "appearance_glassAutoDesc": "Default: selects full glass or basic frost based on the current rendering backend, without assessing device performance.",
+  "appearance_glassBasic": "Basic frost",
+  "appearance_glassBasicDesc": "Keeps background blur and tint without optical refraction.",
+  "appearance_glassFull": "Full glass",
+  "appearance_glassFullDesc": "Enables optical refraction; falls back to basic frost when the backend is unsupported or the shader is unavailable.",
+  "appearance_glassUnsupported": "The current rendering backend does not support shader filters. Auto and Full glass both use basic frost.",
+  "appearance_glassSettingsEntry": "Open Appearance to adjust glass effects for the bottom navigation bar and editor tool island together."
 }

@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart' show visibleForTesting;
 
 import '../network/flux_request_spec.dart';
 import 'upload_trace.dart';
+import 'upload_progress.dart';
 
 /// 分片 PUT 到对象存储失败（重试用尽）。此时合并请求还没发出、分片上传已
 /// 放弃，换普通上传重来不会产生重复附件。
@@ -43,14 +44,17 @@ class S3MultipartUpload {
 
   Future<Map<String, dynamic>> _post(
     String action,
-    Map<String, dynamic> data,
-  ) async {
+    Map<String, dynamic> data, {
+    CancelToken? cancelToken,
+  }) async {
+    checkUploadCancelled(cancelToken);
     final watch = Stopwatch()..start();
     trace.event('multipart_control_start', fields: {'action': action});
     try {
       final response = await control.post<dynamic>(
         '/uploads/$action.json',
         data: data,
+        cancelToken: cancelToken,
         options: Options(
           contentType: Headers.jsonContentType,
           receiveTimeout: const Duration(minutes: 2),
@@ -92,13 +96,22 @@ class S3MultipartUpload {
     return value;
   }
 
-  Future<Map<String, dynamic>> upload(File file, String filename) async {
+  Future<Map<String, dynamic>> upload(
+    File file,
+    String filename, {
+    CancelToken? cancelToken,
+    UploadProgressCallback? onProgress,
+  }) async {
     final watch = Stopwatch()..start();
     String? externalId;
     RandomAccessFile? input;
     try {
+      checkUploadCancelled(cancelToken);
+      onProgress?.call(const UploadProgress(phase: UploadPhase.preparing));
       input = await file.open();
       final size = await input.length();
+      checkUploadCancelled(cancelToken);
+      var completedBytes = 0;
       final bytesPerPart = chunkSize(size);
       final count = (size / bytesPerPart).ceil();
       if (count < 1 || count > 10000) {
@@ -116,7 +129,7 @@ class S3MultipartUpload {
         'file_name': filename,
         'file_size': size,
         'upload_type': 'composer',
-      });
+      }, cancelToken: cancelToken);
       externalId = _requiredString(created, 'external_upload_identifier');
       final identifier = _requiredString(created, 'unique_identifier');
       final parts = <Map<String, dynamic>>[];
@@ -127,7 +140,7 @@ class S3MultipartUpload {
         final signed = await _post('batch-presign-multipart-parts', {
           'unique_identifier': identifier,
           'part_numbers': numbers,
-        });
+        }, cancelToken: cancelToken);
         final urls = signed['presigned_urls'];
         if (urls is! Map) throw const FormatException('缺少分片签名');
         for (final number in numbers) {
@@ -142,18 +155,52 @@ class S3MultipartUpload {
           }
           final remaining = size - (number - 1) * bytesPerPart;
           final expected = remaining < bytesPerPart ? remaining : bytesPerPart;
+          checkUploadCancelled(cancelToken);
           final bytes = await input.read(expected);
           if (bytes.length != expected) {
             throw const FileSystemException('上传文件已变化');
           }
-          final etag = await _put(uri, bytes, number);
+          var partHighWater = 0;
+          final etag = await _put(
+            uri,
+            bytes,
+            number,
+            cancelToken: cancelToken,
+            onSendProgress: (sent, _) {
+              // 同一分片重试只更新高水位，避免累计重复字节或进度倒退。
+              final current = sent.clamp(0, expected);
+              if (current > partHighWater) partHighWater = current;
+              onProgress?.call(
+                UploadProgress(
+                  phase: UploadPhase.uploading,
+                  sentBytes: completedBytes + partHighWater,
+                  totalBytes: size,
+                ),
+              );
+            },
+          );
+          completedBytes += expected;
+          onProgress?.call(
+            UploadProgress(
+              phase: UploadPhase.uploading,
+              sentBytes: completedBytes,
+              totalBytes: size,
+            ),
+          );
           parts.add({'part_number': number, 'etag': etag});
         }
       }
+      onProgress?.call(
+        UploadProgress(
+          phase: UploadPhase.processing,
+          sentBytes: size,
+          totalBytes: size,
+        ),
+      );
       final result = await _post('complete-multipart', {
         'unique_identifier': identifier,
         'parts': parts,
-      });
+      }, cancelToken: cancelToken);
       trace.event(
         'multipart_complete',
         fields: {'durationMs': watch.elapsedMilliseconds},
@@ -166,10 +213,17 @@ class S3MultipartUpload {
         error: error,
       );
       if (externalId != null) {
+        final cleanupToken = CancelToken();
         try {
           await _post('abort-multipart', {
             'external_upload_identifier': externalId,
-          }).timeout(const Duration(seconds: 5));
+          }, cancelToken: cleanupToken).timeout(
+            const Duration(seconds: 5),
+            onTimeout: () {
+              cleanupToken.cancel('清理请求超时');
+              throw const FileSystemException('清理请求超时');
+            },
+          );
         } catch (cleanupError) {
           trace.event('multipart_cleanup_failed', error: cleanupError);
           // 清理失败不覆盖原始上传错误，也不自动重新创建上传。
@@ -182,8 +236,15 @@ class S3MultipartUpload {
     }
   }
 
-  Future<String> _put(Uri uri, Uint8List bytes, int partNumber) async {
+  Future<String> _put(
+    Uri uri,
+    Uint8List bytes,
+    int partNumber, {
+    CancelToken? cancelToken,
+    ProgressCallback? onSendProgress,
+  }) async {
     for (var attempt = 0; ; attempt++) {
+      checkUploadCancelled(cancelToken);
       final watch = Stopwatch()..start();
       final fields = <String, Object?>{
         'partNumber': partNumber,
@@ -197,6 +258,8 @@ class S3MultipartUpload {
         final response = await storage.putUri<dynamic>(
           uri,
           data: Stream.value(bytes),
+          cancelToken: cancelToken,
+          onSendProgress: onSendProgress,
           options: Options(
             headers: {Headers.contentLengthHeader: bytes.length},
             contentType: 'application/octet-stream',
@@ -227,7 +290,8 @@ class S3MultipartUpload {
           fields: {...fields, 'durationMs': watch.elapsedMilliseconds},
           error: error,
         );
-        if (error is! DioException) rethrow;
+        checkUploadCancelled(cancelToken);
+        if (error is! DioException || CancelToken.isCancel(error)) rethrow;
         final status = error.response?.statusCode;
         Never giveUp() => throw MultipartStorageException(error);
         final retryable =
@@ -242,7 +306,10 @@ class S3MultipartUpload {
           'multipart_part_retry',
           fields: {...fields, 'delayMs': (attempt + 1) * 1000},
         );
-        await Future<void>.delayed(Duration(seconds: attempt + 1));
+        await waitForUpload(
+          Future<void>.delayed(Duration(seconds: attempt + 1)),
+          cancelToken,
+        );
       }
     }
   }

@@ -130,8 +130,9 @@ void main() {
       if (saved) {
         await tester.pump(const Duration(seconds: 3));
         expect(remote?.reply, '等待舍弃的正文');
-        // cfluxdo 顶栏的舍弃是直出的 🗑 图标按钮
-        await tester.tap(find.byTooltip(S.current.common_discard));
+        await tester.tap(find.byKey(const ValueKey('composer-header-more')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const ValueKey('composer-header-discard')));
         await tester.pumpAndSettle();
         await tester.tap(
           find.widgetWithText(TextButton, S.current.common_cancel),
@@ -148,7 +149,9 @@ void main() {
       final previousWrites = writes;
       deletionStarted = Completer<void>();
       releaseDeletion = Completer<void>();
-      await tester.tap(find.byTooltip(S.current.common_discard));
+      await tester.tap(find.byKey(const ValueKey('composer-header-more')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('composer-header-discard')));
       await tester.pumpAndSettle();
       await tester.tap(
         find.widgetWithText(FilledButton, S.current.common_discard),

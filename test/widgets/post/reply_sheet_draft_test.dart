@@ -224,7 +224,7 @@ void main() {
     );
   }
 
-  testWidgets('富文本冲突时点状态图标选云端，重建文档且旧编辑器卸载不回写', skip: richSkip != null, (
+  testWidgets('富文本冲突时从更多菜单选云端，重建文档且旧编辑器卸载不回写', skip: richSkip != null, (
     tester,
   ) async {
     var remote = const Draft(
@@ -254,20 +254,24 @@ void main() {
       sequence: 2,
       data: DraftData(reply: '另一设备的最新版本', action: 'reply'),
     );
-    // 富文本 800ms 镜像 + 草稿 2s 防抖后发出保存，撞 409 后核对云端 → 冲突
-    final status = find.byKey(const ValueKey('composer-draft-status'));
-    for (var i = 0; i < 6 && status.evaluate().isEmpty; i++) {
+    // 富文本 800ms 镜像 + 草稿 2s 防抖后发出保存，撞 409 后核对云端 → 冲突，
+    // 页头「更多」入口挂上提醒红点
+    final attention = find.byKey(const ValueKey('composer-draft-attention'));
+    for (var i = 0; i < 6 && attention.evaluate().isEmpty; i++) {
       await tester.pump(const Duration(seconds: 1));
-      await _settleAsync(tester, () => status.evaluate().isNotEmpty);
+      await _settleAsync(tester, () => attention.evaluate().isNotEmpty);
     }
-    expect(status, findsOneWidget);
+    expect(attention, findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('composer-header-more')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
     expect(
-      find.byTooltip(
+      find.text(
         '${S.current.composer_draftConflict} · ${S.current.composer_draftResolve}',
       ),
       findsOneWidget,
     );
-    await tester.tap(status);
+    await tester.tap(find.byKey(const ValueKey('composer-draft-status-item')));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
     await tester.tap(find.text(S.current.composer_draftUseRemote));

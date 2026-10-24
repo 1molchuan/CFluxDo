@@ -102,5 +102,21 @@
   "webviewAdapter_title": "WebView Network Engine",
   "networkSettings_upload": "File uploads",
   "networkSettings_forceDisableMultipart": "Force disable multipart uploads",
-  "networkSettings_forceDisableMultipartDescription": "Use standard uploads for all files regardless of site settings. Enable if multipart uploads are failing. Applies to the next upload."
+  "networkSettings_forceDisableMultipartDescription": "Use standard uploads for all files regardless of site settings. Enable if multipart uploads are failing. Applies to the next upload.",
+  "engineStatus_reasonFallback": "Cronet fell back to the backup adapter",
+  "networkAdapter_autoFallback": "Auto fallback",
+  "networkAdapter_autoFallbackDesc": "Cronet unavailable, switched to fallback adapter",
+  "networkAdapter_degradeReason": "Cronet fallback reason",
+  "networkAdapter_fallback": "Fallback",
+  "networkAdapter_fallbackStatus": "Fallback status",
+  "networkAdapter_forceFallback": "Force fallback adapter",
+  "networkAdapter_forceFallbackDesc": "Disable Cronet, use NetworkHttpAdapter",
+  "networkAdapter_resetFallback": "Reset fallback",
+  "networkAdapter_resetFallbackDesc": "Clear fallback record, retry Cronet on next launch",
+  "networkAdapter_resetSuccess": "Reset done, restart to apply",
+  "networkAdapter_settingSaved": "Setting saved, restart to apply",
+  "networkAdapter_simulateError": "Simulate Cronet error",
+  "networkAdapter_simulateErrorDesc": "Trigger fallback process for testing",
+  "networkAdapter_simulateSuccess": "Simulated fallback triggered, check status",
+  "networkAdapter_viewReason": "View reason"
 }

@@ -123,5 +123,21 @@
   "webviewAdapter_title": "WebView 网络引擎",
   "networkSettings_upload": "文件上传",
   "networkSettings_forceDisableMultipart": "强制关闭分片上传",
-  "networkSettings_forceDisableMultipartDescription": "开启后，所有文件均使用普通上传，忽略站点分片配置。服务端分片异常时可开启，对下一次上传生效。"
+  "networkSettings_forceDisableMultipartDescription": "开启后，所有文件均使用普通上传，忽略站点分片配置。服务端分片异常时可开启，对下一次上传生效。",
+  "engineStatus_reasonFallback": "Cronet 已降级，使用备用适配器",
+  "networkAdapter_autoFallback": "已自动降级",
+  "networkAdapter_autoFallbackDesc": "检测到 Cronet 不可用，已切换到备用适配器",
+  "networkAdapter_degradeReason": "Cronet 降级原因",
+  "networkAdapter_fallback": "备用",
+  "networkAdapter_fallbackStatus": "降级状态",
+  "networkAdapter_forceFallback": "强制使用备用适配器",
+  "networkAdapter_forceFallbackDesc": "禁用 Cronet，使用 NetworkHttpAdapter",
+  "networkAdapter_resetFallback": "重置降级状态",
+  "networkAdapter_resetFallbackDesc": "清除降级记录，下次启动重新尝试 Cronet",
+  "networkAdapter_resetSuccess": "已重置，重启应用后生效",
+  "networkAdapter_settingSaved": "设置已保存，重启应用后生效",
+  "networkAdapter_simulateError": "模拟 Cronet 错误",
+  "networkAdapter_simulateErrorDesc": "触发降级流程，测试自动降级功能",
+  "networkAdapter_simulateSuccess": "已触发模拟降级，请查看降级状态",
+  "networkAdapter_viewReason": "查看降级原因"
 }

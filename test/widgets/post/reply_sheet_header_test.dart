@@ -14,6 +14,7 @@ import 'package:fluxdo/services/discourse/discourse_service.dart';
 import 'package:fluxdo/services/local_notification_service.dart';
 import 'package:fluxdo/services/preloaded_data_service.dart';
 import 'package:fluxdo/utils/platform_utils.dart';
+import 'package:fluxdo/widgets/markdown_editor/composer_submit_button.dart';
 import 'package:fluxdo/widgets/post/reply_sheet.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -96,11 +97,10 @@ void main() {
     expect(row, findsOneWidget);
     final name = find.descendant(of: row, matching: find.text('@$_longName'));
     expect(name, findsOneWidget);
-    expect(tester.widget<Text>(name).overflow, isNull);
+    expect(tester.widget<Text>(name).overflow, isNot(TextOverflow.ellipsis));
     expect(find.text(S.current.common_reply), findsOneWidget);
-    // 按钮没被挤掉
-    expect(find.text(S.current.common_send), findsOneWidget);
-    expect(find.text(S.current.common_discard), findsOneWidget);
+    // 发送按钮没被挤掉
+    expect(find.byType(ComposerSubmitButton), findsOneWidget);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
     // 草稿加载、presence 离开频道等收尾计时器跑完
