@@ -34,6 +34,124 @@ double _wrapAngle(double a) {
   return r;
 }
 
+/// 菜单落位：圆心、展开方向、半径与扇形窗口。
+///
+/// 圆心钉在锚点上沿（上方放不下时翻到下沿、向下展开）；贴左右屏幕边缘时
+/// **不挪圆心**，优先「旋转扇形窗口」，其次收窄窗口，窗口窄到项拥挤才加大
+/// 半径——菜单项始终紧贴锚点展开、不出屏。[RadialLongPressMenu] 与话题
+/// 进度条手势共用（墨笺阅读条的楼层数字贴着右边缘）。
+class RadialMenuPlacement {
+  const RadialMenuPlacement({
+    required this.center,
+    required this.direction,
+    required this.radius,
+    required this.sweepStart,
+    required this.sweepEnd,
+  });
+
+  final Offset center;
+  final RadialMenuDirection direction;
+  final double radius;
+  final double sweepStart;
+  final double sweepEnd;
+
+  /// 项放大态的最大半径（48 * 1.2 / 2），加边距用于越界判断
+  static const double _itemHalf = 29.0;
+  static const double _edgeMargin = 8.0;
+
+  /// 相邻项圆心间的最小弧长（48 项径 + 8 间隙）
+  static const double _minArcPerItem = 56.0;
+
+  /// 扇形单侧最大偏角（弧度，~115°）：允许窗口越过水平线一点，
+  /// 让贴边时的扇子有足够展开空间，但不至于绕到锚点背面
+  static const double _maxTilt = 2.0;
+
+  /// 半径补偿上限（仅在窗口收窄仍不够时启用）
+  static const double _maxRadius = 150.0;
+
+  /// 相邻项弧长低于此值（项径 48 + 2）即视为挤在一起
+  static const double _minCrowdedArc = 50.0;
+
+  /// [anchor] 为锚点的全局矩形，[screenSize]/[safePadding] 取自 MediaQuery。
+  /// [maxTilt] 是扇形单侧最大偏角：默认允许略越过水平线；锚点在底栏里时传
+  /// π/2，菜单项不会折到锚点两侧、压住底栏，排不下就加大半径。
+  /// [allowShift] 为 true 时，加大半径后仍挤（相邻项弧长不足一个项宽）就
+  /// 改成完整半圆、圆心水平挪进屏内——按压区本身是高亮死区，起手不会误选
+  factory RadialMenuPlacement.fit({
+    required Rect anchor,
+    required int itemCount,
+    required Size screenSize,
+    required EdgeInsets safePadding,
+    double maxTilt = _maxTilt,
+    bool allowShift = false,
+  }) {
+    var cx = anchor.center.dx;
+    final xMin = _edgeMargin + _itemHalf;
+    final xMax = screenSize.width - _edgeMargin - _itemHalf;
+
+    // 求扇形窗口（极轴偏角 φ，0 = 正前方，左负右正），圆心钉死在锚点：
+    // 1) 由屏幕左右边界反解 φ 允许区间 [lo, hi]（项水平偏移 = R·sin φ）
+    // 2) 优先只用水平线以内的部分 [loPref, hiPref]（屏幕中部即完整半圆）
+    // 3) 不够排下所有项时向水平线外延伸到刚好够（旋转+收窄，不挪圆心）
+    // 4) 仍不够才加大半径重算（半径越大约束越松、所需角度越小）
+    double radius = RadialMenuSession.radiusForCount(itemCount);
+    double sweepStart = -math.pi / 2;
+    double sweepEnd = math.pi / 2;
+    for (var i = 0; i < 3; i++) {
+      final sMin = (xMin - cx) / radius;
+      final sMax = (xMax - cx) / radius;
+      final lo = sMin <= -1 ? -maxTilt : math.asin(sMin.clamp(-1.0, 1.0));
+      final hi = sMax >= 1 ? maxTilt : math.asin(sMax.clamp(-1.0, 1.0));
+      final loPref = math.max(lo, -math.pi / 2);
+      final hiPref = math.min(hi, math.pi / 2);
+      final needed = itemCount > 1
+          ? _minArcPerItem * (itemCount - 1) / radius
+          : 0.0;
+      if (hiPref - loPref >= needed) {
+        sweepStart = loPref;
+        sweepEnd = hiPref;
+        break;
+      }
+      if (hi - lo >= needed) {
+        sweepStart = (-needed / 2).clamp(lo, hi - needed);
+        sweepEnd = sweepStart + needed;
+        break;
+      }
+      // 整个允许区间都排不下：加大半径（或已到上限时用满区间兜底）
+      sweepStart = lo;
+      sweepEnd = hi;
+      if (radius >= _maxRadius) break;
+      radius = math.min(
+        _minArcPerItem * (itemCount - 1) / math.max(hi - lo, 0.3),
+        _maxRadius,
+      );
+    }
+
+    if (allowShift &&
+        itemCount > 1 &&
+        radius * (sweepEnd - sweepStart) / (itemCount - 1) < _minCrowdedArc) {
+      radius = RadialMenuSession.radiusForCount(itemCount);
+      sweepStart = -math.pi / 2;
+      sweepEnd = math.pi / 2;
+      final lo = xMin + radius;
+      final hi = xMax - radius;
+      if (lo <= hi) cx = cx.clamp(lo, hi);
+    }
+
+    // 垂直：优先向上展开；上方放不下（贴近屏幕顶部）则翻转向下。
+    // 不做圆心下移 clamp——那会让按压点落到圆心上方，长按瞬间误高亮某一项。
+    final fitExtent = radius + _itemHalf + _edgeMargin;
+    final up = anchor.top - fitExtent >= safePadding.top;
+    return RadialMenuPlacement(
+      center: Offset(cx, up ? anchor.top : anchor.bottom),
+      direction: up ? RadialMenuDirection.up : RadialMenuDirection.down,
+      radius: radius,
+      sweepStart: sweepStart,
+      sweepEnd: sweepEnd,
+    );
+  }
+}
+
 /// 径向菜单会话：管理 OverlayEntry 生命周期、高亮命中与触觉反馈。
 ///
 /// 角度统一使用「极轴偏角 φ」坐标系：φ = 0 指向展开方向的正前方
@@ -621,20 +739,6 @@ class RadialLongPressMenu extends StatefulWidget {
 class _RadialLongPressMenuState extends State<RadialLongPressMenu> {
   final RadialMenuSession _session = RadialMenuSession();
 
-  /// 项放大态的最大半径（48 * 1.2 / 2），加边距用于越界判断
-  static const double _itemHalf = 29.0;
-  static const double _edgeMargin = 8.0;
-
-  /// 相邻项圆心间的最小弧长（48 项径 + 8 间隙）
-  static const double _minArcPerItem = 56.0;
-
-  /// 扇形单侧最大偏角（弧度，~115°）：允许窗口越过水平线一点，
-  /// 让贴边时的扇子有足够展开空间，但不至于绕到锚点背面
-  static const double _maxTilt = 2.0;
-
-  /// 半径补偿上限（仅在窗口收窄仍不够时启用）
-  static const double _maxRadius = 150.0;
-
   @override
   void dispose() {
     _session.dispose();
@@ -651,64 +755,22 @@ class _RadialLongPressMenuState extends State<RadialLongPressMenu> {
     final rect = topLeft & box.size;
 
     final mq = MediaQuery.of(context);
-    final cx = rect.center.dx;
-    final xMin = _edgeMargin + _itemHalf;
-    final xMax = mq.size.width - _edgeMargin - _itemHalf;
-
-    // 求扇形窗口（极轴偏角 φ，0 = 正前方，左负右正），圆心钉死在锚点：
-    // 1) 由屏幕左右边界反解 φ 允许区间 [lo, hi]（项水平偏移 = R·sin φ）
-    // 2) 优先只用水平线以内的部分 [loPref, hiPref]（屏幕中部即完整半圆）
-    // 3) 不够排下所有项时向水平线外延伸到刚好够（旋转+收窄，不挪圆心）
-    // 4) 仍不够才加大半径重算（半径越大约束越松、所需角度越小）
-    double radius = RadialMenuSession.radiusForCount(items.length);
-    double sweepStart = -math.pi / 2;
-    double sweepEnd = math.pi / 2;
-    for (var i = 0; i < 3; i++) {
-      final sMin = (xMin - cx) / radius;
-      final sMax = (xMax - cx) / radius;
-      final lo = sMin <= -1 ? -_maxTilt : math.asin(sMin.clamp(-1.0, 1.0));
-      final hi = sMax >= 1 ? _maxTilt : math.asin(sMax.clamp(-1.0, 1.0));
-      final loPref = math.max(lo, -math.pi / 2);
-      final hiPref = math.min(hi, math.pi / 2);
-      final needed = items.length > 1
-          ? _minArcPerItem * (items.length - 1) / radius
-          : 0.0;
-      if (hiPref - loPref >= needed) {
-        sweepStart = loPref;
-        sweepEnd = hiPref;
-        break;
-      }
-      if (hi - lo >= needed) {
-        sweepStart = (-needed / 2).clamp(lo, hi - needed);
-        sweepEnd = sweepStart + needed;
-        break;
-      }
-      // 整个允许区间都排不下：加大半径（或已到上限时用满区间兜底）
-      sweepStart = lo;
-      sweepEnd = hi;
-      if (radius >= _maxRadius) break;
-      radius = math.min(
-        _minArcPerItem * (items.length - 1) / math.max(hi - lo, 0.3),
-        _maxRadius,
-      );
-    }
-
-    // 垂直：优先向上展开；上方放不下（贴近屏幕顶部）则翻转向下。
-    // 不做圆心下移 clamp——那会让按压点落到圆心上方，长按瞬间误高亮某一项。
-    final fitExtent = radius + _itemHalf + _edgeMargin;
-    final up = rect.top - fitExtent >= mq.padding.top;
-    final direction = up ? RadialMenuDirection.up : RadialMenuDirection.down;
-    final anchorY = up ? rect.top : rect.bottom;
+    final placement = RadialMenuPlacement.fit(
+      anchor: rect,
+      itemCount: items.length,
+      screenSize: mq.size,
+      safePadding: mq.padding,
+    );
 
     _session.open(
       context: context,
-      center: Offset(cx, anchorY),
+      center: placement.center,
       pressArea: rect,
       items: items,
-      direction: direction,
-      radius: radius,
-      sweepStart: sweepStart,
-      sweepEnd: sweepEnd,
+      direction: placement.direction,
+      radius: placement.radius,
+      sweepStart: placement.sweepStart,
+      sweepEnd: placement.sweepEnd,
       pressAreaIndicatorBuilder: widget.pressAreaIndicatorBuilder,
     );
     _session.updatePointer(details.globalPosition);

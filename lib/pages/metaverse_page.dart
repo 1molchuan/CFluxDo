@@ -3,6 +3,7 @@ import 'package:app_icons/app_icons.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:m3e_ui/m3e_ui.dart';
+
 import '../providers/theme_provider.dart';
 import '../services/ldc_oauth_service.dart';
 import '../services/cdk_oauth_service.dart';
@@ -47,10 +48,12 @@ class _MetaversePageState extends ConsumerState<MetaversePage> {
   Future<void> _refreshEnabledServices() async {
     if (_ldcEnabled) {
       await ref.read(ldcUserInfoProvider.future).catchError((_) => null);
+      if (!mounted) return;
       ref.read(ldcUserInfoProvider.notifier).refresh();
     }
     if (_cdkEnabled) {
       await ref.read(cdkUserInfoProvider.future).catchError((_) => null);
+      if (!mounted) return;
       ref.read(cdkUserInfoProvider.notifier).refresh();
     }
   }
@@ -79,8 +82,9 @@ class _MetaversePageState extends ConsumerState<MetaversePage> {
       if (result && mounted) {
         final prefs = await SharedPreferences.getInstance();
         await prefs.setBool(_ldcEnabledKey, true);
+        if (!mounted) return;
         setState(() => _ldcEnabled = true);
-        ref.read(ldcUserInfoProvider.notifier).refresh();
+        await ref.read(ldcUserInfoProvider.notifier).refresh();
         if (mounted) {
           ToastService.showSuccess(S.current.metaverse_ldcAuthSuccess);
         }
@@ -93,16 +97,15 @@ class _MetaversePageState extends ConsumerState<MetaversePage> {
   }
 
   Future<void> _disableLdc() async {
+    final notifier = ref.read(ldcUserInfoProvider.notifier);
     try {
       final service = LdcOAuthService();
       await service.logout();
     } catch (e) {
       // 忽略登出错误
     }
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_ldcEnabledKey, false);
-    setState(() => _ldcEnabled = false);
-    ref.read(ldcUserInfoProvider.notifier).clear();
+    await notifier.disable();
+    if (mounted) setState(() => _ldcEnabled = false);
   }
 
   Future<void> _toggleCdk(bool value) async {
@@ -129,8 +132,9 @@ class _MetaversePageState extends ConsumerState<MetaversePage> {
       if (result && mounted) {
         final prefs = await SharedPreferences.getInstance();
         await prefs.setBool(_cdkEnabledKey, true);
+        if (!mounted) return;
         setState(() => _cdkEnabled = true);
-        ref.read(cdkUserInfoProvider.notifier).refresh();
+        await ref.read(cdkUserInfoProvider.notifier).refresh();
         if (mounted) {
           ToastService.showSuccess(S.current.metaverse_cdkAuthSuccess);
         }
@@ -143,16 +147,15 @@ class _MetaversePageState extends ConsumerState<MetaversePage> {
   }
 
   Future<void> _disableCdk() async {
+    final notifier = ref.read(cdkUserInfoProvider.notifier);
     try {
       final service = CdkOAuthService();
       await service.logout();
     } catch (e) {
       // 忽略登出错误
     }
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_cdkEnabledKey, false);
-    setState(() => _cdkEnabled = false);
-    ref.read(cdkUserInfoProvider.notifier).clear();
+    await notifier.disable();
+    if (mounted) setState(() => _cdkEnabled = false);
   }
 
   @override
@@ -218,8 +221,10 @@ class _MetaversePageState extends ConsumerState<MetaversePage> {
       if (!mounted) return;
       final result = await service.reauthorize(context);
       if (result && mounted) {
-        ref.read(ldcUserInfoProvider.notifier).refresh();
-        ToastService.showSuccess(S.current.metaverse_ldcReauthSuccess);
+        await ref.read(ldcUserInfoProvider.notifier).refresh();
+        if (mounted) {
+          ToastService.showSuccess(S.current.metaverse_ldcReauthSuccess);
+        }
       }
     } catch (e) {
       if (mounted) {
@@ -240,8 +245,10 @@ class _MetaversePageState extends ConsumerState<MetaversePage> {
       if (!mounted) return;
       final result = await service.reauthorize(context);
       if (result && mounted) {
-        ref.read(cdkUserInfoProvider.notifier).refresh();
-        ToastService.showSuccess(S.current.metaverse_cdkReauthSuccess);
+        await ref.read(cdkUserInfoProvider.notifier).refresh();
+        if (mounted) {
+          ToastService.showSuccess(S.current.metaverse_cdkReauthSuccess);
+        }
       }
     } catch (e) {
       if (mounted) {
@@ -257,8 +264,9 @@ class _MetaversePageState extends ConsumerState<MetaversePage> {
   Widget _buildLdcServiceItem(ThemeData theme) {
     if (_ldcEnabled) {
       return LdcBalanceCard(
-        onDisable: _ldcProcessing ? null : () => _toggleLdc(false),
-        onReauthorize: _ldcProcessing ? null : _reauthorizeLdc,
+        isProcessing: _ldcProcessing,
+        onDisable: () => _toggleLdc(false),
+        onReauthorize: _reauthorizeLdc,
       );
     }
 
@@ -278,9 +286,7 @@ class _MetaversePageState extends ConsumerState<MetaversePage> {
     // 未开启状态：展示连接卡片
     return Card(
       color: theme.colorScheme.surfaceContainerHigh,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(24),
-      ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
       child: InkWell(
         onTap: _ldcProcessing ? null : () => _toggleLdc(true),
         borderRadius: BorderRadius.circular(24),
@@ -328,7 +334,7 @@ class _MetaversePageState extends ConsumerState<MetaversePage> {
               else
                 FilledButton(
                   onPressed: () => _toggleLdc(true),
-                   style: FilledButton.styleFrom(
+                  style: FilledButton.styleFrom(
                     padding: const EdgeInsets.symmetric(horizontal: 16),
                     visualDensity: VisualDensity.compact,
                   ),
@@ -344,8 +350,9 @@ class _MetaversePageState extends ConsumerState<MetaversePage> {
   Widget _buildCdkServiceItem(ThemeData theme) {
     if (_cdkEnabled) {
       return CdkBalanceCard(
-        onDisable: _cdkProcessing ? null : () => _toggleCdk(false),
-        onReauthorize: _cdkProcessing ? null : _reauthorizeCdk,
+        isProcessing: _cdkProcessing,
+        onDisable: () => _toggleCdk(false),
+        onReauthorize: _reauthorizeCdk,
       );
     }
 
@@ -365,9 +372,7 @@ class _MetaversePageState extends ConsumerState<MetaversePage> {
     // 未开启状态：展示连接卡片
     return Card(
       color: theme.colorScheme.surfaceContainerHigh,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(24),
-      ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
       child: InkWell(
         onTap: _cdkProcessing ? null : () => _toggleCdk(true),
         borderRadius: BorderRadius.circular(24),
@@ -415,7 +420,7 @@ class _MetaversePageState extends ConsumerState<MetaversePage> {
               else
                 FilledButton(
                   onPressed: () => _toggleCdk(true),
-                   style: FilledButton.styleFrom(
+                  style: FilledButton.styleFrom(
                     padding: const EdgeInsets.symmetric(horizontal: 16),
                     visualDensity: VisualDensity.compact,
                   ),
@@ -486,9 +491,7 @@ class _MetaversePageState extends ConsumerState<MetaversePage> {
     }
     return Card(
       color: theme.colorScheme.surfaceContainerLow.withValues(alpha: 0.5),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-      ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
         child: Center(
