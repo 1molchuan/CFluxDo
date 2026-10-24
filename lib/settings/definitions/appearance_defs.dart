@@ -20,6 +20,7 @@ import '../../providers/preferences_provider.dart';
 import '../../providers/theme_provider.dart';
 import '../../services/app_background_service.dart';
 import '../../services/custom_font_service.dart';
+import '../../services/recommended_font_service.dart';
 import '../../services/fonts/system_font_service.dart';
 import '../../services/toast_service.dart';
 import '../../theme/app_background.dart';
@@ -1431,8 +1432,254 @@ class _FontSection extends ConsumerWidget {
               ),
             ),
           ],
+          const _RecommendedFontsBlock(),
         ],
       ),
+    );
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════
+// 推荐字体
+// ══════════════════════════════════════════════════════════════════
+
+/// 推荐字体列表：下载 → 校验 → 注册进引擎 → 作为「自定义字体」启用。
+/// 文件由 [RecommendedFontService] 管理，启用只是把它设成当前自定义字体。
+class _RecommendedFontsBlock extends ConsumerStatefulWidget {
+  const _RecommendedFontsBlock();
+
+  @override
+  ConsumerState<_RecommendedFontsBlock> createState() =>
+      _RecommendedFontsBlockState();
+}
+
+class _RecommendedFontsBlockState extends ConsumerState<_RecommendedFontsBlock> {
+  RecommendedFontService get _service => RecommendedFontService.instance;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_service.ensureLoaded());
+  }
+
+  Future<void> _download(RecommendedFont font) async {
+    final l10n = context.l10n;
+    String path;
+    try {
+      path = await _service.download(font);
+    } catch (_) {
+      // 用户取消时 error 为 null，不提示
+      if (mounted && _service.progressOf(font.id)?.error != null) {
+        ToastService.showError(l10n.appearance_recommendedFontFailed);
+      }
+      return;
+    }
+    if (!mounted) return;
+    await _use(font, path);
+  }
+
+  Future<void> _use(RecommendedFont font, String path) async {
+    final l10n = context.l10n;
+    final loaded = await CustomFontService.load(path);
+    if (!mounted) return;
+    if (!loaded) {
+      ToastService.showError(l10n.appearance_recommendedFontLoadFailed);
+      return;
+    }
+    await ref
+        .read(themeProvider.notifier)
+        .setCustomFont(path: path, name: font.name);
+  }
+
+  Future<void> _delete(RecommendedFont font) async {
+    final path = _service.installedPath(font);
+    if (path != null && ref.read(themeProvider).customFontPath == path) {
+      // 正在用它：先退回系统字体并清掉记录（CustomFontService 不会删这个目录里的文件）
+      await ref.read(themeProvider.notifier).removeCustomFont();
+    }
+    await _service.remove(font);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    final l10n = context.l10n;
+    final activePath = ref.watch(
+      themeProvider.select(
+        (s) => s.fontFamily == AppFontFamily.custom ? s.customFontPath : null,
+      ),
+    );
+    return ListenableBuilder(
+      listenable: _service,
+      builder: (context, _) {
+        final fonts = _service.fonts;
+        if (fonts.isEmpty) return const SizedBox.shrink();
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 2),
+              child: Text(
+                l10n.appearance_recommendedFonts,
+                style: theme.textTheme.titleSmall,
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+              child: Text(
+                l10n.appearance_recommendedFontsHint,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: cs.onSurfaceVariant,
+                ),
+              ),
+            ),
+            for (final font in fonts)
+              _RecommendedFontRow(
+                font: font,
+                installedPath: _service.installedPath(font),
+                active: activePath != null &&
+                    _service.installedPath(font) == activePath,
+                downloading: _service.isDownloading(font.id),
+                progress: _service.progressOf(font.id),
+                onDownload: () => _download(font),
+                onCancel: () => _service.cancel(font.id),
+                onUse: (path) => _use(font, path),
+                onDelete: () => _delete(font),
+              ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _RecommendedFontRow extends StatelessWidget {
+  const _RecommendedFontRow({
+    required this.font,
+    required this.installedPath,
+    required this.active,
+    required this.downloading,
+    required this.progress,
+    required this.onDownload,
+    required this.onCancel,
+    required this.onUse,
+    required this.onDelete,
+  });
+
+  final RecommendedFont font;
+  final String? installedPath;
+  final bool active;
+  final bool downloading;
+  final RecommendedFontProgress? progress;
+  final VoidCallback onDownload;
+  final VoidCallback onCancel;
+  final void Function(String path) onUse;
+  final VoidCallback onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    final l10n = context.l10n;
+    final path = installedPath;
+    final family = path == null
+        ? null
+        : RecommendedFontService.familyNameFor(path);
+    final meta = [
+      if (font.nameEn.isNotEmpty) font.nameEn,
+      if (font.sizeLabel.isNotEmpty) font.sizeLabel,
+      if (font.license.isNotEmpty) font.license,
+      if (font.domesticMirror) l10n.appearance_recommendedFontDomestic,
+    ].join(' · ');
+    final fraction = progress?.fraction;
+
+    Widget trailing;
+    if (downloading) {
+      trailing = IconButton(
+        tooltip: l10n.appearance_recommendedFontCancel,
+        onPressed: onCancel,
+        icon: SizedBox(
+          width: 24,
+          height: 24,
+          child: CircularProgressIndicator(value: fraction, strokeWidth: 2.5),
+        ),
+      );
+    } else if (path == null) {
+      trailing = IconButton(
+        tooltip: l10n.appearance_recommendedFontDownload,
+        onPressed: onDownload,
+        icon: Icon(Symbols.download_rounded, color: cs.primary),
+      );
+    } else {
+      trailing = Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (active)
+            Padding(
+              padding: const EdgeInsets.only(right: 4),
+              child: Icon(Symbols.check_circle_rounded, color: cs.primary),
+            )
+          else
+            TextButton(
+              onPressed: () => onUse(path),
+              child: Text(l10n.appearance_recommendedFontUse),
+            ),
+          IconButton(
+            tooltip: l10n.appearance_recommendedFontDelete,
+            onPressed: onDelete,
+            icon: Icon(Symbols.delete_rounded, color: cs.onSurfaceVariant),
+          ),
+        ],
+      );
+    }
+
+    return ListTile(
+      dense: true,
+      contentPadding: const EdgeInsets.fromLTRB(16, 0, 8, 0),
+      leading: Container(
+        width: 40,
+        height: 40,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: cs.surfaceContainerHighest.withValues(alpha: 0.6),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Text(
+          '字',
+          style: TextStyle(
+            fontSize: 20,
+            fontFamily: family,
+            color: family == null ? cs.onSurfaceVariant : cs.onSurface,
+          ),
+        ),
+      ),
+      title: Text(
+        font.name,
+        style: theme.textTheme.bodyLarge?.copyWith(fontFamily: family),
+      ),
+      subtitle: downloading
+          ? Padding(
+              padding: const EdgeInsets.only(top: 6, right: 8),
+              child: LinearProgressIndicator(value: fraction, minHeight: 3),
+            )
+          : Text(
+              family == null ? meta : '${font.preview}\n$meta',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: cs.onSurfaceVariant,
+                fontFamily: family,
+              ),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+      trailing: trailing,
+      onTap: downloading
+          ? null
+          : path == null
+          ? onDownload
+          : active
+          ? null
+          : () => onUse(path),
     );
   }
 }

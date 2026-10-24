@@ -205,5 +205,15 @@
   "appearance_glassFull": "完整玻璃",
   "appearance_glassFullDesc": "啟用光學折射；後端不支援或着色器無法使用時退回基礎磨砂。",
   "appearance_glassUnsupported": "目前的渲染後端不支援着色器濾鏡，自動和完整玻璃均使用基礎磨砂。",
-  "appearance_glassSettingsEntry": "前往外觀設定，統一調整底欄與編輯工具島的玻璃效果。"
+  "appearance_glassSettingsEntry": "前往外觀設定，統一調整底欄與編輯工具島的玻璃效果。",
+  "appearance_recommendedFonts": "推薦字體",
+  "appearance_recommendedFontsHint": "開源中文字體，下載後一鍵啟用；標有「國內鏡像」的走國內源，其餘從 GitHub 下載可能較慢",
+  "appearance_recommendedFontDownload": "下載",
+  "appearance_recommendedFontUse": "啟用",
+  "appearance_recommendedFontInUse": "使用中",
+  "appearance_recommendedFontDelete": "刪除",
+  "appearance_recommendedFontDomestic": "國內鏡像",
+  "appearance_recommendedFontFailed": "下載失敗，請稍後重試",
+  "appearance_recommendedFontLoadFailed": "字體檔案無法載入",
+  "appearance_recommendedFontCancel": "取消下載"
 }

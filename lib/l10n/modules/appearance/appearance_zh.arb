@@ -205,5 +205,15 @@
   "appearance_glassFull": "完整玻璃",
   "appearance_glassFullDesc": "启用光学折射；后端不支持或着色器不可用时回退到基础磨砂。",
   "appearance_glassUnsupported": "当前渲染后端不支持着色器滤镜，自动和完整玻璃均使用基础磨砂。",
-  "appearance_glassSettingsEntry": "前往外观设置，统一调整底栏与编辑工具岛的玻璃效果。"
+  "appearance_glassSettingsEntry": "前往外观设置，统一调整底栏与编辑工具岛的玻璃效果。",
+  "appearance_recommendedFonts": "推荐字体",
+  "appearance_recommendedFontsHint": "开源中文字体，下载后一键启用；标有「国内镜像」的走国内源，其余从 GitHub 下载可能较慢",
+  "appearance_recommendedFontDownload": "下载",
+  "appearance_recommendedFontUse": "启用",
+  "appearance_recommendedFontInUse": "使用中",
+  "appearance_recommendedFontDelete": "删除",
+  "appearance_recommendedFontDomestic": "国内镜像",
+  "appearance_recommendedFontFailed": "下载失败，请稍后重试",
+  "appearance_recommendedFontLoadFailed": "字体文件无法加载",
+  "appearance_recommendedFontCancel": "取消下载"
 }

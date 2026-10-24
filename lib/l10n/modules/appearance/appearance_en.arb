@@ -205,5 +205,15 @@
   "appearance_glassFull": "Full glass",
   "appearance_glassFullDesc": "Enables optical refraction; falls back to basic frost when the backend is unsupported or the shader is unavailable.",
   "appearance_glassUnsupported": "The current rendering backend does not support shader filters. Auto and Full glass both use basic frost.",
-  "appearance_glassSettingsEntry": "Open Appearance to adjust glass effects for the bottom navigation bar and editor tool island together."
+  "appearance_glassSettingsEntry": "Open Appearance to adjust glass effects for the bottom navigation bar and editor tool island together.",
+  "appearance_recommendedFonts": "Recommended fonts",
+  "appearance_recommendedFontsHint": "Open-source Chinese fonts; download once and enable with a tap. Entries marked “CN mirror” use mirrors in mainland China; the rest come from GitHub and may be slow",
+  "appearance_recommendedFontDownload": "Download",
+  "appearance_recommendedFontUse": "Use",
+  "appearance_recommendedFontInUse": "In use",
+  "appearance_recommendedFontDelete": "Delete",
+  "appearance_recommendedFontDomestic": "CN mirror",
+  "appearance_recommendedFontFailed": "Download failed, please try again later",
+  "appearance_recommendedFontLoadFailed": "The font file could not be loaded",
+  "appearance_recommendedFontCancel": "Cancel download"
 }

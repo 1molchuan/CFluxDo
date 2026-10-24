@@ -199,6 +199,7 @@ flutter:
     - assets/polyfill/
     - assets/cook/
     - assets/fonts/MojianSerif-OFL.txt
+    - assets/fonts/recommended_fonts.json
 
   fonts:
     - family: MiSans

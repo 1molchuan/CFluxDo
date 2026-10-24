@@ -1,0 +1,171 @@
+{
+  "version": 1,
+  "updated": "2026-10-24",
+  "fonts": [
+    {
+      "id": "noto-sans-sc",
+      "name": "思源黑体",
+      "nameEn": "Noto Sans SC",
+      "license": "OFL-1.1",
+      "file": "NotoSansSC_400Regular.ttf",
+      "size": 10559284,
+      "sha256": "d45f67f0a7c0ca3f256950777ce6a61cc7ce5f9696d02900cbbaac25f8aa7d16",
+      "preview": "永远相信美好的事情即将发生 Aa 123",
+      "domesticMirror": true,
+      "urls": [
+        {
+          "url": "https://registry.npmmirror.com/@expo-google-fonts/noto-sans-sc/-/noto-sans-sc-0.4.4.tgz",
+          "tgz": "package/400Regular/NotoSansSC_400Regular.ttf"
+        },
+        "https://cdn.jsdelivr.net/npm/@expo-google-fonts/noto-sans-sc@0.4.4/400Regular/NotoSansSC_400Regular.ttf",
+        "https://unpkg.com/@expo-google-fonts/noto-sans-sc@0.4.4/400Regular/NotoSansSC_400Regular.ttf"
+      ]
+    },
+    {
+      "id": "noto-serif-sc",
+      "name": "思源宋体",
+      "nameEn": "Noto Serif SC",
+      "license": "OFL-1.1",
+      "file": "NotoSerifSC_400Regular.ttf",
+      "size": 14807636,
+      "sha256": "c358a69de3df5f423a8946a7b03e3126fb6ba116f1130a463455b4e39e1f0742",
+      "preview": "永远相信美好的事情即将发生 Aa 123",
+      "domesticMirror": true,
+      "urls": [
+        {
+          "url": "https://registry.npmmirror.com/@expo-google-fonts/noto-serif-sc/-/noto-serif-sc-0.4.4.tgz",
+          "tgz": "package/400Regular/NotoSerifSC_400Regular.ttf"
+        },
+        "https://cdn.jsdelivr.net/npm/@expo-google-fonts/noto-serif-sc@0.4.4/400Regular/NotoSerifSC_400Regular.ttf",
+        "https://unpkg.com/@expo-google-fonts/noto-serif-sc@0.4.4/400Regular/NotoSerifSC_400Regular.ttf"
+      ]
+    },
+    {
+      "id": "lxgw-wenkai",
+      "name": "霞鹜文楷",
+      "nameEn": "LXGW WenKai",
+      "license": "OFL-1.1",
+      "file": "LXGWWenKai-Regular.ttf",
+      "size": 25928940,
+      "sha256": "2d73eea94ad808999d90c0000c239a84a33b09d4bc6ab6c5b8bbf1eda8a7fc8b",
+      "preview": "永远相信美好的事情即将发生 Aa 123",
+      "domesticMirror": false,
+      "urls": [
+        "https://github.com/lxgw/LxgwWenKai/releases/download/v1.530/LXGWWenKai-Regular.ttf"
+      ]
+    },
+    {
+      "id": "lxgw-wenkai-screen",
+      "name": "霞鹜文楷 屏幕阅读版",
+      "nameEn": "LXGW WenKai GB Screen",
+      "license": "OFL-1.1",
+      "file": "LXGWWenKaiGBScreen.ttf",
+      "size": 26456786,
+      "sha256": "0df4009ac9dce6eb3b8cb4c4e90de67bb9745e8992a255c03a58dd5fe3f1e503",
+      "preview": "永远相信美好的事情即将发生 Aa 123",
+      "domesticMirror": false,
+      "urls": [
+        "https://github.com/lxgw/LxgwWenKai-Screen/releases/download/v1.530/LXGWWenKaiGBScreen.ttf"
+      ]
+    },
+    {
+      "id": "lxgw-neoxihei",
+      "name": "霞鹜新晰黑",
+      "nameEn": "LXGW Neo XiHei",
+      "license": "OFL-1.1",
+      "file": "LXGWNeoXiHei.ttf",
+      "size": 7473598,
+      "sha256": "80415d3666d9f51cf42ecf82c5350488e6b3f282ab46a3b90dcaa5e212564ecc",
+      "preview": "永远相信美好的事情即将发生 Aa 123",
+      "domesticMirror": false,
+      "urls": [
+        "https://github.com/lxgw/LxgwNeoXiHei/releases/download/v1.308/LXGWNeoXiHei.ttf"
+      ]
+    },
+    {
+      "id": "yozai",
+      "name": "悠哉字体",
+      "nameEn": "Yozai",
+      "license": "OFL-1.1",
+      "file": "Yozai-Regular.ttf",
+      "size": 15605374,
+      "sha256": "25071998a0fe6a72f54c235e714986d259633e5ff670b1a2b5e264387f3316ac",
+      "preview": "永远相信美好的事情即将发生 Aa 123",
+      "domesticMirror": false,
+      "urls": [
+        "https://github.com/lxgw/yozai-font/releases/download/v0.868/Yozai-Regular.ttf"
+      ]
+    },
+    {
+      "id": "xiaolai",
+      "name": "小赖字体",
+      "nameEn": "Xiaolai",
+      "license": "OFL-1.1",
+      "file": "Xiaolai-Regular.ttf",
+      "size": 22220806,
+      "sha256": "e2f68daf0e72777a8cf58bc83de1b98634b251e537ddbfca24b0ae50d1802da2",
+      "preview": "永远相信美好的事情即将发生 Aa 123",
+      "domesticMirror": false,
+      "urls": [
+        "https://github.com/lxgw/kose-font/releases/download/v3.126/Xiaolai-Regular.ttf"
+      ]
+    },
+    {
+      "id": "zcool-xiaowei",
+      "name": "站酷小薇体",
+      "nameEn": "ZCOOL XiaoWei",
+      "license": "OFL-1.1",
+      "file": "ZCOOLXiaoWei_400Regular.ttf",
+      "size": 6302244,
+      "sha256": "f5ffee4980db40005b7d7e76f7e8c7a0f959e87d57c33aeb8c9793a5a1077a35",
+      "preview": "永远相信美好的事情即将发生 Aa 123",
+      "domesticMirror": true,
+      "urls": [
+        {
+          "url": "https://registry.npmmirror.com/@expo-google-fonts/zcool-xiaowei/-/zcool-xiaowei-0.4.1.tgz",
+          "tgz": "package/400Regular/ZCOOLXiaoWei_400Regular.ttf"
+        },
+        "https://cdn.jsdelivr.net/npm/@expo-google-fonts/zcool-xiaowei@0.4.1/400Regular/ZCOOLXiaoWei_400Regular.ttf",
+        "https://unpkg.com/@expo-google-fonts/zcool-xiaowei@0.4.1/400Regular/ZCOOLXiaoWei_400Regular.ttf"
+      ]
+    },
+    {
+      "id": "zcool-kuaile",
+      "name": "站酷快乐体",
+      "nameEn": "ZCOOL KuaiLe",
+      "license": "OFL-1.1",
+      "file": "ZCOOLKuaiLe_400Regular.ttf",
+      "size": 1514968,
+      "sha256": "bc218a547914684c036e0e141bdc60fd94e5fbe22eb84e1f4d1859875fc2415b",
+      "preview": "永远相信美好的事情即将发生 Aa 123",
+      "domesticMirror": true,
+      "urls": [
+        {
+          "url": "https://registry.npmmirror.com/@expo-google-fonts/zcool-kuaile/-/zcool-kuaile-0.4.2.tgz",
+          "tgz": "package/400Regular/ZCOOLKuaiLe_400Regular.ttf"
+        },
+        "https://cdn.jsdelivr.net/npm/@expo-google-fonts/zcool-kuaile@0.4.2/400Regular/ZCOOLKuaiLe_400Regular.ttf",
+        "https://unpkg.com/@expo-google-fonts/zcool-kuaile@0.4.2/400Regular/ZCOOLKuaiLe_400Regular.ttf"
+      ]
+    },
+    {
+      "id": "ma-shan-zheng",
+      "name": "马善政毛笔楷书",
+      "nameEn": "Ma Shan Zheng",
+      "license": "OFL-1.1",
+      "file": "MaShanZheng_400Regular.ttf",
+      "size": 5857936,
+      "sha256": "016752d5574878419a95d6e89304613a7bf8b44199ec0f25308d999dfd75c7de",
+      "preview": "永远相信美好的事情即将发生 Aa 123",
+      "domesticMirror": true,
+      "urls": [
+        {
+          "url": "https://registry.npmmirror.com/@expo-google-fonts/ma-shan-zheng/-/ma-shan-zheng-0.4.3.tgz",
+          "tgz": "package/400Regular/MaShanZheng_400Regular.ttf"
+        },
+        "https://cdn.jsdelivr.net/npm/@expo-google-fonts/ma-shan-zheng@0.4.3/400Regular/MaShanZheng_400Regular.ttf",
+        "https://unpkg.com/@expo-google-fonts/ma-shan-zheng@0.4.3/400Regular/MaShanZheng_400Regular.ttf"
+      ]
+    }
+  ]
+}
