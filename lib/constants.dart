@@ -1,11 +1,14 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' show Locale, PlatformDispatcher;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'config/site_customization.dart';
 import 'config/sites/linuxdo.dart';
+import 'services/app_logger.dart';
 import 'services/windows_webview_environment_service.dart';
 
 /// 应用常量
@@ -39,6 +42,21 @@ class AppConstants {
     _uaInitialized = true;
 
     if (Platform.isWindows || Platform.isLinux) {
+      // 探 UA 要起一个无头 WebView（Windows 还要先建 WebView2 环境），每次
+      // 冷启动都付一遍没有意义：UA 只随运行时版本变。探到的值按版本号缓存，
+      // 版本没变直接用；换了版本或没缓存才真的探一次
+      final runtimeVersion = await _readDesktopWebViewVersion();
+      final cachedUa = await _readDesktopUaCache(runtimeVersion);
+      if (cachedUa != null) {
+        _cachedUserAgent = cachedUa;
+        AppLogger.info(
+          '桌面 WebView UA 命中缓存',
+          tag: 'UserAgent',
+          fields: {'version': runtimeVersion},
+        );
+        _uaCompleter.complete(_cachedUserAgent!);
+        return;
+      }
       try {
         final runtimeUa = await _getDesktopWebViewUserAgent();
         if (runtimeUa != null && runtimeUa.isNotEmpty) {
@@ -46,6 +64,12 @@ class AppConstants {
           debugPrint(
             '[AppConstants] Desktop WebView runtime UA: $_cachedUserAgent',
           );
+          AppLogger.info(
+            '桌面 WebView UA 探测完成',
+            tag: 'UserAgent',
+            fields: {'version': runtimeVersion, 'ua': runtimeUa},
+          );
+          await _writeDesktopUaCache(runtimeVersion, runtimeUa);
         } else {
           _cachedUserAgent = _buildDefaultUserAgent();
           debugPrint(
@@ -78,6 +102,60 @@ class AppConstants {
       _cachedUserAgent = _buildDefaultUserAgent();
     }
     _uaCompleter.complete(_cachedUserAgent!);
+  }
+
+  /// 桌面 WebView UA 缓存：`{"version": 运行时版本, "ua": 探到的 UA}`
+  static const String _desktopUaCacheKey = 'desktop_webview_ua_cache';
+
+  /// WebView 运行时版本（Windows 是 WebView2 运行时，Linux 是 WPE WebKit）；
+  /// 读不到返回 null，此时不用缓存、每次都探
+  static Future<String?> _readDesktopWebViewVersion() async {
+    try {
+      final version = await WebViewEnvironment.getAvailableVersion();
+      final trimmed = version?.trim();
+      return (trimmed == null || trimmed.isEmpty) ? null : trimmed;
+    } catch (e) {
+      debugPrint('[AppConstants] 读取桌面 WebView 运行时版本失败: $e');
+      return null;
+    }
+  }
+
+  static Future<String?> _readDesktopUaCache(String? version) async {
+    if (version == null) return null;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      return desktopUaFromCache(prefs.getString(_desktopUaCacheKey), version);
+    } catch (e) {
+      debugPrint('[AppConstants] 读取桌面 WebView UA 缓存失败: $e');
+      return null;
+    }
+  }
+
+  /// 缓存里的 UA 只在运行时版本一致时可用（纯函数，便于测试）
+  @visibleForTesting
+  static String? desktopUaFromCache(String? cached, String version) {
+    if (cached == null || cached.isEmpty) return null;
+    try {
+      final decoded = jsonDecode(cached);
+      if (decoded is! Map || decoded['version'] != version) return null;
+      final ua = decoded['ua'];
+      return (ua is String && ua.isNotEmpty) ? ua : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static Future<void> _writeDesktopUaCache(String? version, String ua) async {
+    if (version == null) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(
+        _desktopUaCacheKey,
+        jsonEncode({'version': version, 'ua': ua}),
+      );
+    } catch (e) {
+      debugPrint('[AppConstants] 写桌面 WebView UA 缓存失败: $e');
+    }
   }
 
   static Future<String?> _getDesktopWebViewUserAgent() async {
