@@ -95,7 +95,9 @@ class CustomFontService {
   /// 只删本服务 `custom_fonts/` 目录里的文件：推荐字体放在别的目录、由它自己管理，
   /// 「移除自定义字体」只是不再用它，不能把下载好的推荐字体也删掉。
   static Future<void> delete(String? path) async {
-    if (path == null || !path.contains('/$_dirName/')) return;
+    if (path == null) return;
+    // 推荐字体的文件归 RecommendedFontService 管：取消选用不等于删文件
+    if (path.contains('/recommended_fonts/')) return;
     try {
       final file = File(path);
       if (file.existsSync()) {
