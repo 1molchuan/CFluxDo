@@ -1,9 +1,11 @@
+import 'package:app_icons/app_icons.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fluxdo/l10n/slang/strings.g.dart';
 import 'package:fluxdo/pages/topic_detail_page/widgets/mojian_reader_chrome.dart';
+import 'package:fluxdo/providers/preferences_provider.dart';
 import 'package:fluxdo/providers/theme_provider.dart';
 import 'package:fluxdo/services/local_notification_service.dart';
 import 'package:fluxdo/theme/mojian_theme.dart';
@@ -225,5 +227,54 @@ void main() {
     );
     final h = tester.getSize(find.byType(MojianTimeline)).height;
     expect(96 + h, lessThanOrEqualTo(available - 80));
+  });
+
+  testWidgets('阅读条:楼层数字保留进度条手势,长按菜单不出屏', (tester) async {
+    final gestures = <ProgressGestureAction>[];
+    await _pump(
+      tester,
+      Align(
+        alignment: Alignment.bottomCenter,
+        child: MojianReaderBar(
+          streamIndexListenable: ValueNotifier<int>(3),
+          totalCount: 599,
+          isLoggedIn: true,
+          showFloor: true,
+          liked: null,
+          bookmarked: false,
+          onReply: () {},
+          onLike: () {},
+          onBookmark: () {},
+          onProgressTap: () {},
+          onProgressGesture: gestures.add,
+        ),
+      ),
+      size: const Size(411, 900),
+    );
+    final floor = find.text('3 / 599');
+
+    // 左滑 = 下一帖(默认绑定)
+    await tester.drag(floor, const Offset(-160, 0));
+    await tester.pumpAndSettle();
+    expect(gestures, [ProgressGestureAction.nextPost]);
+
+    // 长按弹出半圆菜单:楼层数字贴右边缘,所有项都要在屏内
+    final gesture = await tester.startGesture(tester.getCenter(floor));
+    await tester.pump(const Duration(milliseconds: 260));
+    await tester.pump(const Duration(milliseconds: 400));
+    for (final icon in [
+      Symbols.unfold_more_rounded,
+      Symbols.vertical_align_top_rounded,
+      Symbols.link_rounded,
+      Symbols.auto_awesome_rounded,
+    ]) {
+      final rect = tester.getRect(find.byIcon(icon).last);
+      expect(rect.left, greaterThanOrEqualTo(0), reason: '$icon');
+      expect(rect.right, lessThanOrEqualTo(411), reason: '$icon');
+    }
+    await gesture.moveTo(tester.getCenter(floor));
+    await gesture.up();
+    await tester.pumpAndSettle();
+    expect(gestures, [ProgressGestureAction.nextPost], reason: '原地松手不选任何项');
   });
 }

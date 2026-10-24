@@ -117,8 +117,7 @@ class _TopicProgressGesturesState extends ConsumerState<TopicProgressGestures>
 
     final box = context.findRenderObject() as RenderBox?;
     if (box == null || !box.hasSize) return;
-    final widgetTopLeft = box.localToGlobal(Offset.zero);
-    final widgetTopCenter = widgetTopLeft + Offset(box.size.width / 2, 0);
+    final pressArea = box.localToGlobal(Offset.zero) & box.size;
 
     final items = [
       for (final action in actions)
@@ -132,16 +131,26 @@ class _TopicProgressGesturesState extends ConsumerState<TopicProgressGestures>
         }(),
     ];
 
+    // 经典的悬浮条居中，菜单总是完整半圆；墨笺阅读条的楼层数字贴着右边缘，
+    // 按屏幕边界收窄扇形、必要时加大半径，右侧的项不再出屏，也不折到底栏里
+    final mq = MediaQuery.of(context);
+    final placement = RadialMenuPlacement.fit(
+      anchor: pressArea,
+      itemCount: items.length,
+      screenSize: mq.size,
+      safePadding: mq.padding,
+      maxTilt: math.pi / 2,
+      allowShift: true,
+    );
     _menuSession.open(
       context: context,
-      center: widgetTopCenter,
-      pressArea: Rect.fromLTWH(
-        widgetTopLeft.dx,
-        widgetTopLeft.dy,
-        box.size.width,
-        box.size.height,
-      ),
+      center: placement.center,
+      pressArea: pressArea,
       items: items,
+      direction: placement.direction,
+      radius: placement.radius,
+      sweepStart: placement.sweepStart,
+      sweepEnd: placement.sweepEnd,
     );
 
     // 长按触发，让进度环继续走到 1（视觉上"环走完=菜单完全展开"）
