@@ -994,6 +994,9 @@ class _CfChallengePageState extends State<CfChallengePage> {
     _needsManualAttention = false;
     _snapshotInitialClearance();
     widget.signals.attachReader(_readFreshClearance);
+    widget.signals.attachCurrentReader(
+      () => _readCookieValue('cf_clearance'),
+    );
   }
 
   /// 轮次定稿期间主动读值的入口：只返回与初始快照不同的新值。
@@ -1042,6 +1045,7 @@ class _CfChallengePageState extends State<CfChallengePage> {
   @override
   void dispose() {
     widget.signals.attachReader(null);
+    widget.signals.attachCurrentReader(null);
     _pillDelayTimer?.cancel();
     _timeoutTimer?.cancel();
     _noChallengeCheckTimer?.cancel();

@@ -83,6 +83,9 @@ class FakeRoundEnvironment implements CfRoundEnvironment {
   /// 验证 WebView 里当前的 cf_clearance。
   String? webView;
 
+  /// 验证开始前 WebView 里就有的值：真实验证页会把它和 jar 备份一起当旧值
+  String? staleWebView;
+
   final List<String> calls = [];
   final List<int> recordedFailures = [];
   final List<CfVerifyMode> joins = [];
@@ -135,8 +138,11 @@ class FakeRoundEnvironment implements CfRoundEnvironment {
     // 像验证页一样：只把与旧值不同的值当作新值
     round.attachReader(() async {
       final value = webView;
-      return value != null && value != backup ? value : null;
+      return value != null && value != backup && value != staleWebView
+          ? value
+          : null;
     });
+    round.attachCurrentReader(() async => webView);
     return true;
   }
 

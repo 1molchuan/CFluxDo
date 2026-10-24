@@ -52,6 +52,9 @@ class _SystemTimer implements CfRoundTimer {
 /// 没有新值返回 null（旧值过滤由验证页负责，它知道哪枚是残留）。
 typedef CfFreshClearanceReader = Future<String?> Function();
 
+/// 读 WebView 当前 cf_clearance，不管是不是验证开始前就有的旧值。
+typedef CfCurrentClearanceReader = Future<String?> Function();
+
 /// 验证页上报给轮次的原始信号。
 ///
 /// 页面只报告看到了什么，不再自己判定「完成」：此前四个完成出口各有一套
@@ -61,6 +64,10 @@ typedef CfFreshClearanceReader = Future<String?> Function();
 abstract interface class CfVerificationSignals {
   /// 挂上（或摘下）读取 WebView 新值的入口；定稿期间轮次会主动轮询它。
   void attachReader(CfFreshClearanceReader? reader);
+
+  /// 挂上（或摘下）读取 WebView 当前值（含旧值）的入口：网络层确认通过、
+  /// 却一直没有新值时用它兜底（见 [CfVerificationRound.conclusiveGrace]）。
+  void attachCurrentReader(CfCurrentClearanceReader? reader);
 
   /// 页面读到一枚新值（[source] 只用于日志）。
   void clearanceSeen(String value, {required String source});
@@ -114,6 +121,7 @@ class CfVerificationRound implements CfVerificationSignals {
     this.settleWindow = const Duration(milliseconds: 1500),
     this.probeInterval = const Duration(milliseconds: 250),
     this.completionDeadline = const Duration(seconds: 8),
+    this.conclusiveGrace = const Duration(seconds: 3),
     this.landingAttempts = 3,
     this.landingRetryDelay = const Duration(milliseconds: 500),
   }) : _landing = landing,
@@ -130,6 +138,14 @@ class CfVerificationRound implements CfVerificationSignals {
   /// 完成迹象出现后最多等多久见到新值（与验证页完成探测的 8 秒一致）。
   final Duration completionDeadline;
 
+  /// 网络层确认通过后等新值的宽限。过了还没有新值，说明这次根本没有下发
+  /// 挑战（`/challenge` 直接落到源站 404，WebView 现有的值本来就有效）：
+  /// 把 WebView 现有的值落进 jar 交给重放。jar 里原来就是这枚而重放仍被拦，
+  /// 由调用方按「验证通过但对 Dio 无效」处理（冷却、询问改用浏览器网络栈），
+  /// 不再每次白等 [completionDeadline] 再按 notLanded 计失败、反复弹验证。
+  /// 宽限期内仍优先等新值：CF 常在挑战提交和 /challenge 跳转各签一次。
+  final Duration conclusiveGrace;
+
   /// 落值确认的尝试次数与间隔（取代各调用方「等 1.5 秒 → 同步 → 重试
   /// 3×500ms」的配方）。
   final int landingAttempts;
@@ -140,6 +156,8 @@ class CfVerificationRound implements CfVerificationSignals {
   final Completer<CfRoundOutcome> _completer = Completer<CfRoundOutcome>();
 
   CfFreshClearanceReader? _reader;
+  CfCurrentClearanceReader? _currentReader;
+  bool _triedCurrentValue = false;
   String? _pendingValue;
   DateTime? _pendingSince;
 
@@ -172,6 +190,11 @@ class CfVerificationRound implements CfVerificationSignals {
   @override
   void attachReader(CfFreshClearanceReader? reader) {
     _reader = reader;
+  }
+
+  @override
+  void attachCurrentReader(CfCurrentClearanceReader? reader) {
+    _currentReader = reader;
   }
 
   @override
@@ -311,6 +334,23 @@ class CfVerificationRound implements CfVerificationSignals {
 
     final conclusiveAt = _conclusiveAt;
     if (conclusiveAt != null &&
+        !_triedCurrentValue &&
+        now.difference(conclusiveAt) >= conclusiveGrace) {
+      _triedCurrentValue = true;
+      final current = await _readCurrent();
+      if (isDone || _landingInProgress) return;
+      if (current != null && _pendingValue == null) {
+        CfChallengeLogger.log(
+          '[ROUND $id] conclusive pass without a fresh cf_clearance after '
+          '${conclusiveGrace.inSeconds}s; no challenge was issued, landing the '
+          'current WebView value (${current.length} chars)',
+          level: 'warning',
+        );
+        await _land(current);
+        return;
+      }
+    }
+    if (conclusiveAt != null &&
         now.difference(conclusiveAt) >= completionDeadline) {
       // 网络层已确认通过，却始终读不到新值：值没法交给请求用
       _complete(
@@ -377,6 +417,19 @@ class CfVerificationRound implements CfVerificationSignals {
       CfRoundFailed(round: id, reason: CfRoundFailure.notLanded),
       detail: 'settled value not confirmed in jar',
     );
+  }
+
+  /// 读 WebView 当前值，不论新旧（读不到 / 出错返回 null）
+  Future<String?> _readCurrent() async {
+    final reader = _currentReader;
+    if (reader == null) return null;
+    try {
+      final value = (await reader())?.trim();
+      return value == null || value.isEmpty ? null : value;
+    } catch (e) {
+      debugPrint('[CfRound] 读取 WebView 当前 cf_clearance 失败: $e');
+      return null;
+    }
   }
 
   /// 落值期间读一次 WebView 当前的新值（读不到 / 出错返回 null）
