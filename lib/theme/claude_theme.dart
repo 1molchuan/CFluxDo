@@ -1,11 +1,15 @@
+
+import 'package:common_ui/common_ui.dart' show MenuQuickActionStyle;
 import 'package:flutter/material.dart';
 import 'package:fluxdo_render/fluxdo_render.dart' show FluxdoRenderStyle;
+import 'package:m3e_ui/m3e_ui.dart' show SegmentedCardStyle;
 
 import 'theme_resolver.dart';
 
 /// Anthropic Claude 风格的人文温润设计令牌。
 ///
 /// 包含亮色（Warm Parchment 羊皮纸暖白）与暗色（Warm Charcoal 暖炭黑）两套变体。
+/// 支持深色 OLED 纯黑纸底（[black] = true）。
 /// 强调色为 Claude 标志性的陶土红（Terracotta / Coral）。
 /// 字体完全沿用全局设置，不在标题处硬编码任何特定字体族。
 @immutable
@@ -69,8 +73,10 @@ class ClaudeTokens extends ThemeExtension<ClaudeTokens> {
   /// 错误色（温润砖红）
   final Color error;
 
-  static ClaudeTokens of(Brightness brightness) {
+  /// [black]: 深色用纯黑底（OLED），只影响深色；强调色与文字色保持温润。
+  static ClaudeTokens of(Brightness brightness, {bool black = false}) {
     final light = brightness == Brightness.light;
+    final oled = !light && black;
     return light
         ? const ClaudeTokens(
             background: Color(0xFFFAF8F5),
@@ -88,21 +94,26 @@ class ClaudeTokens extends ThemeExtension<ClaudeTokens> {
             warning: Color(0xFFD97706),
             error: Color(0xFFC93B2B),
           )
-        : const ClaudeTokens(
-            background: Color(0xFF181614),
-            surface1: Color(0xFF201D1B),
-            surface2: Color(0xFF2A2623),
-            surface3: Color(0xFF38332F),
-            textPrimary: Color(0xFFF0EDE6),
-            textSecondary: Color(0xFFB8B0A5),
-            textMuted: Color(0xFF7D756C),
-            border: Color(0xFF38332F),
-            borderStrong: Color(0xFF4A443F),
-            accent: Color(0xFFE07A5F),
-            accentSoft: Color(0x26E07A5F),
-            success: Color(0xFF52B788),
-            warning: Color(0xFFE5A93C),
-            error: Color(0xFFE76F51),
+        : ClaudeTokens(
+            background:
+                oled ? const Color(0xFF000000) : const Color(0xFF181614),
+            surface1:
+                oled ? const Color(0xFF12100E) : const Color(0xFF201D1B),
+            surface2:
+                oled ? const Color(0xFF1C1917) : const Color(0xFF2A2623),
+            surface3:
+                oled ? const Color(0xFF262320) : const Color(0xFF38332F),
+            textPrimary: const Color(0xFFF0EDE6),
+            textSecondary: const Color(0xFFB8B0A5),
+            textMuted: const Color(0xFF7D756C),
+            border: oled ? const Color(0xFF262320) : const Color(0xFF38332F),
+            borderStrong:
+                oled ? const Color(0xFF38332F) : const Color(0xFF4A443F),
+            accent: const Color(0xFFE07A5F),
+            accentSoft: const Color(0x26E07A5F),
+            success: const Color(0xFF52B788),
+            warning: const Color(0xFFE5A93C),
+            error: const Color(0xFFE76F51),
           );
   }
 
@@ -175,10 +186,15 @@ class ClaudeTheme {
   /// - secondary 为暖调中性文字色；
   /// - tertiary 为温润草木绿；
   /// - surface 是温润羊皮纸（日间）或暖炭咖啡黑（夜间）；
+  /// - [black] 为 true 时，深色表面换用 OLED 纯黑梯级；
   /// - surfaceTint 设为透明（不给卡片涂额外的种子色调）。
-  static ColorScheme colorScheme(Brightness brightness) {
-    final t = ClaudeTokens.of(brightness);
+  static ColorScheme colorScheme(
+    Brightness brightness, {
+    bool black = false,
+  }) {
+    final t = ClaudeTokens.of(brightness, black: black);
     final light = brightness == Brightness.light;
+    final oled = !light && black;
     final onAccent = light ? const Color(0xFFFFFFFF) : const Color(0xFF181614);
     Color tint(Color c, double a) =>
         Color.alphaBlend(c.withValues(alpha: a), t.background);
@@ -192,7 +208,11 @@ class ClaudeTheme {
           light ? const Color(0xFF8B351B) : const Color(0xFFF5BAA8),
       secondary: t.textSecondary,
       onSecondary: onAccent,
-      secondaryContainer: t.surface2,
+      secondaryContainer: light
+          ? t.surface2
+          : oled
+          ? const Color(0xFF1C1917)
+          : t.surface2,
       onSecondaryContainer: t.textPrimary,
       tertiary: t.success,
       onTertiary: onAccent,
@@ -207,12 +227,26 @@ class ClaudeTheme {
       surface: t.background,
       onSurface: t.textPrimary,
       onSurfaceVariant: t.textSecondary,
-      surfaceDim: light ? const Color(0xFFEFE9DF) : const Color(0xFF131110),
-      surfaceBright: light ? const Color(0xFFFFFFFF) : const Color(0xFF26221F),
-      surfaceContainerLowest:
-          light ? const Color(0xFFFFFFFF) : const Color(0xFF141210),
-      surfaceContainerLow:
-          light ? const Color(0xFFF6F3EE) : const Color(0xFF1C1A18),
+      surfaceDim: light
+          ? const Color(0xFFEFE9DF)
+          : oled
+          ? const Color(0xFF000000)
+          : const Color(0xFF131110),
+      surfaceBright: light
+          ? const Color(0xFFFFFFFF)
+          : oled
+          ? const Color(0xFF221F1C)
+          : const Color(0xFF26221F),
+      surfaceContainerLowest: light
+          ? const Color(0xFFFFFFFF)
+          : oled
+          ? const Color(0xFF000000)
+          : const Color(0xFF141210),
+      surfaceContainerLow: light
+          ? const Color(0xFFF6F3EE)
+          : oled
+          ? const Color(0xFF0A0908)
+          : const Color(0xFF1C1A18),
       surfaceContainer: t.surface1,
       surfaceContainerHigh: t.surface2,
       surfaceContainerHighest: t.surface3,
@@ -228,14 +262,25 @@ class ClaudeTheme {
     );
   }
 
-  /// Claude 的明暗两套配色（不支持透明背景）。
-  static ResolvedTheme resolve(ThemeMode mode) {
+  /// Claude 的明暗两套配色（不支持透明背景）。[black] = 深色用纯黑（OLED）。
+  static ResolvedTheme resolve(ThemeMode mode, {bool black = false}) {
     return ResolvedTheme(
       light: colorScheme(Brightness.light),
-      dark: colorScheme(Brightness.dark),
+      dark: colorScheme(Brightness.dark, black: black),
       mode: mode,
       transparent: false,
     );
+  }
+
+  /// 分类色块：服务端给的十六进制色；深色模式掺三成白，免得暗色分类在暗底上看不见。
+  static Color categoryColor(String hex, Brightness brightness) {
+    final clean = hex.replaceAll('#', '');
+    final c = clean.length == 6
+        ? Color(int.parse('FF$clean', radix: 16))
+        : const Color(0xFF9E9E9E);
+    return brightness == Brightness.dark
+        ? Color.lerp(c, const Color(0xFFFFFFFF), 0.3)!
+        : c;
   }
 
   /// 组装 Claude 的 ThemeData。
@@ -250,7 +295,10 @@ class ClaudeTheme {
     required IconThemeData primaryIconTheme,
     List<ThemeExtension<dynamic>> extensions = const [],
   }) {
-    final t = ClaudeTokens.of(scheme.brightness);
+    // 纯黑由配色带进来（深色且底色为纯黑），令牌跟着取同一套
+    final black = scheme.brightness == Brightness.dark &&
+        scheme.surface.toARGB32() == 0xFF000000;
+    final t = ClaudeTokens.of(scheme.brightness, black: black);
     final roundedPill = WidgetStatePropertyAll<OutlinedBorder>(
       RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
     );
@@ -274,9 +322,21 @@ class ClaudeTheme {
           quoteBackground: t.surface1,
           quoteRadius: 4,
           quoteTextColor: t.textSecondary,
+          quoteFontFamily: null, // 字体沿用全局设置：不硬编码字体族
           headingFontFamily: null, // 字体沿用全局设置：不硬编码字体族
           headingColor: t.textPrimary,
           ruleColor: t.border,
+        ),
+        // 设置、我的、会话列表等分段卡片组：平铺细线列表
+        SegmentedCardStyle(flat: true, dividerColor: t.border),
+        // 菜单顶部快捷按钮：细线圆圈，选中描强调色、底色极淡
+        MenuQuickActionStyle(
+          fill: Colors.transparent,
+          activeFill: t.accentSoft,
+          iconColor: t.textSecondary,
+          activeIconColor: t.accent,
+          border: t.borderStrong,
+          activeBorder: t.accent.withValues(alpha: 0.6),
         ),
       ],
       appBarTheme: AppBarThemeData(
@@ -361,13 +421,14 @@ class ClaudeTheme {
           ),
         ),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-        labelStyle: WidgetStateTextStyle.resolveWith(
-          (s) => TextStyle(
-            color:
-                s.contains(WidgetState.selected) ? t.accent : t.textSecondary,
-            fontWeight: s.contains(WidgetState.selected)
-                ? FontWeight.w600
-                : FontWeight.w400,
+        // 颜色用 WidgetStateColor 解析，避免 RawChip merge 样式时丢失解析器
+        labelStyle: TextStyle(
+          color: WidgetStateColor.resolveWith(
+            (s) => s.contains(WidgetState.disabled)
+                ? t.textMuted
+                : s.contains(WidgetState.selected)
+                ? t.accent
+                : t.textSecondary,
           ),
         ),
       ),
@@ -445,6 +506,10 @@ class ClaudeTheme {
         fillColor: t.surface1,
         contentPadding:
             const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: BorderSide(color: t.border),
+        ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(10),
           borderSide: BorderSide(color: t.border),

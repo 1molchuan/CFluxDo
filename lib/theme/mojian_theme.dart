@@ -372,7 +372,6 @@ class MojianTheme {
         ? Color.lerp(c, const Color(0xFFFFFFFF), 0.3)!
         : c;
   }
-
   /// 标题类文字换成宋体：display / headline / titleLarge（AppBar 标题、对话框标题都走这里）。
   /// 正文、标签、按钮仍用用户选的正文字体。
   static TextTheme serifTitles(TextTheme base) {

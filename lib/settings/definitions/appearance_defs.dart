@@ -100,20 +100,23 @@ List<SettingsGroup> buildAppearanceGroups(BuildContext context) {
             // 卡片预览实时反映中性/纯黑开关（透明不影响卡片预览）
             final preview = switch (themeState.uiStyle) {
               UiStyle.mojian => MojianTheme.resolve(
-                currentMode,
-                themeState.mojianAccent,
-                black: themeState.blackEnabled,
-                accentPair: themeState.mojianAccentPair,
-              ),
-              UiStyle.claude => ClaudeTheme.resolve(currentMode),
+                  currentMode,
+                  themeState.mojianAccent,
+                  black: themeState.blackEnabled,
+                  accentPair: themeState.mojianAccentPair,
+                ),
+              UiStyle.claude => ClaudeTheme.resolve(
+                  currentMode,
+                  black: themeState.blackEnabled,
+                ),
               UiStyle.classic => ThemeResolver.resolve(
-                mode: currentMode,
-                neutral: themeState.neutralEnabled,
-                black: themeState.blackEnabled,
-                transparent: false,
-                seed: themeState.effectiveSeedColor,
-                variant: themeState.schemeVariant,
-              ),
+                  mode: currentMode,
+                  neutral: themeState.neutralEnabled,
+                  black: themeState.blackEnabled,
+                  transparent: false,
+                  seed: themeState.effectiveSeedColor,
+                  variant: themeState.schemeVariant,
+                ),
             };
             final lightScheme = preview.light;
             final darkScheme = preview.dark;
@@ -2757,7 +2760,10 @@ class _UiStyleSection extends ConsumerWidget {
                   title: l10n.appearance_styleClaude,
                   description: l10n.appearance_styleClaudeDesc,
                   preview: _ClaudeMiniPreview(
-                    tokens: ClaudeTokens.of(brightness),
+                    tokens: ClaudeTokens.of(
+                      brightness,
+                      black: s.blackEnabled,
+                    ),
                   ),
                   onTap: () => notifier.setUiStyle(UiStyle.claude),
                 ),

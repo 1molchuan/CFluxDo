@@ -93,8 +93,8 @@ import 'utils/image_decode_gate.dart';
 import 'widgets/post/post_item/render_parse_cache.dart';
 import 'utils/scroll_busy_signal.dart';
 import 'theme/mojian_theme.dart';
-import 'utils/responsive.dart';
 import 'theme/claude_theme.dart';
+import 'utils/responsive.dart';
 import 'theme/theme_resolver.dart';
 import 'widgets/common/app_background_layer.dart';
 import 'utils/time_utils.dart';
@@ -799,20 +799,23 @@ class MainApp extends ConsumerWidget {
         // 动态色路径只取系统动态色 primary 当种子，不用 OEM 原始 scheme。
         final resolvedTheme = switch (themeState.uiStyle) {
           UiStyle.mojian => MojianTheme.resolve(
-            themeState.mode,
-            themeState.mojianAccent,
-            black: themeState.blackEnabled,
-            accentPair: themeState.mojianAccentPair,
-          ),
-          UiStyle.claude => ClaudeTheme.resolve(themeState.mode),
+              themeState.mode,
+              themeState.mojianAccent,
+              black: themeState.blackEnabled,
+              accentPair: themeState.mojianAccentPair,
+            ),
+          UiStyle.claude => ClaudeTheme.resolve(
+              themeState.mode,
+              black: themeState.blackEnabled,
+            ),
           UiStyle.classic => ThemeResolver.resolve(
-            mode: themeState.mode,
-            neutral: themeState.neutralEnabled,
-            black: themeState.blackEnabled,
-            transparent: themeState.isTransparentActive,
-            seed: themeState.effectiveSeedColor,
-            variant: themeState.schemeVariant,
-          ),
+              mode: themeState.mode,
+              neutral: themeState.neutralEnabled,
+              black: themeState.blackEnabled,
+              transparent: themeState.isTransparentActive,
+              seed: themeState.effectiveSeedColor,
+              variant: themeState.schemeVariant,
+            ),
         };
         final lightScheme = resolvedTheme.light;
         final darkScheme = resolvedTheme.dark;

@@ -1,3 +1,4 @@
+import 'package:common_ui/common_ui.dart' show MenuQuickActionStyle;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fluxdo/providers/theme_provider.dart';
@@ -5,6 +6,7 @@ import 'package:fluxdo/theme/app_background.dart';
 import 'package:fluxdo/theme/claude_theme.dart';
 import 'package:fluxdo/theme/mojian_theme.dart';
 import 'package:fluxdo_render/fluxdo_render.dart' show FluxdoRenderStyle;
+import 'package:m3e_ui/m3e_ui.dart' show SegmentedCardStyle;
 import 'package:shared_preferences/shared_preferences.dart';
 
 double _contrast(Color a, Color b) {
@@ -85,6 +87,28 @@ void main() {
       });
     }
 
+    test('纯黑：深色底换为 OLED 纯黑，各层表面对比度仍达标；浅色不受影响', () {
+      final s = ClaudeTheme.colorScheme(Brightness.dark, black: true);
+      final t = ClaudeTokens.of(Brightness.dark, black: true);
+      expect(s.surface, const Color(0xFF000000));
+      expect(t.background, const Color(0xFF000000));
+
+      for (final bg in [
+        s.surface,
+        s.surfaceContainerLow,
+        s.surfaceContainer,
+        s.surfaceContainerHigh,
+      ]) {
+        expect(_contrast(s.onSurface, bg), greaterThanOrEqualTo(7.0));
+        expect(_contrast(s.onSurfaceVariant, bg), greaterThanOrEqualTo(4.5));
+      }
+      expect(_contrast(s.primary, s.surface), greaterThanOrEqualTo(4.5));
+
+      // 浅色模式不受 black 参数影响
+      final sLight = ClaudeTheme.colorScheme(Brightness.light, black: true);
+      expect(sLight.surface, const Color(0xFFFAF8F5));
+    });
+
     test('令牌插值两端取值正确', () {
       final a = ClaudeTokens.of(Brightness.light);
       final b = ClaudeTokens.of(Brightness.dark);
@@ -93,6 +117,73 @@ void main() {
       expect(a.lerp(b, 0).accent, a.accent);
       expect(a.lerp(b, 1).accent, b.accent);
       expect(a.lerp(null, 0.5), same(a));
+    });
+  });
+
+  group('Claude 扩展样式注入', () {
+    test('Claude 主题注入菜单快捷按钮与平铺分段卡片样式', () {
+      final theme = ClaudeTheme.build(
+        scheme: ClaudeTheme.colorScheme(Brightness.light),
+        fontFamily: null,
+        pageTransitionsTheme: const PageTransitionsTheme(),
+        iconTheme: const IconThemeData(),
+        primaryIconTheme: const IconThemeData(),
+      );
+
+      final menuStyle = theme.extension<MenuQuickActionStyle>();
+      expect(menuStyle, isNotNull);
+      expect(menuStyle!.fill, Colors.transparent);
+      expect(menuStyle.border, isNotNull);
+
+      final cardStyle = theme.extension<SegmentedCardStyle>();
+      expect(cardStyle, isNotNull);
+      expect(cardStyle!.flat, isTrue);
+    });
+
+    testWidgets('选择标签：未选中次要文字色、选中时为强调色', (tester) async {
+      final theme = ClaudeTheme.build(
+        scheme: ClaudeTheme.colorScheme(Brightness.light),
+        fontFamily: null,
+        pageTransitionsTheme: const PageTransitionsTheme(),
+        iconTheme: const IconThemeData(),
+        primaryIconTheme: const IconThemeData(),
+      );
+      final t = theme.extension<ClaudeTokens>()!;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: theme,
+          home: Scaffold(
+            body: Row(
+              children: [
+                ChoiceChip(
+                  label: const Text('on'),
+                  selected: true,
+                  onSelected: (_) {},
+                ),
+                ChoiceChip(
+                  label: const Text('off'),
+                  selected: false,
+                  onSelected: (_) {},
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+
+      Color? colorOf(String label) {
+        final rich = tester.widget<RichText>(
+          find.descendant(
+            of: find.text(label),
+            matching: find.byType(RichText),
+          ),
+        );
+        return rich.text.style?.color;
+      }
+
+      expect(colorOf('on'), t.accent);
+      expect(colorOf('off'), t.textSecondary);
     });
   });
 
@@ -129,6 +220,7 @@ void main() {
         final rs = theme.extension<FluxdoRenderStyle>();
         expect(rs, isNotNull);
         expect(rs?.headingFontFamily, isNull);
+        expect(rs?.quoteFontFamily, isNull);
         expect(rs?.quoteBarColor, ClaudeTokens.of(brightness).accent);
 
         // 正文字体样式采用舒适的 1.6 行高与深暖色
