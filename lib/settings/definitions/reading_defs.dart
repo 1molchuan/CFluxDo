@@ -86,6 +86,17 @@ List<SettingsGroup> buildReadingGroups(BuildContext context) {
               ref.read(preferencesProvider.notifier).setHideBarOnScroll(v),
         ),
         SwitchModel(
+          id: 'autoLoadTopicUpdates',
+          title: l10n.preferences_autoLoadTopicUpdates,
+          subtitle: l10n.preferences_autoLoadTopicUpdatesDesc,
+          icon: Symbols.autorenew_rounded,
+          getValue: (ref) =>
+              ref.watch(preferencesProvider).autoLoadTopicUpdates,
+          onChanged: (ref, v) => ref
+              .read(preferencesProvider.notifier)
+              .setAutoLoadTopicUpdates(v),
+        ),
+        SwitchModel(
           id: 'openExternalLinksInAppBrowser',
           title: l10n.preferences_openLinksInApp,
           subtitle: l10n.preferences_openLinksInAppDesc,

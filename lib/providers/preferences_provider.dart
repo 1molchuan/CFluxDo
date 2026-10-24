@@ -160,6 +160,9 @@ class AppPreferences {
   /// 滚动时收起顶栏和底栏
   final bool hideBarOnScroll;
 
+  /// 话题列表停在顶部时自动载入新话题（不用点「查看 N 个新的或更新的话题」）
+  final bool autoLoadTopicUpdates;
+
   /// 退出时清除图片缓存
   final bool clearCacheOnExit;
 
@@ -322,6 +325,7 @@ class AppPreferences {
     required this.fullscreenSwipeBack,
     required this.exitOnSingleBack,
     required this.hideBarOnScroll,
+    this.autoLoadTopicUpdates = false,
     required this.clearCacheOnExit,
     required this.autoCfChallenge,
     required this.expandRelatedLinks,
@@ -388,6 +392,7 @@ class AppPreferences {
     bool? fullscreenSwipeBack,
     bool? exitOnSingleBack,
     bool? hideBarOnScroll,
+    bool? autoLoadTopicUpdates,
     bool? clearCacheOnExit,
     bool? autoCfChallenge,
     bool? expandRelatedLinks,
@@ -455,6 +460,7 @@ class AppPreferences {
       fullscreenSwipeBack: fullscreenSwipeBack ?? this.fullscreenSwipeBack,
       exitOnSingleBack: exitOnSingleBack ?? this.exitOnSingleBack,
       hideBarOnScroll: hideBarOnScroll ?? this.hideBarOnScroll,
+      autoLoadTopicUpdates: autoLoadTopicUpdates ?? this.autoLoadTopicUpdates,
       clearCacheOnExit: clearCacheOnExit ?? this.clearCacheOnExit,
       autoCfChallenge: autoCfChallenge ?? this.autoCfChallenge,
       expandRelatedLinks: expandRelatedLinks ?? this.expandRelatedLinks,
@@ -552,6 +558,8 @@ class PreferencesNotifier extends StateNotifier<AppPreferences> {
   static const String _fullscreenSwipeBackKey = 'pref_fullscreen_swipe_back';
   static const String _exitOnSingleBackKey = 'pref_exit_on_single_back';
   static const String _hideBarOnScrollKey = 'pref_hide_bar_on_scroll';
+  static const String _autoLoadTopicUpdatesKey =
+      'pref_auto_load_topic_updates';
   static const String _clearCacheOnExitKey = 'pref_clear_cache_on_exit';
   static const String _autoCfChallengeKey = 'pref_auto_cf_challenge';
   static const String _expandRelatedLinksKey = 'pref_expand_related_links';
@@ -639,6 +647,8 @@ class PreferencesNotifier extends StateNotifier<AppPreferences> {
               _prefs.getBool(_fullscreenSwipeBackKey) ?? false,
           exitOnSingleBack: _prefs.getBool(_exitOnSingleBackKey) ?? false,
           hideBarOnScroll: _prefs.getBool(_hideBarOnScrollKey) ?? true,
+          autoLoadTopicUpdates:
+              _prefs.getBool(_autoLoadTopicUpdatesKey) ?? false,
           clearCacheOnExit: _prefs.getBool(_clearCacheOnExitKey) ?? false,
           autoCfChallenge: _prefs.getBool(_autoCfChallengeKey) ?? true,
           expandRelatedLinks: _prefs.getBool(_expandRelatedLinksKey) ?? false,
@@ -869,6 +879,11 @@ class PreferencesNotifier extends StateNotifier<AppPreferences> {
   Future<void> setHideBarOnScroll(bool enabled) async {
     state = state.copyWith(hideBarOnScroll: enabled);
     await _prefs.setBool(_hideBarOnScrollKey, enabled);
+  }
+
+  Future<void> setAutoLoadTopicUpdates(bool enabled) async {
+    state = state.copyWith(autoLoadTopicUpdates: enabled);
+    await _prefs.setBool(_autoLoadTopicUpdatesKey, enabled);
   }
 
   Future<void> setClearCacheOnExit(bool enabled) async {

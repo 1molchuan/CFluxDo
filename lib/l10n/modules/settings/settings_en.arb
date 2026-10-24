@@ -96,6 +96,8 @@
   "preferences_exitOnSingleBackDesc": "Exit immediately from the home screen and use the system predictive exit animation; when off, press back twice to exit",
   "preferences_hideBarOnScroll": "Hide bar on scroll",
   "preferences_hideBarOnScrollDesc": "Auto-hide top and bottom bars when scrolling",
+  "preferences_autoLoadTopicUpdates": "Auto-load new topics",
+  "preferences_autoLoadTopicUpdatesDesc": "When the list is scrolled to the top, new and updated topics load automatically instead of waiting for a tap on the banner. While you are scrolling further down, only the banner is shown",
   "preferences_longPressPreview": "Long press preview",
   "preferences_longPressPreviewDesc": "Long press topic card to preview content",
   "preferences_openLinksInApp": "Open links in app browser",

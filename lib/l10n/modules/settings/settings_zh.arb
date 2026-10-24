@@ -113,6 +113,8 @@
   "preferences_exitOnSingleBackDesc": "在首页返回时直接退出并使用系统预测退出动画；关闭时需连续返回两次",
   "preferences_hideBarOnScroll": "滚动收起导航栏",
   "preferences_hideBarOnScrollDesc": "首页滚动时自动收起顶栏和底栏",
+  "preferences_autoLoadTopicUpdates": "自动载入新话题",
+  "preferences_autoLoadTopicUpdatesDesc": "列表停在顶部时，有新话题或更新会自动载入，不用点提示条；往下浏览时仍只显示提示条",
   "preferences_longPressPreview": "长按预览",
   "preferences_longPressPreviewDesc": "长按话题卡片快速预览内容",
   "preferences_openLinksInApp": "外部链接使用内置浏览器",

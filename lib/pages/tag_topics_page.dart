@@ -127,7 +127,20 @@ class _TagTopicsPageState extends ConsumerState<TagTopicsPage>
     super.dispose();
   }
 
+  @override
+  bool get canAutoApplyTopicUpdates =>
+      !_isLoading &&
+      !_isLoadingMore &&
+      TopicListUpdatesMixin.scrolledToTop(_scrollController);
+
+  @override
+  Future<void> applyTopicUpdates() => _showTopicUpdates();
+
   void _onScroll() {
+    // 回到顶部时把攒着的新话题自动载入（开关打开时）
+    if (_scrollController.position.pixels <= 1) {
+      scheduleAutoApplyTopicUpdates();
+    }
     final distance =
         _scrollController.position.maxScrollExtent -
         _scrollController.position.pixels;
