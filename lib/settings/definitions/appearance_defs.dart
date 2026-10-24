@@ -406,9 +406,11 @@ List<SettingsGroup> buildAppearanceGroups(BuildContext context) {
     ),
 
     // ── 玻璃组件 ──────────────────────────────────────────────────
+    // 墨笺不用玻璃（一律纸色底 + 细线），只在经典风格下显示
     SettingsGroup(
       title: l10n.appearance_glass,
       icon: Symbols.blur_on_rounded,
+      visibleWhen: _classicOnly,
       items: [
         SwitchModel(
           id: 'glassEnabled',

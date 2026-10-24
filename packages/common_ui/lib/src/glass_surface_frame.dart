@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'glass_settings.dart';
 import 'glass_surface.dart';
 
 export 'glass_edge_painter.dart';
@@ -24,6 +25,13 @@ class GlassSurfaceFrame extends StatelessWidget {
     final shape = RoundedRectangleBorder(
       borderRadius: BorderRadius.circular(radius),
     );
+    // 实色外观（界面风格不要玻璃）：不要落影，GlassSurface 画底色与细线
+    if (GlassSettingsScope.of(context).solid != null) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(radius),
+        child: GlassSurface(recipe: recipe, shape: shape, child: child),
+      );
+    }
     return DecoratedBox(
       decoration: ShapeDecoration(
         shape: shape,

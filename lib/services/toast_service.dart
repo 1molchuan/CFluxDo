@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'dart:ui' show lerpDouble;
 
 import 'package:app_icons/app_icons.dart';
+import 'package:common_ui/common_ui.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:m3e_ui/m3e_ui.dart';
@@ -367,8 +368,8 @@ class ToastService {
 }
 
 /// 形态与动效沿用上游的"灵动胶囊"：圆点展开成胶囊、徽章回弹、下载完成
-/// 原位变身。cfluxdo 不用玻璃，外壳是实色：经典是 inverseSurface 深色胶囊；
-/// 墨笺是纸色底 + 细线 + 小圆角（展开过程中圆角从圆点收到 6）。
+/// 原位变身。经典走全局玻璃（开关、档位与高对比度由 GlassSurface 统一降级为
+/// 实色）；墨笺不用玻璃，是纸色底 + 细线 + 小圆角（展开过程中圆角从圆点收到 6）。
 class _ToastView extends StatefulWidget {
   const _ToastView({required this.session});
 
@@ -653,10 +654,8 @@ class _ToastViewState extends State<_ToastView> with TickerProviderStateMixin {
     required double content,
   }) {
     final theme = Theme.of(context);
-    // 经典是深色胶囊（inverseSurface），文字跟着反色
-    final textColor = mj?.ink ?? colorScheme.onInverseSurface;
-    final mutedColor =
-        mj?.ink3 ?? colorScheme.onInverseSurface.withValues(alpha: 0.72);
+    final textColor = mj?.ink ?? colorScheme.onSurface;
+    final mutedColor = mj?.ink3 ?? colorScheme.onSurfaceVariant;
     final t = _enter.value;
     final settling = _settle.isAnimating;
     final s = _settle.value;
@@ -805,7 +804,7 @@ class _ToastViewState extends State<_ToastView> with TickerProviderStateMixin {
       kind == _ToastKind.download ? math.pi / 8 : 0;
 }
 
-/// 实色外壳。经典：深色胶囊 + 落影；墨笺：纸色底 + 细线 + 浅落影。
+/// 外壳。经典：玻璃胶囊 + 落影；墨笺：纸色底 + 细线 + 浅落影。
 /// 外壳负责裁切，[_WidthReveal] 未展开的部分靠它的圆角收住。
 class _ToastShell extends StatelessWidget {
   const _ToastShell({
@@ -825,37 +824,43 @@ class _ToastShell extends StatelessWidget {
   Widget build(BuildContext context) {
     final mj = mojian;
     final borderRadius = BorderRadius.circular(radius);
-    final decoration = mj != null
-        ? ShapeDecoration(
-            color: mj.paper,
-            shape: RoundedRectangleBorder(
-              borderRadius: borderRadius,
-              side: BorderSide(color: mj.ruleStrong, width: 0.5),
+    if (mj == null) {
+      return DecoratedBox(
+        // 浮在正文之上需要比导航更明显的落影
+        decoration: ShapeDecoration(
+          shape: RoundedRectangleBorder(borderRadius: borderRadius),
+          shadows: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: isDark ? 0.28 : 0.10),
+              blurRadius: 24,
+              spreadRadius: -6,
+              offset: const Offset(0, 10),
             ),
-            shadows: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: isDark ? 0.24 : 0.06),
-                blurRadius: 16,
-                spreadRadius: -4,
-                offset: const Offset(0, 6),
-              ),
-            ],
-          )
-        : ShapeDecoration(
-            color: Theme.of(context).colorScheme.inverseSurface,
-            shape: RoundedRectangleBorder(borderRadius: borderRadius),
-            // 浮在正文之上需要比导航更明显的落影
-            shadows: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: isDark ? 0.28 : 0.10),
-                blurRadius: 24,
-                spreadRadius: -6,
-                offset: const Offset(0, 10),
-              ),
-            ],
-          );
+          ],
+        ),
+        child: GlassSurfaceFrame(
+          radius: radius,
+          recipe: GlassRecipe.menu,
+          child: child,
+        ),
+      );
+    }
     return DecoratedBox(
-      decoration: decoration,
+      decoration: ShapeDecoration(
+        color: mj.paper,
+        shape: RoundedRectangleBorder(
+          borderRadius: borderRadius,
+          side: BorderSide(color: mj.ruleStrong, width: 0.5),
+        ),
+        shadows: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: isDark ? 0.24 : 0.06),
+            blurRadius: 16,
+            spreadRadius: -4,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
       child: ClipRRect(borderRadius: borderRadius, child: child),
     );
   }

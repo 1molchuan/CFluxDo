@@ -1,3 +1,4 @@
+import 'package:common_ui/common_ui.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fluxdo/services/local_notification_service.dart';
@@ -141,8 +142,27 @@ void main() {
     await tester.pump(_exit);
   });
 
-  testWidgets('实色外壳：经典深色胶囊、墨笺纸色细线小圆角，都不模糊背景', (tester) async {
-    ShapeDecoration shellDecoration() =>
+  testWidgets('外壳：经典走玻璃，墨笺纸色细线小圆角、不模糊背景', (tester) async {
+    await _pumpHost(tester);
+    ToastService.showSuccess('经典');
+    await tester.pump();
+    await tester.pump(_enter);
+    expect(find.text('经典'), findsOneWidget);
+    expect(
+      find.descendant(of: _shell, matching: find.byType(GlassSurfaceFrame)),
+      findsOneWidget,
+    );
+    await tester.pump(const Duration(seconds: 3));
+    await tester.pump(_exit);
+
+    await _pumpHost(tester, mojian: true);
+    ToastService.showSuccess('墨笺');
+    await tester.pump();
+    await tester.pump(_enter);
+    expect(find.byType(BackdropFilter), findsNothing);
+    expect(find.byType(GlassSurfaceFrame), findsNothing);
+    final mj = Theme.of(tester.element(_shell)).extension<MojianTokens>()!;
+    final mojian =
         tester
                 .widget<DecoratedBox>(
                   find
@@ -154,28 +174,6 @@ void main() {
                 )
                 .decoration
             as ShapeDecoration;
-
-    await _pumpHost(tester);
-    ToastService.showSuccess('经典');
-    await tester.pump();
-    await tester.pump(_enter);
-    expect(find.text('经典'), findsOneWidget);
-    expect(find.byType(BackdropFilter), findsNothing);
-    final classic = shellDecoration();
-    expect(
-      classic.color,
-      Theme.of(tester.element(_shell)).colorScheme.inverseSurface,
-    );
-    await tester.pump(const Duration(seconds: 3));
-    await tester.pump(_exit);
-
-    await _pumpHost(tester, mojian: true);
-    ToastService.showSuccess('墨笺');
-    await tester.pump();
-    await tester.pump(_enter);
-    expect(find.byType(BackdropFilter), findsNothing);
-    final mj = Theme.of(tester.element(_shell)).extension<MojianTokens>()!;
-    final mojian = shellDecoration();
     expect(mojian.color, mj.paper);
     final shape = mojian.shape as RoundedRectangleBorder;
     expect(shape.side.color, mj.ruleStrong);

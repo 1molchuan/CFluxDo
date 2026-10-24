@@ -6,6 +6,7 @@ import '../../l10n/s.dart';
 import '../../navigation/nav_action_bus.dart';
 import '../../pages/appearance_page.dart';
 import '../../providers/preferences_provider.dart';
+import '../../theme/mojian_theme.dart';
 import '../../utils/dialog_utils.dart';
 import '../settings_model.dart';
 
@@ -41,19 +42,22 @@ List<SettingsGroup> buildBottomNavGroups(BuildContext context) {
               .read(preferencesProvider.notifier)
               .setBottomNavFloating(value),
         ),
-        ActionModel(
-          id: 'glassSettings',
-          title: l10n.appearance_glass,
-          subtitle: l10n.appearance_glassSettingsEntry,
-          icon: Symbols.blur_on_rounded,
-          wrapSubtitle: true,
-          onTap: (context, ref) => Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => const AppearancePage(highlightId: 'glassEnabled'),
+        // 墨笺不用玻璃，外观页的玻璃分组也只在经典风格下显示
+        if (Theme.of(context).extension<MojianTokens>() == null)
+          ActionModel(
+            id: 'glassSettings',
+            title: l10n.appearance_glass,
+            subtitle: l10n.appearance_glassSettingsEntry,
+            icon: Symbols.blur_on_rounded,
+            wrapSubtitle: true,
+            onTap: (context, ref) => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) =>
+                    const AppearancePage(highlightId: 'glassEnabled'),
+              ),
             ),
           ),
-        ),
       ],
     ),
     SettingsGroup(

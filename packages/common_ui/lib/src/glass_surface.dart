@@ -297,6 +297,19 @@ class GlassSurface extends StatefulWidget {
   State<GlassSurface> createState() => _GlassSurfaceState();
 }
 
+/// 实色外观的描边：沿用形状，只换边线
+ShapeBorder _withSide(ShapeBorder shape, Color? color) {
+  if (color == null) return shape;
+  final side = BorderSide(color: color, width: 0.5);
+  return switch (shape) {
+    RoundedRectangleBorder(:final borderRadius) =>
+      RoundedRectangleBorder(borderRadius: borderRadius, side: side),
+    StadiumBorder() => StadiumBorder(side: side),
+    CircleBorder() => CircleBorder(side: side),
+    _ => shape,
+  };
+}
+
 class _GlassSurfaceState extends State<GlassSurface> {
   // 进程内只加载一次,所有玻璃实例共享
   static ui.FragmentProgram? _cachedProgram;
@@ -401,6 +414,19 @@ class _GlassSurfaceState extends State<GlassSurface> {
         Color.from(alpha: 1, red: gray, green: gray, blue: gray);
 
     final settings = GlassSettingsScope.of(context);
+    final solid = settings.solid;
+    if (solid != null) {
+      return DecoratedBox(
+        position: DecorationPosition.foreground,
+        decoration: ShapeDecoration(
+          shape: _withSide(widget.shape, solid.border),
+        ),
+        child: DecoratedBox(
+          decoration: ShapeDecoration(shape: widget.shape, color: solid.fill),
+          child: widget.child ?? const SizedBox.shrink(),
+        ),
+      );
+    }
     final highContrast = MediaQuery.maybeOf(context)?.highContrast ?? false;
     final enabled = settings.allowsBlur(
       highContrast: highContrast,
