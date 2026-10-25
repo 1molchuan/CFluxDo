@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:async';
 
 import 'package:dio/dio.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -22,12 +23,15 @@ import 'package:fluxdo/providers/draft_store_provider.dart';
 import '../../helpers/memory_draft_store.dart';
 
 import 'package:fluxdo/utils/platform_utils.dart';
+import 'package:fluxdo/theme/vscode_theme.dart';
 import 'package:fluxdo/widgets/markdown_editor/composer_view_mode_switcher.dart';
 import 'package:fluxdo/widgets/markdown_editor/composer_header_actions.dart';
 import 'package:fluxdo/widgets/markdown_editor/composer_desktop_workbench.dart';
 import 'package:fluxdo/widgets/markdown_editor/content_actions_button.dart';
 import 'package:fluxdo/widgets/markdown_editor/markdown_editor.dart';
+import 'package:fluxdo/widgets/markdown_editor/markdown_renderer.dart';
 import 'package:fluxdo/widgets/post/reply_sheet.dart';
+import 'package:fluxdo/widgets/layout/vscode_terminal_panel.dart';
 import 'package:fluxdo/widgets/markdown_editor/rich_composer/rich_composer_editor.dart';
 import 'package:fluxdo_render/editor.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -36,21 +40,26 @@ Future<void> _pumpReply(
   WidgetTester tester, {
   bool rich = false,
   bool review = false,
-  ReplySheet? sheet,
+  Widget? sheet,
   double? width,
+  double height = 760,
   double scale = 1,
   bool dark = false,
   bool desktop = false,
+  bool vscode = false,
   Draft? Function()? remoteDraft,
   MemoryDraftStore? draftStore,
   List<Map>? draftWrites,
   List<String>? requests,
+  Map<String, dynamic>? createdPost,
+  List<Map>? postWrites,
+  Future<void>? postBarrier,
 }) async {
   PlatformUtils.debugDesktopOverride = desktop;
   addTearDown(() => PlatformUtils.debugDesktopOverride = null);
   if (width != null) {
     tester.view.devicePixelRatio = 1;
-    tester.view.physicalSize = Size(width, 760);
+    tester.view.physicalSize = Size(width, height);
     addTearDown(tester.view.resetDevicePixelRatio);
     addTearDown(tester.view.resetPhysicalSize);
   }
@@ -62,9 +71,26 @@ Future<void> _pumpReply(
   final prefs = await SharedPreferences.getInstance();
   FlutterSecureStorage.setMockInitialValues({'linux_do_username': 'tester'});
   final mock = InterceptorsWrapper(
-    onRequest: (options, handler) {
+    onRequest: (options, handler) async {
       requests?.add('${options.method} ${options.path}');
       final draft = remoteDraft?.call();
+      if (options.method == 'POST' && options.path == '/posts.json') {
+        postWrites?.add(Map.of(options.data as Map));
+        if (postBarrier != null) await postBarrier;
+        if (createdPost == null) {
+          handler.reject(
+            DioException(
+              requestOptions: options,
+              error: StateError('测试未配置发帖响应，已阻止发送'),
+            ),
+          );
+        } else {
+          handler.resolve(
+            Response(requestOptions: options, data: {'post': createdPost}),
+          );
+        }
+        return;
+      }
       if (options.method == 'POST' && options.path == '/drafts.json') {
         draftWrites?.add(Map.of(options.data as Map));
         if (draft != null &&
@@ -132,6 +158,9 @@ Future<void> _pumpReply(
           supportedLocales: AppLocaleUtils.supportedLocales,
           theme: ThemeData(
             brightness: dark ? Brightness.dark : Brightness.light,
+            extensions: vscode
+                ? [VscodeTokens.of(dark ? Brightness.dark : Brightness.light)]
+                : null,
             platform: desktop ? TargetPlatform.macOS : TargetPlatform.android,
           ),
           builder: (context, child) => MediaQuery(
@@ -149,7 +178,12 @@ Future<void> _pumpReply(
   // 草稿的本地存储读取需要让平台异步回调完成，再操作被遮罩覆盖的页头。
   for (
     var i = 0;
-    i < 20 && find.byType(CloseButton).hitTestable().evaluate().isEmpty;
+    i < 20 &&
+        find
+            .byKey(const ValueKey('composer-header-submit'))
+            .hitTestable()
+            .evaluate()
+            .isEmpty;
     i++
   ) {
     await tester.runAsync(
@@ -157,7 +191,10 @@ Future<void> _pumpReply(
     );
     await tester.pump(const Duration(milliseconds: 20));
   }
-  expect(find.byType(CloseButton).hitTestable(), findsOneWidget);
+  expect(
+    find.byKey(const ValueKey('composer-header-submit')).hitTestable(),
+    findsOneWidget,
+  );
 }
 
 Future<void> _waitForRichDraft(WidgetTester tester, String text) async {
@@ -177,7 +214,396 @@ Future<void> _waitForRichDraft(WidgetTester tester, String text) async {
   fail('富文本内部文档没有同步到云端内容');
 }
 
+Widget _terminalReply({
+  required ReplySheetController controller,
+  required ValueChanged<Post?> onClosed,
+  Post? replyToPost,
+}) {
+  var open = true;
+  return StatefulBuilder(
+    builder: (context, setState) => VscodeTerminalPanel(
+      reader: const Center(child: Text('宿主话题正文')),
+      targetLabel: '回复话题',
+      onClose: () => controller.close(),
+      composer: open
+          ? ReplySheet(
+              embedded: true,
+              controller: controller,
+              topicId: 1,
+              replyToPost: replyToPost,
+              preloadedDraftFuture: Future.value(null),
+              onClosed: (post) {
+                onClosed(post);
+                setState(() => open = false);
+              },
+            )
+          : null,
+    ),
+  );
+}
+
 void main() {
+  testWidgets('VS Code终端收起最大化和预览往返保留真实富文本输入与选区', (tester) async {
+    final controller = ReplySheetController();
+    final closed = <Post?>[];
+    await _pumpReply(
+      tester,
+      rich: true,
+      desktop: true,
+      vscode: true,
+      width: 800,
+      height: 760,
+      sheet: _terminalReply(controller: controller, onClosed: closed.add),
+    );
+    await _waitForRichDraft(tester, '');
+    final editor = tester.widget<FluxdoEditor>(find.byType(FluxdoEditor)).state;
+    editor.updateSelection(
+      EditorSelection.collapsed(
+        EditorPosition(blockId: editor.blocks.first.id, offset: 0),
+      ),
+    );
+    editor.insertText('保留终端中的即时输入');
+    final selection = editor.selection;
+    await tester.tap(find.byTooltip(S.current.post_terminalCollapse));
+    await tester.pump();
+    expect(closed, isEmpty);
+    await tester.tap(find.byTooltip(S.current.post_terminalExpand));
+    await tester.pump();
+    await tester.tap(find.byTooltip(S.current.post_terminalMaximize));
+    await tester.pump();
+    await tester.tap(find.byTooltip(S.current.post_terminalRestore));
+    await tester.pump();
+    expect(
+      tester.widget<FluxdoEditor>(find.byType(FluxdoEditor)).state,
+      same(editor),
+    );
+    expect(editor.selection, selection);
+    await tester.tap(find.byTooltip(S.current.common_preview));
+    await tester.pump();
+    final preview = find.byKey(const ValueKey('reply-preview'));
+    expect(
+      tester
+          .widget<MarkdownBody>(
+            find.descendant(of: preview, matching: find.byType(MarkdownBody)),
+          )
+          .data,
+      '保留终端中的即时输入',
+    );
+    await tester.tap(find.byTooltip(S.current.common_exitPreview));
+    await tester.pump();
+    expect(
+      tester.widget<FluxdoEditor>(find.byType(FluxdoEditor)).state,
+      same(editor),
+    );
+    expect(docToMarkdown(editor.blocks).trim(), '保留终端中的即时输入');
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(seconds: 5));
+  });
+
+  testWidgets('VS Code窄窗大字号源码回复可编辑预览并按真实楼层发送', (tester) async {
+    final controller = ReplySheetController();
+    final writes = <Map>[];
+    final closed = <Post?>[];
+    final submission = Completer<void>();
+    final target = Post.fromJson({
+      'id': 22,
+      'username': 'target_user',
+      'post_number': 7,
+    });
+    await _pumpReply(
+      tester,
+      desktop: true,
+      vscode: true,
+      width: 360,
+      height: 760,
+      scale: 2,
+      postWrites: writes,
+      postBarrier: submission.future,
+      createdPost: {
+        'id': 88,
+        'topic_id': 1,
+        'post_number': 8,
+        'username': 'tester',
+        'raw': '窄窗真实回复',
+      },
+      sheet: _terminalReply(
+        controller: controller,
+        onClosed: closed.add,
+        replyToPost: target,
+      ),
+    );
+    final field = find.descendant(
+      of: find.byType(MarkdownEditor),
+      matching: find.byType(TextField),
+    );
+    await tester.enterText(field, '窄窗真实回复');
+    await tester.pump();
+    expect(
+      tester
+          .getSize(find.byKey(const ValueKey('composer-writing-canvas')))
+          .height,
+      greaterThan(140),
+    );
+    await tester.tap(find.byTooltip(S.current.common_preview));
+    await tester.pump();
+    expect(
+      tester
+          .widget<MarkdownBody>(
+            find.descendant(
+              of: find.byKey(const ValueKey('reply-preview')),
+              matching: find.byType(MarkdownBody),
+            ),
+          )
+          .data,
+      '窄窗真实回复',
+    );
+    await tester.tap(find.byTooltip(S.current.common_exitPreview));
+    await tester.pump();
+    expect(tester.widget<TextField>(field).controller!.text, '窄窗真实回复');
+    await tester.tap(find.byKey(const ValueKey('composer-header-submit')));
+    for (var i = 0; i < 100 && writes.isEmpty; i++) {
+      await tester.runAsync(
+        () async => Future<void>.delayed(const Duration(milliseconds: 10)),
+      );
+      await tester.pump(const Duration(milliseconds: 20));
+    }
+    expect(controller.close(), isFalse);
+    expect(
+      tester
+          .widget<FilledButton>(
+            find.byKey(const ValueKey('composer-header-submit')),
+          )
+          .onPressed,
+      isNull,
+    );
+    expect(writes, hasLength(1));
+    submission.complete();
+    for (var i = 0; i < 100 && closed.isEmpty; i++) {
+      await tester.runAsync(
+        () async => Future<void>.delayed(const Duration(milliseconds: 10)),
+      );
+      await tester.pump(const Duration(milliseconds: 20));
+    }
+    expect(writes, hasLength(1));
+    expect(writes.single['raw'], '窄窗真实回复');
+    expect(writes.single['reply_to_post_number'], 7);
+    expect(closed.single?.id, 88);
+    expect(find.text('宿主话题正文').hitTestable(), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(seconds: 5));
+  });
+
+  testWidgets('终端内真实富文本追加引用并关闭后保留宿主与完整草稿', (tester) async {
+    final controller = ReplySheetController();
+    final store = MemoryDraftStore();
+    final closed = <Post?>[];
+    await _pumpReply(
+      tester,
+      rich: true,
+      desktop: true,
+      width: 1200,
+      height: 1000,
+      draftStore: store,
+      sheet: _terminalReply(controller: controller, onClosed: closed.add),
+    );
+    await tester.drag(
+      find.byKey(const ValueKey('vscode-terminal-divider')),
+      const Offset(0, 1000),
+    );
+    await tester.pump();
+    final route = ModalRoute.of(tester.element(find.byType(ReplySheet)))!;
+    await _waitForRichDraft(tester, '');
+    final editor = tester.widget<FluxdoEditor>(find.byType(FluxdoEditor)).state;
+    editor.updateSelection(
+      EditorSelection.collapsed(
+        EditorPosition(blockId: editor.blocks.first.id, offset: 0),
+      ),
+    );
+    editor.insertText('追加前即时正文');
+    // 不等待镜像 debounce，追加必须先从真实文档同步刚输入的正文。
+    expect(controller.appendContent('\n\n追加引用'), isTrue);
+    await tester.pump();
+    await _waitForRichDraft(tester, '追加前即时正文\n\n追加引用');
+    final appended = tester
+        .widget<FluxdoEditor>(find.byType(FluxdoEditor))
+        .state;
+    appended.updateSelection(
+      EditorSelection.collapsed(
+        EditorPosition(blockId: appended.blocks.last.id, offset: '追加引用'.length),
+      ),
+    );
+    appended.insertText('末尾即时修改');
+    // 同样不等待 debounce，通过终端关闭按钮走控制器安全关闭路径。
+    await tester.tap(find.byTooltip('关闭回复面板'));
+    expect(controller.close(), isFalse);
+    await tester.pump();
+    await tester.pump();
+    await tester.runAsync(
+      () async => Future<void>.delayed(const Duration(milliseconds: 100)),
+    );
+    await tester.pump(const Duration(seconds: 1));
+    expect(closed, <Post?>[null]);
+    expect(find.byType(ReplySheet), findsNothing);
+    expect(find.text('宿主话题正文').hitTestable(), findsOneWidget);
+    expect(
+      ModalRoute.of(tester.element(find.byType(VscodeTerminalPanel))),
+      same(route),
+    );
+    expect(route.isCurrent, isTrue);
+    expect(navigatorKey.currentState!.canPop(), isFalse);
+    expect(store.entry?.data.reply?.trim(), '追加前即时正文\n\n追加引用末尾即时修改');
+    expect(store.entry?.data.replyToPostNumber, isNull);
+    expect(controller.close(), isFalse);
+    controller.focus();
+    await tester.pump();
+    expect(closed, hasLength(1));
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(seconds: 1));
+  });
+
+  testWidgets('宿主直接移除终端仍保存富文本最后一次即时输入', (tester) async {
+    final controller = ReplySheetController();
+    final store = MemoryDraftStore();
+    final closed = <Post?>[];
+    var visible = true;
+    late StateSetter updateHost;
+    final terminal = _terminalReply(
+      controller: controller,
+      onClosed: closed.add,
+    );
+    await _pumpReply(
+      tester,
+      rich: true,
+      desktop: true,
+      width: 1200,
+      height: 1000,
+      draftStore: store,
+      sheet: StatefulBuilder(
+        builder: (context, setState) {
+          updateHost = setState;
+          return visible ? terminal : const Center(child: Text('切换后的宿主正文'));
+        },
+      ),
+    );
+    final route = ModalRoute.of(tester.element(find.byType(ReplySheet)))!;
+    await _waitForRichDraft(tester, '');
+    final editor = tester.widget<FluxdoEditor>(find.byType(FluxdoEditor)).state;
+    editor.updateSelection(
+      EditorSelection.collapsed(
+        EditorPosition(blockId: editor.blocks.first.id, offset: 0),
+      ),
+    );
+    editor.insertText('切换话题前最后一次尚未同步的输入');
+    // 不走 close、不等待 debounce，模拟宿主关闭分栏或切换话题。
+    updateHost(() => visible = false);
+    await tester.pump();
+    await tester.runAsync(
+      () async => Future<void>.delayed(const Duration(milliseconds: 100)),
+    );
+    await tester.pump(const Duration(seconds: 1));
+    expect(find.byType(VscodeTerminalPanel), findsNothing);
+    expect(find.byType(ReplySheet), findsNothing);
+    expect(find.text('切换后的宿主正文').hitTestable(), findsOneWidget);
+    expect(route.isCurrent, isTrue);
+    expect(navigatorKey.currentState!.canPop(), isFalse);
+    expect(store.entry?.data.reply?.trim(), '切换话题前最后一次尚未同步的输入');
+    expect(closed, isEmpty);
+    expect(controller.close(), isFalse);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(seconds: 1));
+  });
+
+  testWidgets('终端内真实富文本发送提交楼层目标并将帖子交还宿主', (tester) async {
+    final controller = ReplySheetController();
+    final store = MemoryDraftStore();
+    final writes = <Map>[];
+    final closed = <Post?>[];
+    final target = Post.fromJson({
+      'id': 22,
+      'username': 'target_user',
+      'post_number': 7,
+      'cooked': '<p>被回复的帖子</p>',
+      'created_at': '2026-01-01T00:00:00Z',
+      'updated_at': '2026-01-01T00:00:00Z',
+    });
+    final createdPost = <String, dynamic>{
+      'id': 88,
+      'topic_id': 1,
+      'username': 'tester',
+      'post_number': 8,
+      'reply_to_post_number': 7,
+      'raw': '真实编辑器发送正文',
+      'cooked': '<p>真实编辑器发送正文</p>',
+      'created_at': '2026-01-01T00:00:00Z',
+      'updated_at': '2026-01-01T00:00:00Z',
+    };
+    await _pumpReply(
+      tester,
+      rich: true,
+      desktop: true,
+      width: 1200,
+      height: 1000,
+      draftStore: store,
+      createdPost: createdPost,
+      postWrites: writes,
+      sheet: _terminalReply(
+        controller: controller,
+        onClosed: closed.add,
+        replyToPost: target,
+      ),
+    );
+    final route = ModalRoute.of(tester.element(find.byType(ReplySheet)))!;
+    await _waitForRichDraft(tester, '');
+    final editor = tester.widget<FluxdoEditor>(find.byType(FluxdoEditor)).state;
+    editor.updateSelection(
+      EditorSelection.collapsed(
+        EditorPosition(blockId: editor.blocks.first.id, offset: 0),
+      ),
+    );
+    editor.insertText('真实编辑器发送正文');
+    await tester.tap(find.byKey(const ValueKey('composer-header-submit')));
+    // 提交仍在处理时不能从外部关闭编辑器。
+    expect(controller.close(), isFalse);
+    for (
+      var i = 0;
+      i < 50 && find.byType(ReplySheet).evaluate().isNotEmpty;
+      i++
+    ) {
+      await tester.runAsync(
+        () async => Future<void>.delayed(const Duration(milliseconds: 10)),
+      );
+      await tester.pump(const Duration(milliseconds: 20));
+    }
+    expect(writes, hasLength(1));
+    expect(writes.single['topic_id'], 1);
+    expect(writes.single['reply_to_post_number'], 7);
+    expect((writes.single['raw'] as String).trim(), '真实编辑器发送正文');
+    expect(closed, hasLength(1));
+    expect(closed.single?.id, createdPost['id']);
+    expect(closed.single?.postNumber, createdPost['post_number']);
+    expect(closed.single?.replyToPostNumber, 7);
+    expect(closed.single?.cooked, createdPost['cooked']);
+    expect(find.byType(ReplySheet), findsNothing);
+    expect(find.text('宿主话题正文').hitTestable(), findsOneWidget);
+    expect(
+      ModalRoute.of(tester.element(find.byType(VscodeTerminalPanel))),
+      same(route),
+    );
+    expect(route.isCurrent, isTrue);
+    expect(navigatorKey.currentState!.canPop(), isFalse);
+    expect(store.entry, isNull);
+    expect(controller.close(), isFalse);
+    await tester.pump(const Duration(seconds: 1));
+    expect(closed, hasLength(1));
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(seconds: 1));
+  });
+
   for (final (width, scale, username) in [
     (320.0, 1.0, 'IG2018'),
     (390.0, 1.0, 'IG2018'),

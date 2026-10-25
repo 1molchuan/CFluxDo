@@ -1,20 +1,24 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
 import '../../../../models/topic.dart';
 import '../../../../providers/discourse_providers.dart';
 import '../../../../providers/preferences_provider.dart';
+
 import 'package:dio/dio.dart';
+
 import '../../../../services/app_error_handler.dart';
 import '../../../../services/discourse/discourse_service.dart';
 import '../../../../utils/frame_jank_monitor.dart';
 import '../../../common/relative_time_text.dart';
 import '../../post_revision/edits_indicator.dart';
 import '../../post_revision/revision_modal.dart';
-import '../../small_action_item.dart';
+import '../../small_action_item.dart' show PostTypes;
 import 'post_header.dart';
 import 'post_reply_history.dart';
 import 'post_stamp_painter.dart';
 import '../../../../theme/mojian_theme.dart';
+import '../../../../theme/vscode_theme.dart';
 
 class PostHeaderSection extends ConsumerStatefulWidget {
   final Post post;
@@ -100,6 +104,7 @@ class _PostHeaderSectionState extends ConsumerState<PostHeaderSection> {
   void _rebuildAvatarIfNeeded() {
     final hasMention = widget.onMentionUser != null;
     final theme = Theme.of(context);
+    if (theme.extension<VscodeTokens>() != null) return;
     // theme 进失效条件(按实例恒等比较):此前只看 postId/hasMention,
     // 深浅色切换后缓存的 PostAvatar 仍持旧 theme,边框/底色残留旧配色
     if (_cachedAvatarWidget == null ||
@@ -183,6 +188,9 @@ class _PostHeaderSectionState extends ConsumerState<PostHeaderSection> {
     FrameJankMonitor.noteBuild('pHdr#${widget.post.postNumber}');
     final theme = Theme.of(context);
     final post = widget.post;
+    if (theme.extension<VscodeTokens>() != null) {
+      return const SizedBox.shrink();
+    }
     final currentUser = ref.read(currentUserProvider).value;
     final isOwnPost =
         currentUser != null && currentUser.username == post.username;

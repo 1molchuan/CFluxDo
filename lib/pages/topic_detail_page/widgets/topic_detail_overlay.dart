@@ -1,10 +1,13 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:app_icons/app_icons.dart';
+
+import '../../../l10n/s.dart';
 import '../../../models/topic.dart';
 import '../../../providers/preferences_provider.dart';
 import '../../../providers/topic_detail/topic_view_mode.dart';
 import '../../../theme/mojian_theme.dart';
+import '../../../theme/vscode_theme.dart';
 import '../../../utils/responsive.dart';
 import '../../../widgets/topic/topic_progress.dart';
 import 'mojian_reader_chrome.dart';
@@ -54,6 +57,10 @@ class TopicDetailOverlay extends StatelessWidget {
   /// 时间轴拖动/点击后跳到第 n 个(1 起)stream 位置
   final ValueChanged<int>? onSeekIndex;
 
+  final Widget? postActions;
+  final bool dockInWorkbench;
+  final ValueListenable<int?>? currentPostNumberListenable;
+
   const TopicDetailOverlay({
     super.key,
     required this.showBottomBarListenable,
@@ -83,6 +90,9 @@ class TopicDetailOverlay extends StatelessWidget {
     this.onLikeFirstPost,
     this.onBookmark,
     this.onSeekIndex,
+    this.postActions,
+    this.dockInWorkbench = false,
+    this.currentPostNumberListenable,
   });
 
   TopicBottomBar _bottomBar({bool docked = false}) => TopicBottomBar(
@@ -127,6 +137,8 @@ class TopicDetailOverlay extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final bottomPadding = MediaQuery.of(context).padding.bottom;
+    final vscode = VscodeTokens.maybeOf(context);
+    if (vscode != null) return _buildVscode(context, vscode);
     if (Theme.of(context).extension<MojianTokens>() != null) {
       return LayoutBuilder(
         builder: (context, constraints) =>
@@ -194,6 +206,67 @@ class TopicDetailOverlay extends StatelessWidget {
         ),
         // 悬浮回复按钮
         if (isLoggedIn) _replyFab(bottomPadding),
+      ],
+    );
+  }
+
+  /// 源码阅读只保留贴底工具行，不再用浮动胶囊和大回复按钮遮挡正文。
+  Widget _buildVscode(BuildContext context, VscodeTokens tokens) {
+    final controls = Theme(
+      data: VscodeTheme.toolbarTheme(Theme.of(context)),
+      child: SizedBox(
+        key: const ValueKey('vscode-reader-controls'),
+        height: 32,
+        child: Row(
+          children: [
+            Expanded(
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: postActions ?? const SizedBox.shrink(),
+              ),
+            ),
+            if (!isNestedMode || currentPostNumberListenable != null)
+              TopicProgressGestures(
+                onAction: onProgressGesture ?? (_) {},
+                child: ValueListenableBuilder<int>(
+                  valueListenable: streamIndexListenable,
+                  builder: (context, currentIndex, _) => TextButton(
+                    onPressed: onProgressTap,
+                    child: currentPostNumberListenable == null
+                        ? Text('$currentIndex / $totalCount')
+                        : ValueListenableBuilder<int?>(
+                            valueListenable: currentPostNumberListenable!,
+                            builder: (context, number, _) => Text(
+                              number == null
+                                  ? '正在定位'
+                                  : '阅读 #$number · $currentIndex / $totalCount',
+                            ),
+                          ),
+                  ),
+                ),
+              ),
+            if (isLoggedIn && postActions == null)
+              TextButton.icon(
+                onPressed: onReply,
+                icon: const Icon(Symbols.reply_rounded),
+                label: Text(context.l10n.common_reply),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (dockInWorkbench) return controls;
+    return Stack(
+      children: [
+        Positioned(
+          left: 0,
+          right: 0,
+          bottom: 0,
+          child: Material(
+            color: tokens.panel,
+            child: SafeArea(top: false, child: controls),
+          ),
+        ),
       ],
     );
   }

@@ -4,7 +4,9 @@ import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:share_plus/share_plus.dart';
+
 import 'dart:async';
+
 import '../../../../../l10n/s.dart';
 import '../../../../../models/topic.dart';
 import '../../../../../modules/ldc_reward/ldc_reward.dart';
@@ -14,7 +16,9 @@ import '../../../../../providers/preferences_provider.dart';
 import '../../../../../utils/blocked_user_filter.dart';
 import '../../../../../utils/share_utils.dart';
 import '../../../../../utils/frame_jank_monitor.dart';
+
 import 'package:dio/dio.dart';
+
 import '../../../../../services/app_error_handler.dart';
 import '../../../../../services/discourse/discourse_service.dart';
 import '../../../../../services/log/bookmark_edit_trace.dart';
@@ -36,6 +40,12 @@ import '../../../../post/post_replies_sheet.dart';
 import '../../../../../utils/dialog_utils.dart';
 import '../../../../common/app_bottom_sheet.dart';
 import '../../../../ai/ai_translation_sheet.dart';
+import '../../../../../theme/vscode_theme.dart';
+import '../../../../common/vscode_peek_section.dart';
+import '../../../post_signature_block.dart';
+import '../post_notice_widget.dart';
+import '../../../../topic/assign_sheet.dart';
+import '../../../../layout/vscode_reader_status_scope.dart';
 
 part 'actions/bookmark_actions.dart';
 part 'actions/manage_actions.dart';
@@ -98,6 +108,11 @@ class PostFooterSection extends ConsumerStatefulWidget {
   /// (只留评论区);长帖分段无左列,保留 footer 胶囊。
   final bool showVotingControl;
 
+  /// 工作台状态栏只挂载动作，不重复渲染正文附属内容。
+  final bool actionsOnly;
+  final int? categoryId;
+  final PostAssignmentInfo? assignmentInfo;
+
   const PostFooterSection({
     super.key,
     required this.post,
@@ -127,6 +142,9 @@ class PostFooterSection extends ConsumerStatefulWidget {
     this.isPostVotingTopic = false,
     this.topicClosed = false,
     this.showVotingControl = true,
+    this.actionsOnly = false,
+    this.categoryId,
+    this.assignmentInfo,
   });
 
   @override
@@ -293,24 +311,67 @@ class _PostFooterSectionState extends ConsumerState<PostFooterSection> {
     }
   }
 
-  Widget _buildBoostArea(BuildContext context) {
+  Widget _buildBoostArea(BuildContext context, WidgetRef ref) {
     // 弹幕层实际在显示时才隐藏 footer 的 boost 气泡区(由 PostItem 在
     // 帖子内容上叠加渲染)。此前按全局偏好判断:长帖分段/嵌套视图/回复
     // 弹层没有弹幕层,开偏好后这些路径的 boost 两头都不显示。
-    if (widget.danmakuActive == true) {
+    if (widget.danmakuActive == true && !widget.actionsOnly) {
       return const SizedBox.shrink();
     }
     final blockedUsernames = ref.watch(
       preferencesProvider.select((p) => p.normalizedBlockedUsernames),
     );
-    return BoostList(
-      boosts: BlockedUserFilter.visibleBoosts(_boosts, blockedUsernames),
+    final boosts = BlockedUserFilter.visibleBoosts(_boosts, blockedUsernames);
+    final list = BoostList(
+      boosts: boosts,
       canBoost: _canBoost,
       onAddBoost: _openBoostInput,
       onBoostTap: _showBoostActions,
       highlightUsername: widget.highlightBoostUsername,
     );
+    if (Theme.of(context).extension<VscodeTokens>() != null) {
+      if (boosts.isEmpty) return const SizedBox.shrink();
+      return VscodePeekSection(
+        label: 'Boost',
+        summary: '${boosts.length} 条',
+        builder: (_) => list,
+      );
+    }
+    return list;
   }
+
+  Widget _buildActionBar(bool isGuest, bool isOwnPost, ThemeData theme) =>
+      PostActionBar(
+        post: widget.post,
+        isGuest: isGuest,
+        isOwnPost: isOwnPost,
+        isLiking: _isLiking,
+        reactions: _reactions,
+        currentUserReaction: _currentUserReaction,
+        likeButtonKey: _likeButtonKey,
+        replies: _replies,
+        isLoadingRepliesNotifier: _isLoadingRepliesNotifier,
+        showRepliesNotifier: _showRepliesNotifier,
+        hideRepliesButton: widget.hideRepliesButton,
+        onToggleLike: _toggleLike,
+        onReactionSelected: _toggleReaction,
+        onShowReactionUsers: (reactionId) =>
+            _showReactionUsers(context, reactionId: reactionId),
+        onReply: widget.onReply == null ? null : () => widget.onReply!(),
+        onShowMoreMenu: () => _showMoreMenu(context, theme),
+        onToggleReplies: _toggleReplies,
+        onAddBoost: _openBoostInput,
+        canBoost: _canBoost,
+        hasBoosts: _boosts.isNotEmpty && !(widget.danmakuActive == true),
+        isPostVotingTopic: widget.isPostVotingTopic,
+        leadingSlot: (widget.isPostVotingTopic && widget.showVotingControl)
+            ? PostVotingControl(
+                post: widget.post,
+                topicId: widget.topicId,
+                topicClosed: widget.topicClosed,
+              )
+            : null,
+      );
 
   @override
   Widget build(BuildContext context) {
@@ -318,16 +379,89 @@ class _PostFooterSectionState extends ConsumerState<PostFooterSection> {
     // 列表在 footer;监控关闭零开销)
     FrameJankMonitor.noteBuild('pFtr#${widget.post.postNumber}');
     final theme = Theme.of(context);
+    final vscode = theme.extension<VscodeTokens>() != null;
     final currentUser = ref.read(currentUserProvider).value;
     final isOwnPost =
         currentUser != null && currentUser.username == widget.post.username;
     final isGuest = currentUser == null;
+    if (widget.actionsOnly) {
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _buildActionBar(isGuest, isOwnPost, theme),
+          IconButton(
+            tooltip: '楼层信息：Boost、签名与相关链接',
+            icon: const Icon(Icons.info_outline),
+            onPressed: () => AppBottomSheet.show(
+              context: context,
+              title: '#${widget.post.postNumber} · @${widget.post.username}',
+              builder: (_) => Consumer(
+                builder: (context, ref, _) => SingleChildScrollView(
+                  child: _buildDetails(theme, isGuest, isOwnPost, ref),
+                ),
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+    if (vscode && VscodeReaderFlowScope.contains(context))
+      return const SizedBox.shrink();
+    return _buildDetails(theme, isGuest, isOwnPost, ref);
+  }
 
+  Widget _buildDetails(
+    ThemeData theme,
+    bool isGuest,
+    bool isOwnPost,
+    WidgetRef ref,
+  ) {
+    final vscode = theme.extension<VscodeTokens>() != null;
     return Padding(
-      padding: widget.padding,
+      padding: vscode ? EdgeInsets.zero : widget.padding,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          if (vscode && widget.post.notice != null)
+            PostNoticeWidget(
+              notice: widget.post.notice!,
+              username: widget.post.username,
+            ),
+          if (vscode && widget.assignmentInfo != null)
+            Wrap(
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                Text('已指定给 ${widget.assignmentInfo!.displayName}'),
+                TextButton(
+                  onPressed: () => showPostAssignDialog(
+                    context,
+                    ref,
+                    topicId: widget.topicId,
+                    postId: widget.post.id,
+                    current: widget.assignmentInfo,
+                  ),
+                  child: const Text('编辑指定'),
+                ),
+                TextButton(
+                  onPressed: () => unassignPost(
+                    ref,
+                    topicId: widget.topicId,
+                    postId: widget.post.id,
+                  ),
+                  child: const Text('取消指定'),
+                ),
+              ],
+            ),
+          if (vscode &&
+              PostSignatureBlock.shouldRender(
+                ref,
+                widget.post,
+                categoryId: widget.categoryId,
+              ))
+            PostSignatureBlock(
+              post: widget.post,
+              categoryId: widget.categoryId,
+            ),
           PostLinks(
             linkCounts: widget.post.linkCounts,
             // select:整 provider watch 会让任何偏好变化都重建所有在屏帖脚
@@ -343,47 +477,26 @@ class _PostFooterSectionState extends ConsumerState<PostFooterSection> {
               onJumpToPost: widget.onJumpToPost,
             ),
           if (widget.post.postNumber == 1 && widget.opTopSlot != null) ...[
-            const SizedBox(height: 12),
-            Align(
-              alignment: AlignmentDirectional.centerStart,
-              child: widget.opTopSlot,
-            ),
+            if (vscode)
+              VscodePeekSection(
+                label: '楼主附属操作',
+                builder: (_) => Align(
+                  alignment: AlignmentDirectional.centerStart,
+                  child: widget.opTopSlot,
+                ),
+              )
+            else ...[
+              const SizedBox(height: 12),
+              Align(
+                alignment: AlignmentDirectional.centerStart,
+                child: widget.opTopSlot,
+              ),
+            ],
           ],
-          const SizedBox(height: 12),
-          PostActionBar(
-            post: widget.post,
-            isGuest: isGuest,
-            isOwnPost: isOwnPost,
-            isLiking: _isLiking,
-            reactions: _reactions,
-            currentUserReaction: _currentUserReaction,
-            likeButtonKey: _likeButtonKey,
-            replies: _replies,
-            isLoadingRepliesNotifier: _isLoadingRepliesNotifier,
-            showRepliesNotifier: _showRepliesNotifier,
-            hideRepliesButton: widget.hideRepliesButton,
-            onToggleLike: _toggleLike,
-            onReactionSelected: _toggleReaction,
-            onShowReactionUsers: (reactionId) =>
-                _showReactionUsers(context, reactionId: reactionId),
-            onReply: widget.onReply == null ? null : () => widget.onReply!(),
-            onShowMoreMenu: () => _showMoreMenu(context, theme),
-            onToggleReplies: _toggleReplies,
-            onAddBoost: _openBoostInput,
-            canBoost: _canBoost,
-            // 弹幕模式下 BoostList 不显示，把"+ Boost"按钮的位置让给 action bar
-            hasBoosts: _boosts.isNotEmpty && !(widget.danmakuActive == true),
-            isPostVotingTopic: widget.isPostVotingTopic,
-            // 问答话题:操作栏左侧赞成/反对控件(官方首帖也可投,不按楼层区分)。
-            // 短帖正文左侧已有竖排投票列时不再放胶囊(showVotingControl=false)
-            leadingSlot: (widget.isPostVotingTopic && widget.showVotingControl)
-                ? PostVotingControl(
-                    post: widget.post,
-                    topicId: widget.topicId,
-                    topicClosed: widget.topicClosed,
-                  )
-                : null,
-          ),
+          if (!widget.actionsOnly) ...[
+            const SizedBox(height: 12),
+            _buildActionBar(isGuest, isOwnPost, theme),
+          ],
           // 问答话题:评论区(官方语义——问题帖与顶层答案帖下方,
           // 评论代替对答案的追问;含点赞/加载更多/添加评论)
           if (widget.isPostVotingTopic &&
@@ -397,7 +510,7 @@ class _PostFooterSectionState extends ConsumerState<PostFooterSection> {
               topicClosed: widget.topicClosed,
             ),
           // Boost 气泡列表 / 弹幕
-          if (_boosts.isNotEmpty) _buildBoostArea(context),
+          if (_boosts.isNotEmpty) _buildBoostArea(context, ref),
           ValueListenableBuilder<bool>(
             valueListenable: _showRepliesNotifier,
             builder: (context, showReplies, _) {

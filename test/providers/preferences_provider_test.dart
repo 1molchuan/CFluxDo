@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fluxdo/providers/preferences_provider.dart';
 import 'package:fluxdo/providers/theme_provider.dart';
+import 'package:fluxdo/models/vscode_body_style.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 Future<ProviderContainer> _createContainer({
@@ -16,6 +17,28 @@ Future<ProviderContainer> _createContainer({
 }
 
 void main() {
+  test('VS Code 正文偏好独立持久化，不覆盖首页上滑刷新设置', () async {
+    final container = await _createContainer(
+      initialValues: {'pref_home_fab_refresh_on_scroll_up': false},
+    );
+    addTearDown(container.dispose);
+    final notifier = container.read(preferencesProvider.notifier);
+    expect(container.read(preferencesProvider).vscodeBodyStyle, VscodeBodyStyle.compact);
+    expect(container.read(preferencesProvider).vscodeCodeLanguage, VscodeCodeLanguage.java);
+    await notifier.setVscodeBodyStyle(VscodeBodyStyle.programming);
+    await notifier.setVscodeCodeLanguage(VscodeCodeLanguage.python);
+    final prefs = container.read(sharedPreferencesProvider);
+    final restored = ProviderContainer(
+      overrides: [sharedPreferencesProvider.overrideWithValue(prefs)],
+    );
+    addTearDown(restored.dispose);
+    final state = restored.read(preferencesProvider);
+    expect(state.vscodeBodyStyle, VscodeBodyStyle.programming);
+    expect(state.vscodeCodeLanguage, VscodeCodeLanguage.python);
+    expect(state.homeFabRefreshOnScrollUp, isFalse);
+    expect(prefs.getBool('pref_home_fab_refresh_on_scroll_up'), isFalse);
+  });
+
   test('全局玻璃默认自动开启，不继承旧底栏关闭值', () async {
     final container = await _createContainer(
       initialValues: {

@@ -11,6 +11,7 @@ import 'painted_topic_card.dart';
 import 'topic_card_layout.dart';
 import 'topic_item_builder.dart';
 import 'topic_creation_time.dart';
+import '../../theme/vscode_theme.dart';
 
 /// 卡片排版空闲预热(通用内核):RecyclerView GapWorker / Telegram
 /// 后台预建 StaticLayout 的 Flutter 对等物。
@@ -207,6 +208,7 @@ class TopicCardPrewarmScope extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (VscodeTokens.maybeOf(context) != null) return child;
     return CardPrewarmScope<Topic>(
       items: topics,
       signature: (

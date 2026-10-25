@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:app_icons/app_icons.dart';
+
 import '../../../l10n/s.dart';
 import '../../../providers/topic_detail/topic_view_mode.dart';
 import '../../../theme/mojian_theme.dart';
+import '../../../theme/vscode_theme.dart';
+
 import 'package:common_ui/common_ui.dart';
 
-/// 话题详情页底部操作栏
+/// 话题阅读工具栏：VS Code 放在标题栏，其余主题保留底栏。
 class TopicBottomBar extends StatelessWidget {
   final VoidCallback? onScrollToTop;
   final VoidCallback? onShare;
@@ -57,40 +60,50 @@ class TopicBottomBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final inheritedTheme = Theme.of(context);
+    final vscode = VscodeTokens.maybeOf(context);
+    final theme = vscode == null
+        ? inheritedTheme
+        : VscodeTheme.toolbarTheme(inheritedTheme);
     final bottomPadding = MediaQuery.of(context).padding.bottom;
     final mj = theme.extension<MojianTokens>();
 
-    return Container(
-      height: docked ? dockedHeight : 80,
-      padding: EdgeInsets.only(bottom: docked ? 0 : bottomPadding),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
-        border: mj == null ? null : Border(top: BorderSide(color: mj.rule)),
-      ),
-      child: Row(
-        children: [
-          const SizedBox(width: 8),
-          // 回到顶部
-          IconButton(
-            onPressed: onScrollToTop,
-            icon: const Icon(Symbols.vertical_align_top_rounded),
-            tooltip: context.l10n.topicDetail_scrollToTop,
-          ),
-          // 筛选
-          if (_hasActiveFilter)
-            _buildActiveFilterChip(context, theme)
-          else
-            _buildFilterMenuButton(context, theme),
-          // 分享菜单
-          _buildShareMenu(context, theme),
-          // 在浏览器打开
-          IconButton(
-            onPressed: onOpenInBrowser,
-            icon: const Icon(Symbols.language_rounded),
-            tooltip: context.l10n.topicDetail_openInBrowser,
-          ),
-        ],
+    return Theme(
+      data: theme,
+      child: Container(
+        height: vscode != null ? 32 : (docked ? dockedHeight : 80),
+        padding: EdgeInsets.only(
+          bottom: vscode != null || docked ? 0 : bottomPadding,
+        ),
+        decoration: BoxDecoration(
+          color: vscode == null ? theme.colorScheme.surface : null,
+          border: mj == null ? null : Border(top: BorderSide(color: mj.rule)),
+        ),
+        child: Row(
+          mainAxisSize: vscode != null ? MainAxisSize.min : MainAxisSize.max,
+          children: [
+            if (vscode == null) const SizedBox(width: 8),
+            // 回到顶部
+            IconButton(
+              onPressed: onScrollToTop,
+              icon: const Icon(Symbols.vertical_align_top_rounded),
+              tooltip: context.l10n.topicDetail_scrollToTop,
+            ),
+            // 筛选
+            if (_hasActiveFilter)
+              _buildActiveFilterChip(context, theme)
+            else
+              _buildFilterMenuButton(context, theme),
+            // 分享菜单
+            _buildShareMenu(context, theme),
+            // 在浏览器打开
+            IconButton(
+              onPressed: onOpenInBrowser,
+              icon: const Icon(Symbols.language_rounded),
+              tooltip: context.l10n.topicDetail_openInBrowser,
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -107,18 +120,30 @@ class TopicBottomBar extends StatelessWidget {
           style: IconButton.styleFrom(
             backgroundColor: theme.colorScheme.primaryContainer,
           ),
-          iconSize: 20,
-          visualDensity: VisualDensity.compact,
+          iconSize: theme.extension<VscodeTokens>() == null ? 20 : 16,
+          visualDensity: theme.extension<VscodeTokens>() == null
+              ? VisualDensity.compact
+              : VisualDensity.standard,
         ),
       ],
     );
   }
 
   (IconData, String) _activeFilterInfo(BuildContext context) {
-    if (viewMode.isSummary) return (Symbols.local_fire_department_rounded, context.l10n.topicDetail_hotOnly);
-    if (viewMode.isActivity) return (Symbols.history_rounded, context.l10n.topicDetail_sortByActivity);
-    if (viewMode.isUserFilter) return (Symbols.person_rounded, context.l10n.topicDetail_authorOnly);
-    if (viewMode.isTopLevel) return (Symbols.account_tree_rounded, context.l10n.topicDetail_topLevelOnly);
+    if (viewMode.isSummary)
+      return (
+        Symbols.local_fire_department_rounded,
+        context.l10n.topicDetail_hotOnly,
+      );
+    if (viewMode.isActivity)
+      return (Symbols.history_rounded, context.l10n.topicDetail_sortByActivity);
+    if (viewMode.isUserFilter)
+      return (Symbols.person_rounded, context.l10n.topicDetail_authorOnly);
+    if (viewMode.isTopLevel)
+      return (
+        Symbols.account_tree_rounded,
+        context.l10n.topicDetail_topLevelOnly,
+      );
     if (isNestedMode) return (Symbols.forum_rounded, context.l10n.nested_title);
     return (Symbols.filter_list_rounded, '');
   }
@@ -151,8 +176,11 @@ class TopicBottomBar extends StatelessWidget {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(Symbols.history_rounded,
-                    size: 20, color: theme.colorScheme.onSurface),
+                Icon(
+                  Symbols.history_rounded,
+                  size: 20,
+                  color: theme.colorScheme.onSurface,
+                ),
                 const SizedBox(width: 12),
                 Text(context.l10n.topicDetail_sortByActivity),
               ],
@@ -164,8 +192,11 @@ class TopicBottomBar extends StatelessWidget {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(Symbols.local_fire_department_rounded,
-                    size: 20, color: theme.colorScheme.onSurface),
+                Icon(
+                  Symbols.local_fire_department_rounded,
+                  size: 20,
+                  color: theme.colorScheme.onSurface,
+                ),
                 const SizedBox(width: 12),
                 Text(context.l10n.topicDetail_hotOnly),
               ],
@@ -176,8 +207,11 @@ class TopicBottomBar extends StatelessWidget {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Symbols.person_rounded,
-                  size: 20, color: theme.colorScheme.onSurface),
+              Icon(
+                Symbols.person_rounded,
+                size: 20,
+                color: theme.colorScheme.onSurface,
+              ),
               const SizedBox(width: 12),
               Text(context.l10n.topicDetail_authorOnly),
             ],
@@ -188,8 +222,11 @@ class TopicBottomBar extends StatelessWidget {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Symbols.account_tree_rounded,
-                  size: 20, color: theme.colorScheme.onSurface),
+              Icon(
+                Symbols.account_tree_rounded,
+                size: 20,
+                color: theme.colorScheme.onSurface,
+              ),
               const SizedBox(width: 12),
               Text(context.l10n.topicDetail_topLevelOnly),
             ],
@@ -201,8 +238,11 @@ class TopicBottomBar extends StatelessWidget {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Symbols.forum_rounded,
-                  size: 20, color: theme.colorScheme.onSurface),
+              Icon(
+                Symbols.forum_rounded,
+                size: 20,
+                color: theme.colorScheme.onSurface,
+              ),
               const SizedBox(width: 12),
               Text(context.l10n.nested_title),
             ],
@@ -237,7 +277,11 @@ class TopicBottomBar extends StatelessWidget {
             value: 'link',
             child: Row(
               children: [
-                Icon(Symbols.link_rounded, size: 20, color: theme.colorScheme.onSurface),
+                Icon(
+                  Symbols.link_rounded,
+                  size: 20,
+                  color: theme.colorScheme.onSurface,
+                ),
                 const SizedBox(width: 12),
                 Text(context.l10n.topicDetail_shareLink),
               ],
@@ -248,7 +292,11 @@ class TopicBottomBar extends StatelessWidget {
             value: 'image',
             child: Row(
               children: [
-                Icon(Symbols.image_rounded, size: 20, color: theme.colorScheme.onSurface),
+                Icon(
+                  Symbols.image_rounded,
+                  size: 20,
+                  color: theme.colorScheme.onSurface,
+                ),
                 const SizedBox(width: 12),
                 Text(context.l10n.topicDetail_generateShareImage),
               ],
@@ -258,7 +306,11 @@ class TopicBottomBar extends StatelessWidget {
           value: 'export',
           child: Row(
             children: [
-              Icon(Symbols.download_rounded, size: 20, color: theme.colorScheme.onSurface),
+              Icon(
+                Symbols.download_rounded,
+                size: 20,
+                color: theme.colorScheme.onSurface,
+              ),
               const SizedBox(width: 12),
               Text(context.l10n.topicDetail_exportArticle),
             ],

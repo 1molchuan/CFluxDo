@@ -2,6 +2,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:app_icons/app_icons.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
 import '../../l10n/s.dart';
 import '../../utils/dialog_utils.dart';
 import '../../models/topic.dart';
@@ -15,7 +16,9 @@ import '../../utils/html_text_mapper.dart';
 import '../../utils/html_to_markdown.dart';
 import '../../utils/quote_builder.dart';
 import '../common/app_bottom_sheet.dart';
+
 import 'package:m3e_ui/m3e_ui.dart';
+
 import '../../utils/fluxdo_render_callbacks.dart';
 import 'post_item/quote_selection_helper.dart';
 import '../crypto/crypto_decrypt_sheet.dart';
@@ -34,6 +37,7 @@ void showPostRepliesSheet({
   bool isPrivateMessageTopic = false,
   bool isPmWithNonHumanUser = false,
   void Function(int postNumber)? onJumpToPost,
+  void Function(Post? post, {String? initialContent})? onComposeReply,
 }) {
   showAppBottomSheet(
     context: context,
@@ -46,6 +50,7 @@ void showPostRepliesSheet({
       isPrivateMessageTopic: isPrivateMessageTopic,
       isPmWithNonHumanUser: isPmWithNonHumanUser,
       onJumpToPost: onJumpToPost,
+      onComposeReply: onComposeReply,
     ),
   );
 }
@@ -57,6 +62,7 @@ class _PostRepliesSheetContent extends ConsumerStatefulWidget {
   final bool isPrivateMessageTopic;
   final bool isPmWithNonHumanUser;
   final void Function(int postNumber)? onJumpToPost;
+  final void Function(Post? post, {String? initialContent})? onComposeReply;
 
   const _PostRepliesSheetContent({
     required this.post,
@@ -65,6 +71,7 @@ class _PostRepliesSheetContent extends ConsumerStatefulWidget {
     this.isPrivateMessageTopic = false,
     this.isPmWithNonHumanUser = false,
     this.onJumpToPost,
+    this.onComposeReply,
   });
 
   @override
@@ -212,12 +219,17 @@ class _PostRepliesSheetContentState
     });
   }
 
-  void _handleReply(Post post, {String? initialContent}) {
-    final replyToPost = post.postNumber == 1 ? null : post;
+  void _composeReply(Post? post, {String? initialContent}) {
+    final compose = widget.onComposeReply;
+    if (compose != null) {
+      Navigator.of(context).pop();
+      compose(post, initialContent: initialContent);
+      return;
+    }
     showReplySheet(
       context: context,
       topicId: widget.topicId,
-      replyToPost: replyToPost,
+      replyToPost: post,
       initialContent: initialContent,
       topicTitle: widget.topicTitle,
       isPrivateMessageTopic: widget.isPrivateMessageTopic,
@@ -225,17 +237,14 @@ class _PostRepliesSheetContentState
     );
   }
 
+  void _handleReply(Post post, {String? initialContent}) {
+    final replyToPost = post.postNumber == 1 ? null : post;
+    _composeReply(replyToPost, initialContent: initialContent);
+  }
+
   /// 头像长按菜单「@用户」：新回复（不针对该楼）+ 预填 @username
   void _handleMention(String username) {
-    showReplySheet(
-      context: context,
-      topicId: widget.topicId,
-      replyToPost: null,
-      initialContent: '@$username ',
-      topicTitle: widget.topicTitle,
-      isPrivateMessageTopic: widget.isPrivateMessageTopic,
-      isPmWithNonHumanUser: widget.isPmWithNonHumanUser,
-    );
+    _composeReply(null, initialContent: '@$username ');
   }
 
   void _handleQuoteSelection(String selectedText, Post post) {
@@ -280,15 +289,7 @@ class _PostRepliesSheetContentState
       topicId: widget.topicId,
     );
 
-    showReplySheet(
-      context: context,
-      topicId: widget.topicId,
-      replyToPost: post,
-      initialContent: quote,
-      topicTitle: widget.topicTitle,
-      isPrivateMessageTopic: widget.isPrivateMessageTopic,
-      isPmWithNonHumanUser: widget.isPmWithNonHumanUser,
-    );
+    _composeReply(post, initialContent: quote);
   }
 
   /// 上报可见帖子用于阅读时长统计
@@ -500,9 +501,8 @@ class _PostRepliesSheetContentState
                 topicId: widget.topicId,
               ).render(
                 cookedHtml: post.cooked,
-                baseTextStyle: Theme.of(
-                  context,
-                ).textTheme.bodySmall?.copyWith(fontSize: 14, height: 1.5),
+                baseTextStyle: Theme.of(context).textTheme.bodySmall
+                    ?.copyWith(fontSize: 14, height: 1.5),
                 compact: true,
                 selectionEnabled: _isLoggedIn,
                 onQuoteRequest: _isLoggedIn

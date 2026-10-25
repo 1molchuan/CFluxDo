@@ -4,11 +4,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../providers/preferences_provider.dart';
 import '../../theme/mojian_theme.dart';
+import '../../theme/vscode_theme.dart';
 
 /// 只订阅玻璃偏好，避免调整档位时重建 MainApp 的其他主题/窗口逻辑。
 ///
-/// 墨笺不用玻璃：所有玻璃组件画成纸色底 + 细线（无模糊、无落影），
-/// 与墨笺的纸面一致；玻璃开关与档位只对经典风格生效。
+/// 墨笺使用纸色底与细线，VS Code 使用固定色实底；其他风格保留原有玻璃偏好。
 class AppGlassSettings extends ConsumerWidget {
   const AppGlassSettings({super.key, required this.child});
   final Widget child;
@@ -16,6 +16,7 @@ class AppGlassSettings extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final mj = Theme.of(context).extension<MojianTokens>();
+    final vscode = VscodeTokens.maybeOf(context);
     final settings = ref.watch(
       preferencesProvider.select(
         (p) =>
@@ -23,7 +24,13 @@ class AppGlassSettings extends ConsumerWidget {
       ),
     );
     return GlassSettingsScope(
-      settings: mj == null
+      settings: vscode != null
+          ? GlassSettings(
+              enabled: false,
+              level: settings.level,
+              solid: GlassSolidStyle(fill: vscode.panel, border: vscode.border),
+            )
+          : mj == null
           ? settings
           : GlassSettings(
               enabled: settings.enabled,

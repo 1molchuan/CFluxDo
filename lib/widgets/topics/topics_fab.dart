@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../l10n/s.dart';
 import '../../theme/mojian_theme.dart';
+import '../../theme/vscode_theme.dart';
 import '../../models/shortcut_binding.dart';
 import '../../providers/shortcut_provider.dart';
 import '../../providers/preferences_provider.dart';
@@ -222,17 +223,21 @@ class _TopicsFabState extends ConsumerState<TopicsFab>
 
   @override
   Widget build(BuildContext context) {
+    final isExplorer = VscodeTokens.maybeOf(context) != null;
     final barVisibility = ref.watch(barVisibilityProvider).clamp(0.0, 1.0);
     final hideBarOnScroll = ref.watch(
       preferencesProvider.select((p) => p.hideBarOnScroll),
     );
     // 上滑切换：只对有创作按钮的登录用户生效；刷新模式下独立刷新钮
-    // 暂隐，避免上下两个刷新图标。
+    // 暂隐，避免上下两个刷新图标。资源管理器使用独立的刷新入口。
     final swapOnScrollUp = ref.watch(
       preferencesProvider.select((p) => p.homeFabRefreshOnScrollUp),
     );
     final refreshMode =
-        widget.canCreate && swapOnScrollUp && ref.watch(fabRefreshModeProvider);
+        !isExplorer &&
+        widget.canCreate &&
+        swapOnScrollUp &&
+        ref.watch(fabRefreshModeProvider);
     final showRefresh =
         ref.watch(preferencesProvider.select((p) => p.homeRefreshButton)) &&
         !refreshMode;
@@ -240,7 +245,8 @@ class _TopicsFabState extends ConsumerState<TopicsFab>
     // 与底栏使用相同规则和同一逐帧进度，不再叠加延迟动画。
     // 宽屏使用 NavigationRail，没有滚动隐藏的底栏，FAB 保持可见。
     final visibility =
-        Responsive.showBottomNavigation(context) &&
+        !isExplorer &&
+            Responsive.showBottomNavigation(context) &&
             (hideBarOnScroll || barVisibility == 0)
         ? barVisibility
         : 1.0;
@@ -254,6 +260,33 @@ class _TopicsFabState extends ConsumerState<TopicsFab>
     final scheme = Theme.of(context).colorScheme;
     final mj = Theme.of(context).extension<MojianTokens>();
 
+    if (isExplorer) {
+      if (!widget.canCreate) return const SizedBox.shrink();
+      return OverlayPortal(
+        controller: _portal,
+        overlayChildBuilder: _buildMenu,
+        child: TapRegion(
+          groupId: _tapGroup,
+          onTapOutside: (_) {
+            if (_expanded) _close(restoreFocus: false);
+          },
+          child: CompositedTransformTarget(
+            key: _anchorKey,
+            link: _link,
+            child: IconButton(
+              key: const ValueKey('topics-create-menu'),
+              focusNode: _triggerFocus,
+              constraints: const BoxConstraints.tightFor(width: 28, height: 28),
+              padding: EdgeInsets.zero,
+              visualDensity: VisualDensity.compact,
+              tooltip: context.l10n.topicsScreen_createTopic,
+              icon: const Icon(Icons.note_add_outlined, size: 16),
+              onPressed: _present ? _toggle : null,
+            ),
+          ),
+        ),
+      );
+    }
     final controls = OverlayPortal(
       controller: _portal,
       overlayChildBuilder: _buildMenu,
@@ -428,12 +461,16 @@ class _TopicsFabState extends ConsumerState<TopicsFab>
   Widget _buildMenu(BuildContext context) {
     final anchor = _anchorKey.currentContext?.findRenderObject() as RenderBox?;
     final media = MediaQuery.of(context);
+    final isExplorer = VscodeTokens.maybeOf(context) != null;
     final origin = anchor?.localToGlobal(Offset.zero) ?? Offset.zero;
     // 最近的 Stack 就是 master 格，不能用整窗宽度让菜单侵入导航栏。
     final pane = this.context.findAncestorRenderObjectOfType<RenderStack>();
     final paneLeft = pane?.localToGlobal(Offset.zero).dx ?? 0;
-    final availableWidth = origin.dx + 56 - paneLeft - 16;
-    final availableHeight = origin.dy - media.viewPadding.top - 16;
+    final availableWidth =
+        origin.dx + (anchor?.size.width ?? 56) - paneLeft - 8;
+    final availableHeight = isExplorer
+        ? media.size.height - origin.dy - (anchor?.size.height ?? 28) - 16
+        : origin.dy - media.viewPadding.top - 16;
     final menuVisible = _present && _scrollVisibility == 1;
     return Positioned.fill(
       child: Visibility(
@@ -442,11 +479,13 @@ class _TopicsFabState extends ConsumerState<TopicsFab>
         child: CompositedTransformFollower(
           link: _link,
           showWhenUnlinked: false,
-          targetAnchor: Alignment.topRight,
-          followerAnchor: Alignment.bottomRight,
-          offset: const Offset(0, -8),
+          targetAnchor: isExplorer ? Alignment.bottomRight : Alignment.topRight,
+          followerAnchor: isExplorer
+              ? Alignment.topRight
+              : Alignment.bottomRight,
+          offset: Offset(0, isExplorer ? 4 : -8),
           child: Align(
-            alignment: Alignment.bottomRight,
+            alignment: isExplorer ? Alignment.topRight : Alignment.bottomRight,
             child: TapRegion(
               groupId: _tapGroup,
               child: FocusScope(
@@ -526,6 +565,30 @@ class _TopicsFabState extends ConsumerState<TopicsFab>
     ).transform(_animation.value);
     final theme = Theme.of(context);
     final mj = theme.extension<MojianTokens>();
+    final vscode = VscodeTokens.maybeOf(context);
+    if (vscode != null) {
+      return Material(
+        color: vscode.panel,
+        shape: RoundedRectangleBorder(side: BorderSide(color: vscode.border)),
+        child: TextButton(
+          style: TextButton.styleFrom(
+            foregroundColor: vscode.foreground,
+            minimumSize: const Size(0, 30),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            shape: const RoundedRectangleBorder(),
+          ),
+          onPressed: () => _select(onPressed),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 16),
+              const SizedBox(width: 8),
+              Flexible(child: Text(label)),
+            ],
+          ),
+        ),
+      );
+    }
     return Opacity(
       opacity: t,
       child: Transform.translate(

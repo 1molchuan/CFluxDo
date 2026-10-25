@@ -14,6 +14,7 @@ import '../../../../services/preloaded_data_service.dart';
 import '../../../../utils/platform_utils.dart';
 import 'post_reaction_picker.dart';
 import '../../../../theme/mojian_theme.dart';
+import '../../../../theme/vscode_theme.dart';
 
 /// 获取 emoji 图片 URL（未加载完成时返回空字符串，由 errorBuilder 处理）
 String _getEmojiUrl(String emojiName) {
@@ -235,11 +236,22 @@ class _PostActionBarState extends State<PostActionBar>
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final vscode = theme.extension<VscodeTokens>() != null;
 
     final leftButton = (widget.post.replyCount > 0 && !widget.hideRepliesButton)
         ? _buildRepliesButton(theme)
         : null;
     final rightActions = _buildRightActions(theme);
+    if (vscode) {
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (widget.leadingSlot != null) widget.leadingSlot!,
+          if (leftButton != null) leftButton,
+          ...rightActions,
+        ],
+      );
+    }
 
     // 右侧整组放进 Wrap：放得下时单行右对齐，放不下时自动换行，
     // 不做宽度估算，由布局系统自己决定
@@ -256,9 +268,9 @@ class _PostActionBarState extends State<PostActionBar>
         ],
         Expanded(
           child: Wrap(
-            alignment: WrapAlignment.end,
-            spacing: 8,
-            runSpacing: 8,
+            alignment: vscode ? WrapAlignment.start : WrapAlignment.end,
+            spacing: vscode ? 2 : 8,
+            runSpacing: vscode ? 2 : 8,
             crossAxisAlignment: WrapCrossAlignment.center,
             children: rightActions,
           ),
@@ -274,6 +286,28 @@ class _PostActionBarState extends State<PostActionBar>
         return ValueListenableBuilder<bool>(
           valueListenable: widget.showRepliesNotifier,
           builder: (context, showReplies, _) {
+            if (theme.extension<VscodeTokens>() case final tokens?) {
+              return TextButton.icon(
+                onPressed: isLoadingReplies ? null : widget.onToggleReplies,
+                style: VscodeTheme.toolbarTheme(theme).textButtonTheme.style
+                    ?.copyWith(
+                      foregroundColor: WidgetStatePropertyAll(
+                        showReplies ? tokens.accent : tokens.muted,
+                      ),
+                    ),
+                icon: isLoadingReplies && widget.replies.isEmpty
+                    ? const SizedBox(
+                        width: 12,
+                        height: 12,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : Icon(
+                        showReplies ? Icons.expand_less : Icons.expand_more,
+                        size: 16,
+                      ),
+                label: Text('${widget.post.replyCount} 条回复'),
+              );
+            }
             return GestureDetector(
               onTap: isLoadingReplies ? null : widget.onToggleReplies,
               child: Container(
@@ -352,6 +386,36 @@ class _PostActionBarState extends State<PostActionBar>
       final hideLike = isPvAnswer && !pvLikesOnAnswers;
       if ((!widget.isOwnPost || widget.reactions.isNotEmpty) && !hideLike) {
         actions.add(_buildLikeReactionArea(theme));
+        if (theme.extension<VscodeTokens>() case final tokens?) {
+          final reactions = DiscourseService().enabledReactionsSync;
+          if (!widget.isOwnPost && reactions.isNotEmpty) {
+            actions.add(
+              PopupMenuButton<String>(
+                tooltip: '选择回应',
+                onSelected: (id) {
+                  widget.onReactionSelected(id);
+                  _bounce.forward(from: 0);
+                },
+                itemBuilder: (_) => [
+                  for (final id in reactions)
+                    PopupMenuItem(value: id, child: Text(id)),
+                ],
+                child: SizedBox(
+                  height: 32,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 6),
+                    child: Center(
+                      child: Text(
+                        '回应',
+                        style: TextStyle(color: tokens.muted, fontSize: 11),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            );
+          }
+        }
       }
       if (!widget.isOwnPost && widget.canBoost && !widget.hasBoosts) {
         actions.add(_iconCircle(
@@ -372,11 +436,14 @@ class _PostActionBarState extends State<PostActionBar>
         ));
       }
     }
-    actions.add(_iconCircle(
-      theme,
-      icon: Symbols.more_horiz_rounded,
-      onTap: widget.onShowMoreMenu,
-    ));
+    actions.add(
+      _iconCircle(
+        theme,
+        tooltip: theme.extension<VscodeTokens>() != null ? '更多操作' : null,
+        icon: Symbols.more_horiz_rounded,
+        onTap: widget.onShowMoreMenu,
+      ),
+    );
     return actions;
   }
 
@@ -386,6 +453,14 @@ class _PostActionBarState extends State<PostActionBar>
     required IconData icon,
     required VoidCallback? onTap,
   }) {
+    if (theme.extension<VscodeTokens>() != null) {
+      return TextButton.icon(
+        onPressed: onTap,
+        icon: Icon(icon, size: 16),
+        label: Text(tooltip ?? '更多'),
+        style: VscodeTheme.toolbarTheme(theme).textButtonTheme.style,
+      );
+    }
     Widget child = GestureDetector(
       onTap: onTap,
       child: Container(
@@ -453,10 +528,13 @@ class _PostActionBarState extends State<PostActionBar>
   /// - 点击 like 图标（右半区）→ toggleLike
   /// - 桌面端 hover 300ms → 触发 picker（直接进入选择模式）
   Widget _buildLikeReactionArea(ThemeData theme) {
+    final tokens = theme.extension<VscodeTokens>();
+    final vscode = tokens != null;
+    final height = vscode ? 32.0 : 36.0;
     final reactionStackContent = (widget.reactions.isNotEmpty)
         ? Container(
-            height: 36,
-            padding: const EdgeInsets.only(left: 12),
+            height: height,
+            padding: EdgeInsets.only(left: vscode ? 6 : 12),
             alignment: Alignment.center,
             child: Row(
               mainAxisSize: MainAxisSize.min,
@@ -494,34 +572,61 @@ class _PostActionBarState extends State<PostActionBar>
               gestures: _touchGestures(() => widget.onShowReactionUsers(null)),
               child: reactionStackContent,
             );
+      if (vscode) {
+        reactionStack = Tooltip(
+          message: '查看回应用户；悬停可选择回应',
+          child: Semantics(
+            label: '查看回应用户',
+            button: true,
+            child: FocusableActionDetector(
+              shortcuts: const {
+                SingleActivator(LogicalKeyboardKey.enter): ActivateIntent(),
+                SingleActivator(LogicalKeyboardKey.space): ActivateIntent(),
+              },
+              actions: {
+                ActivateIntent: CallbackAction<ActivateIntent>(
+                  onInvoke: (_) {
+                    widget.onShowReactionUsers(null);
+                    return null;
+                  },
+                ),
+              },
+              child: reactionStack,
+            ),
+          ),
+        );
+      }
     }
 
     // like 图标本身
     final likeIcon = Container(
-      height: 36,
+      height: height,
+      constraints: vscode ? const BoxConstraints(minWidth: 32) : null,
       padding: EdgeInsets.only(
-        left: widget.reactions.isNotEmpty ? 0 : 12,
-        right: 12,
+        left: widget.reactions.isNotEmpty ? 0 : (vscode ? 6 : 12),
+        right: vscode ? 6 : 12,
       ),
       alignment: Alignment.center,
       child: widget.currentUserReaction != null
           ? Image(
-              image:
-                  emojiImageProvider(_getEmojiUrl(widget.currentUserReaction!.id)),
-              width: 20,
-              height: 20,
-              errorBuilder: (_, _, _) => const Icon(Symbols.favorite_rounded, size: 20),
+              image: emojiImageProvider(
+                _getEmojiUrl(widget.currentUserReaction!.id),
+              ),
+              width: vscode ? 16 : 20,
+              height: vscode ? 16 : 20,
+              errorBuilder: (_, _, _) =>
+                  Icon(Symbols.favorite_rounded, size: vscode ? 16 : 20),
             )
           : Icon(
               Symbols.favorite_rounded,
-              size: 20,
+              size: vscode ? 16 : 20,
               color: theme.colorScheme.onSurfaceVariant,
             ),
     );
 
     // like 图标的手势层：tap = toggleLike；long press = Tapback 风格 picker。
     // 自己的帖子：无 tap、无长按
-    final likeButton = widget.isOwnPost
+    Widget likeButton = widget.isOwnPost
         ? likeIcon
         : RawGestureDetector(
             behavior: HitTestBehavior.opaque,
@@ -530,20 +635,48 @@ class _PostActionBarState extends State<PostActionBar>
             }),
             child: likeIcon,
           );
+    if (vscode) {
+      likeButton = Tooltip(
+        message: widget.isOwnPost ? '当前回应' : '点赞；悬停可选择回应',
+        child: Semantics(
+          label: widget.currentUserReaction == null ? '点赞' : '更改或取消回应',
+          button: !widget.isOwnPost,
+          enabled: !widget.isOwnPost && !widget.isLiking,
+          child: FocusableActionDetector(
+            enabled: !widget.isOwnPost && !widget.isLiking,
+            shortcuts: const {
+              SingleActivator(LogicalKeyboardKey.enter): ActivateIntent(),
+              SingleActivator(LogicalKeyboardKey.space): ActivateIntent(),
+            },
+            actions: {
+              ActivateIntent: CallbackAction<ActivateIntent>(
+                onInvoke: (_) {
+                  if (!widget.isLiking) widget.onToggleLike();
+                  return null;
+                },
+              ),
+            },
+            child: likeButton,
+          ),
+        ),
+      );
+    }
 
     Widget area = Container(
-      height: 36,
-      decoration: BoxDecoration(
-        color: widget.currentUserReaction != null
-            ? theme.colorScheme.primaryContainer.withValues(alpha: 0.3)
-            : _idleFill(theme),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(
-          color: widget.currentUserReaction != null
-              ? theme.colorScheme.primary.withValues(alpha: 0.2)
-              : Colors.transparent,
-        ),
-      ),
+      height: height,
+      decoration: vscode
+          ? null
+          : BoxDecoration(
+              color: widget.currentUserReaction != null
+                  ? theme.colorScheme.primaryContainer.withValues(alpha: 0.3)
+                  : _idleFill(theme),
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(
+                color: widget.currentUserReaction != null
+                    ? theme.colorScheme.primary.withValues(alpha: 0.2)
+                    : Colors.transparent,
+              ),
+            ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -735,7 +868,9 @@ class _OutlinedEmojiPainter extends CustomPainter {
   }
 }
 
-/// 操作按钮的常态底色:经典是淡灰圆底;墨笺不要底色,只留图标(按下/激活态照旧)
-Color _idleFill(ThemeData theme) => theme.extension<MojianTokens>() != null
+/// 操作按钮常态底色：墨笺与编辑器只保留图标，经典样式仍用淡灰圆底。
+Color _idleFill(ThemeData theme) =>
+    theme.extension<MojianTokens>() != null ||
+        theme.extension<VscodeTokens>() != null
     ? Colors.transparent
     : theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.3);

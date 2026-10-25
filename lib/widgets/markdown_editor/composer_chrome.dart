@@ -1,9 +1,12 @@
 import 'dart:math' as math;
+
 import 'package:chat_bottom_container/listener_manager.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
+
 import '../common/progressive_top_blur.dart';
+import 'composer_island.dart';
 
 /// 顶栏与底栏共享阅读态显隐；输入或面板交互期间保持可见。
 class ComposerChromeController extends ChangeNotifier {
@@ -376,6 +379,7 @@ class ComposerReadingGutter extends InheritedWidget {
       leading != oldWidget.leading || trailing != oldWidget.trailing;
 }
 
+/// 终端正文沿左侧铺开；独立编辑器仍保留居中阅读行宽。
 class ComposerReadingPadding extends StatelessWidget {
   const ComposerReadingPadding({
     super.key,
@@ -387,19 +391,22 @@ class ComposerReadingPadding extends StatelessWidget {
   final EdgeInsets vertical;
   final double? minLeading;
   @override
-  Widget build(BuildContext context) => Padding(
-    padding: EdgeInsets.fromLTRB(
-      math.max(
-        minLeading ?? ComposerReadingGutter.of(context),
-        (MediaQuery.sizeOf(context).width - 800) / 2,
+  Widget build(BuildContext context) {
+    final terminal = ComposerTerminalScope.maybeOf(context) != null;
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+        math.max(
+          minLeading ?? ComposerReadingGutter.of(context),
+          terminal ? 0 : (MediaQuery.sizeOf(context).width - 800) / 2,
+        ),
+        vertical.top,
+        math.max(
+          ComposerReadingGutter.trailingOf(context),
+          terminal ? 0 : (MediaQuery.sizeOf(context).width - 800) / 2,
+        ),
+        vertical.bottom,
       ),
-      vertical.top,
-      math.max(
-        ComposerReadingGutter.trailingOf(context),
-        (MediaQuery.sizeOf(context).width - 800) / 2,
-      ),
-      vertical.bottom,
-    ),
-    child: child,
-  );
+      child: child,
+    );
+  }
 }

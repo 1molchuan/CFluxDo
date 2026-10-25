@@ -1,6 +1,11 @@
+import 'package:flutter/gestures.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter/material.dart';
+
 import '../../../../l10n/s.dart';
 import '../../../../models/topic.dart';
+import '../../../../theme/vscode_theme.dart';
+import '../../../layout/vscode_reader_status_scope.dart';
 
 class PostSegmentFrame extends StatelessWidget {
   final Post post;
@@ -32,6 +37,24 @@ class PostSegmentFrame extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final selection = VscodeTokens.maybeOf(context) != null
+        ? VscodeReaderFlowScope.maybeOf(context)?.selectedPost
+        : null;
+    if (selection == null) return _buildFrame(context, selected);
+    return _PostTapSelector(
+      onSelect: () => selection.value = post.postNumber,
+      child: ValueListenableBuilder<int?>(
+        valueListenable: selection,
+        builder: (context, number, _) => Semantics(
+          selected: number == post.postNumber,
+          onTap: () => selection.value = post.postNumber,
+          child: _buildFrame(context, number == post.postNumber),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildFrame(BuildContext context, bool isSelected) {
     final theme = Theme.of(context);
     final targetColor = buildPostTargetColor(theme, post, highlight);
     final borderColor = theme.colorScheme.outlineVariant.withValues(alpha: 0.5);
@@ -57,7 +80,9 @@ class PostSegmentFrame extends StatelessWidget {
             children: [
               Column(
                 mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
+                crossAxisAlignment: theme.extension<VscodeTokens>() != null
+                    ? CrossAxisAlignment.stretch
+                    : CrossAxisAlignment.start,
                 children: [
                   if (showDivider)
                     Container(
@@ -135,7 +160,7 @@ class PostSegmentFrame extends StatelessWidget {
             ],
           ),
         ),
-        if (selected)
+        if (isSelected)
           _PostSelectionIndicator(
             color: buildPostSelectionIndicatorColor(theme),
           ),
@@ -145,6 +170,66 @@ class PostSegmentFrame extends StatelessWidget {
       child: dimmed ? Opacity(opacity: 0.6, child: body) : body,
     );
   }
+}
+
+/// 旁听完成的点击，不参与 SelectionArea 的手势竞争，也不把拖选和滚动当点击。
+class _PostTapSelector extends StatefulWidget {
+  const _PostTapSelector({required this.onSelect, required this.child});
+
+  final VoidCallback onSelect;
+  final Widget child;
+
+  @override
+  State<_PostTapSelector> createState() => _PostTapSelectorState();
+}
+
+class _PostTapSelectorState extends State<_PostTapSelector> {
+  PointerDownEvent? _press;
+
+  bool get _hasLinkModifier =>
+      HardwareKeyboard.instance.isControlPressed ||
+      HardwareKeyboard.instance.isMetaPressed;
+
+  void _onDown(PointerDownEvent event) {
+    if (_press != null || event.buttons != kPrimaryButton || _hasLinkModifier) {
+      _press = null;
+      return;
+    }
+    _press = event;
+  }
+
+  void _onMove(PointerMoveEvent event) {
+    final press = _press;
+    if (press == null || press.pointer != event.pointer) return;
+    final slop = press.kind == PointerDeviceKind.mouse
+        ? kPrecisePointerHitSlop
+        : kTouchSlop;
+    if ((event.position - press.position).distanceSquared > slop * slop) {
+      _press = null;
+    }
+  }
+
+  void _onUp(PointerUpEvent event) {
+    final press = _press;
+    _press = null;
+    if (press != null &&
+        press.pointer == event.pointer &&
+        !_hasLinkModifier &&
+        event.timeStamp - press.timeStamp < kLongPressTimeout) {
+      widget.onSelect();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Listener(
+    behavior: HitTestBehavior.translucent,
+    onPointerDown: _onDown,
+    onPointerMove: _onMove,
+    onPointerUp: _onUp,
+    onPointerCancel: (_) => _press = null,
+    onPointerSignal: (_) => _press = null,
+    child: widget.child,
+  );
 }
 
 class _PostSelectionIndicator extends StatelessWidget {

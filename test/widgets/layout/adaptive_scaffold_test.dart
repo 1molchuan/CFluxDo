@@ -6,9 +6,57 @@ import 'package:fluxdo/pages/topics_page.dart';
 import 'package:fluxdo/providers/theme_provider.dart';
 import 'package:fluxdo/widgets/layout/adaptive_navigation.dart';
 import 'package:fluxdo/widgets/layout/adaptive_scaffold.dart';
+import 'package:fluxdo/theme/vscode_theme.dart';
+import 'package:fluxdo/widgets/layout/vscode_workbench_chrome.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
+  testWidgets('VS Code 保留活动栏和终端状态栏，状态文字继承全局字体', (tester) async {
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.binding.setSurfaceSize(const Size(1400, 900));
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final container = ProviderContainer(
+      overrides: [sharedPreferencesProvider.overrideWithValue(prefs)],
+    );
+    addTearDown(container.dispose);
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: TranslationProvider(
+          child: MaterialApp(
+            theme: ThemeData(
+              fontFamily: 'UserFont',
+              extensions: [VscodeTokens.of(Brightness.light)],
+            ),
+            home: AdaptiveScaffold(
+              selectedIndex: 0,
+              onDestinationSelected: (_) {},
+              destinations: const [
+                AdaptiveDestination(
+                  id: 'home',
+                  icon: Icon(Icons.home_outlined),
+                  selectedIcon: Icon(Icons.home),
+                  label: '首页',
+                ),
+              ],
+              body: const SizedBox.expand(child: Text('工作台内容')),
+            ),
+          ),
+        ),
+      ),
+    );
+    expect(find.byType(VscodeActivityBar), findsOneWidget);
+    expect(find.byType(VscodeStatusBar), findsOneWidget);
+    expect(find.byType(NavigationBar), findsNothing);
+    expect(find.text('工作台内容'), findsOneWidget);
+    expect(
+      DefaultTextStyle.of(tester.element(find.text('Windows'))).style.fontFamily,
+      'UserFont',
+    );
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('手机端 barVisibility 为 0 时将底部导航栏平移出屏', (tester) async {
     addTearDown(() => tester.binding.setSurfaceSize(null));
     await tester.binding.setSurfaceSize(const Size(390, 844));

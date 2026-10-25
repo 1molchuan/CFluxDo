@@ -37,6 +37,9 @@ import '../widgets/topic/topic_card.dart' show mojianCardDecoration;
 import '../config/forum_site.dart';
 import '../services/site_context.dart';
 import '../utils/url_helper.dart';
+import '../theme/vscode_theme.dart';
+import '../utils/time_utils.dart';
+import '../widgets/search/vscode_search_results.dart';
 
 /// 搜索框中的站内直达链接标准化。支持两站完整 URL、主域裸链接和相对路径；
 /// 普通关键词原样返回，后续由 [isInternalUrlString] 判定后继续普通搜索。
@@ -131,6 +134,8 @@ class _SearchPageState extends ConsumerState<SearchPage> {
   Object? _searchError;
   StackTrace? _searchErrorStack;
   bool _isLoadMoreFailed = false;
+  bool _isSearching = false;
+  bool _vscodeOptionsExpanded = false;
 
   // 最近搜索记录
   List<String> _recentSearches = [];
@@ -406,6 +411,27 @@ class _SearchPageState extends ConsumerState<SearchPage> {
   }
 
   void _openFilterPanel() {
+    final vscode = VscodeTokens.maybeOf(context);
+    if (vscode != null) {
+      showAppDialog<void>(
+        context: context,
+        builder: (context) => Theme(
+          data: VscodeTheme.toolbarTheme(Theme.of(context)),
+          child: Dialog(
+            shape: const RoundedRectangleBorder(),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 560, maxHeight: 720),
+              child: SearchFilterPanel(
+                filter: _filter,
+                onFilterChanged: _onFilterChanged,
+                hideInType: true,
+              ),
+            ),
+          ),
+        ),
+      );
+      return;
+    }
     showAppBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -543,6 +569,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
     }
 
     setState(() {
+      _isSearching = true;
       _hasError = false;
       _isLoadMoreFailed = false;
       if (!isLoadMore) {
@@ -581,6 +608,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
       );
 
       setState(() {
+        _isSearching = false;
         if (_currentPage == 1) {
           _standardPosts = result.posts;
           _allUsers = result.users;
@@ -594,6 +622,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
       });
     } catch (e, s) {
       setState(() {
+        _isSearching = false;
         _isLoadingMore = false;
         if (isLoadMore) {
           // 加载更多失败：回退页码，显示重试
@@ -635,6 +664,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
     _loadMoreCoordinator.resetCooldown();
     setState(() {
       _currentQuery = '';
+      _isSearching = false;
       _standardPosts = [];
       _allPosts = [];
       _aiPosts = [];
@@ -812,7 +842,289 @@ class _SearchPageState extends ConsumerState<SearchPage> {
     '${entry.instanceId ?? entry.username ?? entry.topicId}',
   );
 
+  Widget _buildVscodeSearchScaffold(ThemeData theme, VscodeTokens tokens) {
+    final canClose = widget.onClose != null || Navigator.of(context).canPop();
+    return Theme(
+      data: VscodeTheme.toolbarTheme(theme),
+      child: Scaffold(
+        backgroundColor: tokens.sidebar,
+        resizeToAvoidBottomInset: false,
+        body: SafeArea(
+          bottom: false,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 2, 6, 2),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        context.l10n.common_search,
+                        style: theme.textTheme.labelMedium?.copyWith(
+                          fontSize: 12,
+                          color: tokens.muted,
+                          letterSpacing: 0.6,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: context.l10n.common_refresh,
+                      icon: const Icon(Icons.refresh, size: 17),
+                      onPressed: _currentQuery.isEmpty || _isSearching
+                          ? null
+                          : () => _onFilterChanged(_filter),
+                    ),
+                    if (canClose)
+                      IconButton(
+                        tooltip: context.l10n.common_close,
+                        icon: const Icon(Icons.close, size: 17),
+                        onPressed:
+                            widget.onClose ??
+                            () => Navigator.of(context).maybePop(),
+                      ),
+                  ],
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
+                child: TextField(
+                  key: const ValueKey('vscode-search-input'),
+                  controller: _searchController,
+                  focusNode: _focusNode,
+                  onSubmitted: _onSearch,
+                  onChanged: (_) => setState(() {}),
+                  textInputAction: TextInputAction.search,
+                  style: theme.textTheme.bodyMedium?.copyWith(fontSize: 13),
+                  decoration: InputDecoration(
+                    hintText: context.l10n.common_search,
+                    filled: true,
+                    fillColor: tokens.background,
+                    isDense: true,
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 8,
+                    ),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(2),
+                      borderSide: BorderSide(color: tokens.border),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(2),
+                      borderSide: BorderSide(color: tokens.border),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(2),
+                      borderSide: BorderSide(color: tokens.accent),
+                    ),
+                    suffixIconConstraints: const BoxConstraints(
+                      minHeight: 30,
+                      minWidth: 30,
+                    ),
+                    suffixIcon: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (_searchController.text.isNotEmpty)
+                          IconButton(
+                            tooltip: context.l10n.common_clear,
+                            icon: const Icon(Icons.close, size: 15),
+                            onPressed: _clearSearch,
+                          ),
+                        IconButton(
+                          tooltip: context.l10n.common_search,
+                          icon: const Icon(Icons.keyboard_return, size: 17),
+                          onPressed: () => _onSearch(_searchController.text),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              InkWell(
+                key: const ValueKey('vscode-search-options'),
+                onTap: () => setState(
+                  () => _vscodeOptionsExpanded = !_vscodeOptionsExpanded,
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 4,
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        _vscodeOptionsExpanded
+                            ? Icons.expand_more
+                            : Icons.chevron_right,
+                        size: 16,
+                        color: tokens.muted,
+                      ),
+                      const SizedBox(width: 4),
+                      Expanded(
+                        child: Text(
+                          context.l10n.search_advancedSearch,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: tokens.muted,
+                          ),
+                        ),
+                      ),
+                      if (_filter.isNotEmpty)
+                        Text(
+                          '${_filter.activeFilterCount}',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: tokens.accent,
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+              if (_vscodeOptionsExpanded)
+                _buildVscodeSearchOptions(theme, tokens),
+              if (_filter.isNotEmpty) _buildVscodeActiveFilters(theme, tokens),
+              if (_isSearching) const LinearProgressIndicator(minHeight: 2),
+              Expanded(
+                child: _currentQuery.isEmpty
+                    ? _buildEmptyState(theme)
+                    : _buildSearchResults(theme),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildVscodeSearchOptions(ThemeData theme, VscodeTokens tokens) {
+    final settings = ref.watch(searchSettingsProvider);
+    final aiEnabled =
+        settings.aiSearchEnabled &&
+        settings.sortOrder == SearchSortOrder.relevance;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 12, 6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            context.l10n.search_hintText,
+            style: theme.textTheme.bodySmall?.copyWith(
+              fontSize: 11,
+              color: tokens.muted,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Wrap(
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 8,
+            children: [
+              DropdownButton<SearchSortOrder>(
+                value: settings.sortOrder,
+                isDense: true,
+                underline: const SizedBox.shrink(),
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: tokens.foreground,
+                ),
+                items: [
+                  for (final order in SearchSortOrder.values)
+                    DropdownMenuItem(value: order, child: Text(order.label)),
+                ],
+                onChanged: _onSortChanged,
+              ),
+              TextButton.icon(
+                onPressed: _openFilterPanel,
+                icon: const Icon(Icons.folder_open_outlined, size: 15),
+                label: Text(context.l10n.search_currentFilter),
+              ),
+              if (_siteAiSearchAvailable)
+                IconButton(
+                  tooltip: 'AI',
+                  isSelected: aiEnabled,
+                  icon: _isSearchingAi
+                      ? const SizedBox.square(
+                          dimension: 14,
+                          child: CircularProgressIndicator(strokeWidth: 1.5),
+                        )
+                      : const Icon(Icons.auto_awesome_outlined, size: 16),
+                  onPressed: settings.sortOrder == SearchSortOrder.relevance
+                      ? () => _onAiSearchChanged(!aiEnabled)
+                      : null,
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildVscodeActiveFilters(ThemeData theme, VscodeTokens tokens) {
+    Widget entry(String label, VoidCallback remove) => TextButton(
+      onPressed: remove,
+      style: TextButton.styleFrom(
+        foregroundColor: tokens.foreground,
+        backgroundColor: tokens.background,
+        side: BorderSide(color: tokens.border),
+        shape: const RoundedRectangleBorder(),
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+        minimumSize: Size.zero,
+        textStyle: theme.textTheme.bodySmall,
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Flexible(child: Text(label, overflow: TextOverflow.ellipsis)),
+          const SizedBox(width: 4),
+          const Icon(Icons.close, size: 12),
+        ],
+      ),
+    );
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 2, 12, 6),
+      child: Wrap(
+        spacing: 4,
+        runSpacing: 4,
+        children: [
+          if (_filter.categoryId != null)
+            entry(
+              '#${_filter.categoryName ?? _filter.categorySlug ?? _filter.categoryId}',
+              _clearCategory,
+            ),
+          for (final tag in _filter.tags)
+            entry('tags:$tag', () => _removeTag(tag)),
+          if (_filter.status != null)
+            entry(_filter.status!.label, _clearStatus),
+          if (_filter.afterDate != null)
+            entry(
+              context.l10n.search_afterDate(
+                TimeUtils.formatShortDate(_filter.afterDate),
+              ),
+              _clearDateRange,
+            ),
+          if (_filter.beforeDate != null)
+            entry(
+              context.l10n.search_beforeDate(
+                TimeUtils.formatShortDate(_filter.beforeDate),
+              ),
+              _clearDateRange,
+            ),
+          entry(context.l10n.search_clearAll, _clearAllFilters),
+        ],
+      ),
+    );
+  }
+
+  void _onAiSearchChanged(bool value) {
+    ref.read(searchSettingsProvider.notifier).setAiSearchEnabled(value);
+    setState(() {
+      _rebuildDisplayPosts();
+      if (value && _aiPosts.isEmpty && _currentQuery.isNotEmpty) {
+        _triggerAiSearch(_stripOrderFromQuery(_currentQuery));
+      }
+    });
+  }
+
   Widget _buildSearchScaffold(ThemeData theme) {
+    final vscode = VscodeTokens.maybeOf(context);
+    if (vscode != null) return _buildVscodeSearchScaffold(theme, vscode);
     final searchField = TextField(
       controller: _searchController,
       focusNode: _focusNode,
@@ -1014,6 +1326,43 @@ class _SearchPageState extends ConsumerState<SearchPage> {
       return const Center(child: LoadingSpinner());
     }
 
+    final vscode = VscodeTokens.maybeOf(context);
+    if (vscode != null) {
+      return ListView(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        children: [
+          if (_recentSearches.isEmpty)
+            Text(
+              context.l10n.search_emptyHint,
+              style: theme.textTheme.bodySmall?.copyWith(color: vscode.muted),
+            )
+          else ...[
+            Row(
+              children: [
+                const Icon(Icons.expand_more, size: 16),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: Text(
+                    context.l10n.search_recentSearches,
+                    style: theme.textTheme.bodySmall,
+                  ),
+                ),
+                IconButton(
+                  tooltip: context.l10n.common_clear,
+                  onPressed: _isClearingRecentSearches
+                      ? null
+                      : _clearRecentSearches,
+                  icon: const Icon(Icons.delete_outline, size: 15),
+                ),
+              ],
+            ),
+            for (final query in _recentSearches)
+              _buildRecentSearchItem(query, theme),
+          ],
+        ],
+      );
+    }
+
     // 有最近搜索记录时显示记录列表
     if (_recentSearches.isNotEmpty) {
       return ListView(
@@ -1112,6 +1461,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
   Widget _buildRecentSearchItem(String query, ThemeData theme) {
     // 提取纯净查询
     final cleanQuery = _stripOrderFromQuery(query);
+    final vscode = VscodeTokens.maybeOf(context);
 
     return InkWell(
       onTap: () {
@@ -1125,9 +1475,12 @@ class _SearchPageState extends ConsumerState<SearchPage> {
         _searchController.text = cleanQuery;
         _onSearch(cleanQuery);
       },
-      borderRadius: BorderRadius.circular(8),
+      borderRadius: BorderRadius.circular(vscode == null ? 8 : 0),
       child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+        padding: EdgeInsets.symmetric(
+          vertical: vscode == null ? 12 : 6,
+          horizontal: 8,
+        ),
         child: Row(
           children: [
             Icon(
@@ -1189,10 +1542,61 @@ class _SearchPageState extends ConsumerState<SearchPage> {
     if (posts.isEmpty && users.isEmpty && !_isLoadingMore) {
       // 只有原始结果也为空才可能是首页请求仍在途；
       // 原始结果非空但过滤后为空 = 全部被本地屏蔽，必须显示空态而非转圈
-      if (_currentPage == 1 && _allPosts.isEmpty && _allUsers.isEmpty) {
-        return const SearchListSkeleton();
+      if (_currentPage == 1 &&
+          _allPosts.isEmpty &&
+          _allUsers.isEmpty &&
+          (VscodeTokens.maybeOf(context) == null || _isSearching)) {
+        return VscodeTokens.maybeOf(context) == null
+            ? const SearchListSkeleton()
+            : const SizedBox.shrink();
       }
       return _buildNoResults();
+    }
+
+    if (VscodeTokens.maybeOf(context) != null) {
+      final hasMore = _hasMorePosts || _hasMoreUsers;
+      return VscodeSearchResults(
+        key: ValueKey((
+          _currentQuery,
+          _filter,
+          ref.watch(searchSettingsProvider).sortOrder,
+        )),
+        posts: posts,
+        users: users,
+        scrollController: _scrollController,
+        hasMorePosts: _hasMorePosts,
+        onOpenPost: _openTopicResult,
+        onOpenUser: _openUserResult,
+        onPreviewPost: ref.watch(preferencesProvider).longPressPreview
+            ? (post, anchorContext) => SearchPreviewDialog.show(
+                context,
+                post: post,
+                onOpen: () => _openTopicResult(post),
+                sourceContext: anchorContext,
+              )
+            : null,
+        footer: Column(
+          children: [
+            PagedListFooter(
+              hasMore: hasMore,
+              isLoadingMore: _isLoadingMore,
+              isLoadMoreFailed: _isLoadMoreFailed,
+              onRetry: () {
+                _loadMoreCoordinator.resetCooldown();
+                setState(() => _isLoadMoreFailed = false);
+                _loadMore();
+              },
+            ),
+            // 收起后的树可能不足一屏，仍需保留主动翻页入口。
+            if (hasMore && !_isLoadingMore && !_isLoadMoreFailed)
+              TextButton.icon(
+                onPressed: _loadMore,
+                icon: const Icon(Icons.expand_more, size: 16),
+                label: Text(context.l10n.common_searchMore),
+              ),
+          ],
+        ),
+      );
     }
 
     return Column(
@@ -1258,23 +1662,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
                         onChanged:
                             ref.watch(searchSettingsProvider).sortOrder ==
                                 SearchSortOrder.relevance
-                            ? (value) {
-                                ref
-                                    .read(searchSettingsProvider.notifier)
-                                    .setAiSearchEnabled(value);
-                                setState(() {
-                                  _rebuildDisplayPosts();
-                                  // 开启时若还没有 AI 结果，触发搜索
-                                  if (value &&
-                                      _aiPosts.isEmpty &&
-                                      _currentQuery.isNotEmpty) {
-                                    final cleanQuery = _stripOrderFromQuery(
-                                      _currentQuery,
-                                    );
-                                    _triggerAiSearch(cleanQuery);
-                                  }
-                                });
-                              }
+                            ? _onAiSearchChanged
                             : null,
                       ),
                     ),
@@ -1369,6 +1757,25 @@ class _SearchPageState extends ConsumerState<SearchPage> {
 
   Widget _buildNoResults() {
     final theme = Theme.of(context);
+    final vscode = VscodeTokens.maybeOf(context);
+    if (vscode != null) {
+      return ListView(
+        padding: const EdgeInsets.all(12),
+        children: [
+          Text(
+            context.l10n.search_noResults,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: vscode.foreground,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            context.l10n.search_tryOtherKeywords,
+            style: theme.textTheme.bodySmall?.copyWith(color: vscode.muted),
+          ),
+        ],
+      );
+    }
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,

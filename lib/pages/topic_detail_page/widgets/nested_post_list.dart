@@ -12,11 +12,15 @@ import '../../../models/nested_reading_position.dart';
 import '../../../widgets/nested/nested_reading_scope.dart';
 import '../../../models/topic.dart';
 import '../../../providers/nested_topic_provider.dart';
+import '../../../providers/preferences_provider.dart';
 import '../../../theme/mojian_theme.dart';
 import '../../../utils/blocked_user_filter.dart';
 import '../../../utils/responsive.dart';
 import '../../../widgets/nested/nested_post_card.dart';
 import '../../../widgets/post/post_item/post_item.dart';
+import '../../../widgets/post/post_item/vscode_line_index.dart';
+import '../../../widgets/post/post_item/vscode_nested_lines.dart';
+import '../../../widgets/post/post_item/widgets/vscode_post_source.dart';
 import 'topic_detail_header.dart';
 import 'shared_issue_button.dart';
 import 'topic_more_topics.dart';
@@ -128,6 +132,12 @@ class _NestedPostListState extends ConsumerState<NestedPostList> {
   int? _handledFullTarget;
   NestedReadingPosition? _lastPosition;
   final ValueNotifier<int?> _currentRoot = ValueNotifier(null);
+  final VscodeLineIndex _sourceLines = VscodeLineIndex();
+  final Map<int, VscodeNestedDisplayState> _sourceDisplayStates = {};
+
+  void _refreshSourceLines() {
+    if (mounted) setState(() {});
+  }
 
   @override
   void initState() {
@@ -173,6 +183,10 @@ class _NestedPostListState extends ConsumerState<NestedPostList> {
   @override
   void didUpdateWidget(covariant NestedPostList oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (widget.topicId != oldWidget.topicId ||
+        widget.nestedState.sort != oldWidget.nestedState.sort) {
+      _sourceDisplayStates.clear();
+    }
     if (widget.fullTargetPostNumber == null) _handledFullTarget = null;
     if (widget.nestedState.sort != oldWidget.nestedState.sort) {
       _session.branches.clear();
@@ -508,6 +522,26 @@ class _NestedPostListState extends ConsumerState<NestedPostList> {
     );
     final contextChain = contextMode ? ns.contextChain : null;
     final p = widget.params;
+    final sourceMode = VscodePostSource.enabled(context);
+    final sourceOptions = ref.watch(preferencesProvider.select(
+      (prefs) => (prefs.vscodeBodyStyle, prefs.vscodeCodeLanguage),
+    ));
+    if (sourceMode) {
+      _sourceLines.update([
+        if (opPost != null)
+          VscodeLineEntry(post: opPost, htmlUnits: [opPost.cooked]),
+        ...vscodeNestedLines(
+          roots: contextMode && contextChain != null ? [contextChain] : roots,
+          session: _session,
+          blockedUsernames: widget.blockedUsernames,
+          maxDepth: maxDepth,
+          highlightPostNumber: contextMode
+              ? ns.targetPostNumber
+              : _highlightTarget,
+          displayStates: _sourceDisplayStates,
+        ),
+      ], style: sourceOptions.$1, language: sourceOptions.$2);
+    }
 
     return NestedReadingScope(
       controller: _viewport,
@@ -579,6 +613,7 @@ class _NestedPostListState extends ConsumerState<NestedPostList> {
                       child: PostItem(
                         post: opPost,
                         topicId: widget.topicId,
+                        sourceFirstLine: _sourceLines.firstLineOf(opPost.id),
                         categoryId: widget.detail.categoryId,
                         isTopicOwner: true,
                         topicHasAcceptedAnswer: widget.detail.hasAcceptedAnswer,
@@ -680,6 +715,13 @@ class _NestedPostListState extends ConsumerState<NestedPostList> {
                   SliverToBoxAdapter(
                     child: NestedPostCard(
                       node: contextChain,
+                      sourceLines: sourceMode ? _sourceLines : null,
+                      sourceDisplayStates: sourceMode
+                          ? _sourceDisplayStates
+                          : null,
+                      onSourceStructureChanged: sourceMode
+                          ? _refreshSourceLines
+                          : null,
                       topicId: widget.topicId,
                       detail: widget.detail,
                       params: p,
@@ -714,6 +756,13 @@ class _NestedPostListState extends ConsumerState<NestedPostList> {
                       final card = NestedPostCard(
                         key: ValueKey(roots[index].post.id),
                         node: roots[index],
+                        sourceLines: sourceMode ? _sourceLines : null,
+                        sourceDisplayStates: sourceMode
+                            ? _sourceDisplayStates
+                            : null,
+                        onSourceStructureChanged: sourceMode
+                            ? _refreshSourceLines
+                            : null,
                         topicId: widget.topicId,
                         detail: widget.detail,
                         params: p,
@@ -763,7 +812,9 @@ class _NestedPostListState extends ConsumerState<NestedPostList> {
 
                 SliverToBoxAdapter(
                   child: SizedBox(
-                    height: MediaQuery.of(context).padding.bottom + 100,
+                    height:
+                        MediaQuery.of(context).padding.bottom +
+                        (sourceMode ? 44 : 100),
                   ),
                 ),
               ],
@@ -777,7 +828,9 @@ class _NestedPostListState extends ConsumerState<NestedPostList> {
               ),
             PositionedDirectional(
               end: 16,
-              bottom: 100 + MediaQuery.paddingOf(context).bottom,
+              bottom:
+                  (sourceMode ? 44 : 100) +
+                  MediaQuery.paddingOf(context).bottom,
               child: !contextMode && roots.isNotEmpty
                   ? ValueListenableBuilder<int?>(
                       valueListenable: _currentRoot,
