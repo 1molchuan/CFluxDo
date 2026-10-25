@@ -439,7 +439,7 @@ class MasterDetailEmptyState extends StatelessWidget {
               message,
               textAlign: TextAlign.center,
               style: theme.textTheme.bodyLarge?.copyWith(
-                fontFamily: MojianTokens.serifFamily,
+                fontFamily: MojianTokens.titleFamilyFor(context),
                 fontWeight: FontWeight.w600,
                 fontSize: 17,
                 letterSpacing: 3,

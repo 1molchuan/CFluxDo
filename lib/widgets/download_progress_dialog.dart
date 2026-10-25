@@ -125,9 +125,7 @@ class DownloadProgressDialog extends ConsumerWidget {
                   : FontWeight.w300,
               color: color,
               height: 1.0,
-              fontFamily: Theme.of(context).extension<MojianTokens>() != null
-                  ? MojianTokens.serifFamily
-                  : 'monospace',
+              fontFamily: MojianTokens.titleFamilyOf(context) ?? 'monospace',
             ),
           ),
           const SizedBox(height: 16),

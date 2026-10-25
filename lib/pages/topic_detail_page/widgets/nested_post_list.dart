@@ -923,7 +923,7 @@ class _SortChip extends StatelessWidget {
               Text(
                 label,
                 style: theme.textTheme.bodyMedium?.copyWith(
-                  fontFamily: MojianTokens.serifFamily,
+                  fontFamily: MojianTokens.titleFamilyFor(context),
                   fontWeight: isActive ? FontWeight.w600 : FontWeight.w400,
                   color: isActive ? mj.ink : mj.ink3,
                 ),

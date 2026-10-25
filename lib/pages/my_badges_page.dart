@@ -201,7 +201,7 @@ class _MyBadgesPageState extends ConsumerState<MyBadgesPage> {
                     Text(
                       '$totalCount',
                       style: TextStyle(
-                        fontFamily: mj != null ? MojianTokens.serifFamily : null,
+                        fontFamily: mj?.titleFamily,
                         fontSize: 36,
                         fontWeight: mj != null ? FontWeight.w700 : FontWeight.w600,
                         color: mj?.ink ?? Theme.of(context).colorScheme.onSurface,

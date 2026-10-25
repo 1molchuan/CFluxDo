@@ -105,7 +105,7 @@ class _MoreTopicsSectionState extends ConsumerState<MoreTopicsSection> {
                           : l10n.topicDetail_suggestedTopics,
                       style: theme.textTheme.titleSmall?.copyWith(
                         fontWeight: FontWeight.w600,
-                        fontFamily: mj != null ? MojianTokens.serifFamily : null,
+                        fontFamily: mj?.titleFamily,
                         color: mj?.ink,
                       ),
                     ),
@@ -184,7 +184,7 @@ class _MoreTopicsTab extends StatelessWidget {
                   Text(
                     label,
                     style: theme.textTheme.titleSmall?.copyWith(
-                      fontFamily: MojianTokens.serifFamily,
+                      fontFamily: mj.titleFamily,
                       fontWeight: FontWeight.w600,
                       color: selected ? mj.ink : mj.ink3,
                     ),
@@ -321,7 +321,7 @@ class _MoreTopicTile extends StatelessWidget {
           topic.title,
           style: mj != null
               ? theme.textTheme.bodyMedium?.copyWith(
-                  fontFamily: MojianTokens.serifFamily,
+                  fontFamily: mj.titleFamily,
                   fontWeight: FontWeight.w600,
                   fontSize: 15.5,
                   height: 1.45,

@@ -613,7 +613,7 @@ extension on _DraftCard {
                   child: Text(
                     title,
                     style: TextStyle(
-                      fontFamily: MojianTokens.serifFamily,
+                      fontFamily: MojianTokens.titleFamilyFor(context),
                       fontSize: 16,
                       fontWeight: FontWeight.w600,
                       height: 1.45,

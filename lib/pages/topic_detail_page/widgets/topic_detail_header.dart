@@ -369,7 +369,7 @@ class TopicDetailHeader extends ConsumerWidget {
     final l10n = context.l10n;
     final wide = MediaQuery.sizeOf(context).width >= 600;
     final titleStyle = theme.textTheme.headlineSmall?.copyWith(
-      fontFamily: MojianTokens.serifFamily,
+      fontFamily: MojianTokens.titleFamilyFor(context),
       fontWeight: FontWeight.w700,
       fontSize: wide ? 28 : 24,
       height: 1.4,
@@ -419,7 +419,7 @@ class TopicDetailHeader extends ConsumerWidget {
           TextSpan(
             text: number,
             style: TextStyle(
-              fontFamily: MojianTokens.serifFamily,
+              fontFamily: MojianTokens.titleFamilyFor(context),
               fontWeight: FontWeight.w600,
               fontSize: 16,
               color: mj.ink,

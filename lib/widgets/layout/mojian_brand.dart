@@ -27,7 +27,7 @@ class MojianBrand extends StatelessWidget {
       child: Text(
         'c',
         style: TextStyle(
-          fontFamily: MojianTokens.serifFamily,
+          fontFamily: MojianTokens.titleFamilyFor(context),
           fontWeight: FontWeight.w700,
           fontSize: 17,
           height: 1,
@@ -48,7 +48,7 @@ class MojianBrand extends StatelessWidget {
             Text(
               'cfluxdo',
               style: TextStyle(
-                fontFamily: MojianTokens.serifFamily,
+                fontFamily: MojianTokens.titleFamilyFor(context),
                 fontWeight: FontWeight.w600,
                 fontSize: 21,
                 height: 1,

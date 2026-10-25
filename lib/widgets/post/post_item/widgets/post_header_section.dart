@@ -309,7 +309,7 @@ class _PostHeaderSectionState extends ConsumerState<PostHeaderSection> {
                       style: theme.extension<MojianTokens>() != null
                           ? theme.textTheme.labelSmall?.copyWith(
                               color: theme.colorScheme.onSurfaceVariant,
-                              fontFamily: MojianTokens.serifFamily,
+                              fontFamily: MojianTokens.titleFamilyOf(context),
                               fontWeight: FontWeight.w600,
                               fontSize: 11,
                             )

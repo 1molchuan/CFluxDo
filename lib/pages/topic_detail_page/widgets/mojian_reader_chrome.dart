@@ -242,7 +242,7 @@ class _FloorIndicator extends StatelessWidget {
                 builder: (context, index, _) => Text(
                   '$index / $totalCount',
                   style: TextStyle(
-                    fontFamily: MojianTokens.serifFamily,
+                    fontFamily: MojianTokens.titleFamilyFor(context),
                     fontWeight: FontWeight.w600,
                     fontSize: 13,
                     color: mj.ink2,
@@ -380,7 +380,7 @@ class _MojianTimelineState extends State<MojianTimeline> {
     final mj = theme.extension<MojianTokens>()!;
     final l10n = context.l10n;
     final dateStyle = TextStyle(
-      fontFamily: MojianTokens.serifFamily,
+      fontFamily: mj.titleFamily,
       fontSize: 12,
       color: mj.ink3,
     );
@@ -450,7 +450,7 @@ class _MojianTimelineState extends State<MojianTimeline> {
                       Text(
                         '$index / ${widget.totalCount}',
                         style: TextStyle(
-                          fontFamily: MojianTokens.serifFamily,
+                          fontFamily: mj.titleFamily,
                           fontWeight: FontWeight.w600,
                           fontSize: 14,
                           height: 1,

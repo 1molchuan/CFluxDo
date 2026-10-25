@@ -1352,10 +1352,10 @@ class _ImageViewerPageState extends ConsumerState<ImageViewerPage>
                                           color: Colors.white,
                                           fontSize: 14,
                                         )
-                                      : const TextStyle(
+                                      : TextStyle(
                                           color: Colors.white,
                                           fontSize: 14,
-                                          fontFamily: MojianTokens.serifFamily,
+                                          fontFamily: MojianTokens.titleFamilyFor(context),
                                           fontFeatures: [
                                             FontFeature.tabularFigures(),
                                           ],

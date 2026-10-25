@@ -278,7 +278,7 @@ class _TopicTimelineSheetState extends State<TopicTimelineSheet> {
                   widget.title!,
                   style: theme.textTheme.titleMedium?.copyWith(
                     fontWeight: FontWeight.w600,
-                    fontFamily: mj == null ? null : MojianTokens.serifFamily,
+                    fontFamily: mj?.titleFamily,
                   ),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,

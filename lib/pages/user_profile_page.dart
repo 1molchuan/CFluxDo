@@ -2209,9 +2209,7 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage>
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
-                              fontFamily: mj == null
-                                  ? null
-                                  : MojianTokens.serifFamily,
+                              fontFamily: mj?.titleFamily,
                               color: mj?.ink ?? Colors.white,
                               fontSize: 16,
                               fontWeight: FontWeight.w600,
@@ -2355,9 +2353,7 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage>
                           // 墨笺:名字用宋体(横幅背景保留,白字不变)
                           style: TextStyle(
                             fontFamily:
-                                theme.extension<MojianTokens>() != null
-                                ? MojianTokens.serifFamily
-                                : null,
+                                theme.extension<MojianTokens>()?.titleFamily,
                             color: ink.fg,
                             fontSize: ink.mojian ? 24 : 22,
                             fontWeight: ink.mojian
@@ -2891,9 +2887,7 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage>
             value,
             style: TextStyle(
               fontFamily:
-                  Theme.of(context).extension<MojianTokens>() != null
-                  ? MojianTokens.serifFamily
-                  : null,
+                  MojianTokens.titleFamilyOf(context),
               color: ink.fg,
               fontSize: 17,
               fontWeight: FontWeight.w600,
@@ -3312,9 +3306,7 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage>
                     fontWeight: theme.extension<MojianTokens>() != null
                         ? FontWeight.w600
                         : FontWeight.w500,
-                    fontFamily: theme.extension<MojianTokens>() != null
-                        ? MojianTokens.serifFamily
-                        : null,
+                    fontFamily: theme.extension<MojianTokens>()?.titleFamily,
                   ),
                 ),
               ),
@@ -4113,9 +4105,7 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage>
                   fontWeight: theme.extension<MojianTokens>() != null
                       ? FontWeight.w600
                       : FontWeight.w500,
-                  fontFamily: theme.extension<MojianTokens>() != null
-                      ? MojianTokens.serifFamily
-                      : null,
+                  fontFamily: theme.extension<MojianTokens>()?.titleFamily,
                 ),
               ),
 

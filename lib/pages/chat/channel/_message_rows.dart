@@ -282,7 +282,7 @@ class _DayDivider extends StatelessWidget {
               TimeUtils.formatShortDate(date),
               style: mj != null
                   ? TextStyle(
-                      fontFamily: MojianTokens.serifFamily,
+                      fontFamily: mj.titleFamily,
                       fontSize: 12.5,
                       fontWeight: FontWeight.w600,
                       letterSpacing: 1.6,

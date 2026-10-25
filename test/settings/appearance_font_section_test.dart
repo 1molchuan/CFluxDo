@@ -44,7 +44,10 @@ Future<SharedPreferences> _pumpFontSection(
                 context,
               ).firstWhere((g) => g.title == context.l10n.appearance_font);
               final model = group.items.single as CustomModel;
-              return Scaffold(body: model.builder(context, ref));
+              // 真实外观页在滚动容器里，这里也给一个，免得整段撑爆 600px 的测试画布
+              return Scaffold(
+                body: SingleChildScrollView(child: model.builder(context, ref)),
+              );
             },
           ),
         ),
@@ -54,10 +57,10 @@ Future<SharedPreferences> _pumpFontSection(
   return prefs;
 }
 
-/// 当前选中的字体（RadioGroup 的 groupValue 即状态快照）。
-AppFontFamily _selected(WidgetTester tester) => tester
-    .widget<RadioGroup<AppFontFamily>>(find.byType(RadioGroup<AppFontFamily>))
-    .groupValue!;
+/// 当前选中的字体（直接读主题状态）。
+AppFontFamily _selected(WidgetTester tester) => ProviderScope.containerOf(
+  tester.element(find.byType(Scaffold)),
+).read(themeProvider).fontFamily;
 
 void main() {
   setUpAll(() {
@@ -72,16 +75,20 @@ void main() {
     }
   });
 
-  testWidgets('字体分组列出系统 / MiSans / 系统字体 / 自定义四项，未选时给提示', (tester) async {
+  testWidgets('字体分组：当前字体卡片 + 系统 / MiSans / 系统字体 / 导入文件四项，未选时给提示', (
+    tester,
+  ) async {
     await _pumpFontSection(tester, prefsSeed: {});
 
+    expect(find.text('当前：系统默认'), findsOneWidget);
+    expect(find.text('所选字体会用于全部界面文字：标题、列表、帖子正文都会换。'), findsOneWidget);
     expect(find.text('系统默认'), findsOneWidget);
     expect(find.text('MiSans'), findsOneWidget);
     expect(find.text('系统字体'), findsOneWidget);
-    expect(find.text('自定义字体'), findsOneWidget);
+    expect(find.text('导入字体文件'), findsOneWidget);
     expect(find.text('支持 ttf / otf 字体文件'), findsOneWidget);
     expect(find.text('从系统已安装字体中选择'), findsOneWidget);
-    // 还没选过字体时不出现文件行 / 已选行
+    // 还没选过字体时不出现更换 / 移除
     expect(find.text('移除'), findsNothing);
     expect(find.text('更换'), findsNothing);
     expect(_selected(tester), AppFontFamily.system);
@@ -90,6 +97,7 @@ void main() {
     await tester.pump();
 
     expect(_selected(tester), AppFontFamily.miSans);
+    expect(find.text('当前：MiSans · App 内置的小米字体'), findsOneWidget);
     expect(find.text('支持 ttf / otf 字体文件'), findsOneWidget);
   });
 
@@ -103,7 +111,7 @@ void main() {
       },
     );
 
-    expect(find.text('微软雅黑'), findsOneWidget);
+    expect(find.text('已选：微软雅黑'), findsOneWidget);
     expect(find.text('更换'), findsOneWidget);
     // 已经选过：不再显示选择提示
     expect(find.text('从系统已安装字体中选择'), findsNothing);
@@ -113,6 +121,7 @@ void main() {
 
     expect(_selected(tester), AppFontFamily.installed);
     expect(prefs.getString('font_family'), 'installed');
+    expect(find.text('当前：微软雅黑 · 系统字体'), findsOneWidget);
   });
 
   testWidgets('已有字体文件：显示文件名，可在自选与内置字体间来回切换', (tester) async {
@@ -126,7 +135,8 @@ void main() {
     );
 
     expect(_selected(tester), AppFontFamily.custom);
-    expect(find.text('HarmonyOS Sans.ttf'), findsOneWidget);
+    expect(find.text('已选：HarmonyOS Sans.ttf'), findsOneWidget);
+    expect(find.text('当前：HarmonyOS Sans.ttf · 导入字体文件'), findsOneWidget);
     // 有文件时不再显示选择提示
     expect(find.text('支持 ttf / otf 字体文件'), findsNothing);
 
@@ -134,12 +144,16 @@ void main() {
     await tester.pump();
     expect(_selected(tester), AppFontFamily.system);
     expect(prefs.getString('font_family'), 'system');
+    // 文件还在：行上保留「更换」，但不再是当前字体
+    expect(find.text('已选：HarmonyOS Sans.ttf'), findsOneWidget);
+    expect(find.text('移除'), findsNothing);
 
-    await tester.tap(find.text('自定义字体'));
+    await tester.tap(find.text('导入字体文件'));
     await tester.pump();
     // 文件还在：直接切回自选字体，不重复拉起文件选择器
     expect(_selected(tester), AppFontFamily.custom);
     expect(prefs.getString('font_family'), 'custom');
+    expect(find.text('移除'), findsOneWidget);
   });
 
   testWidgets('移除自选字体：回退系统默认、清掉记录、收起文件行', (tester) async {
@@ -156,7 +170,7 @@ void main() {
     await tester.pump();
 
     expect(_selected(tester), AppFontFamily.system);
-    expect(find.text('HarmonyOS Sans.ttf'), findsNothing);
+    expect(find.textContaining('HarmonyOS Sans.ttf'), findsNothing);
     expect(find.text('移除'), findsNothing);
     expect(find.text('支持 ttf / otf 字体文件'), findsOneWidget);
     expect(prefs.getString(CustomFontService.pathPrefKey), isNull);
@@ -173,7 +187,8 @@ void main() {
       },
     );
 
-    expect(find.text('字体文件已丢失'), findsOneWidget);
+    // 当前字体卡片与选项行都提示丢失
+    expect(find.textContaining('字体文件已丢失'), findsNWidgets(2));
     expect(find.text('更换'), findsOneWidget);
     expect(find.text('移除'), findsOneWidget);
   });

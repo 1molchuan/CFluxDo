@@ -213,7 +213,7 @@ class NotificationItem extends StatelessWidget {
     // 墨笺:通知标题(多为话题标题)用宋体,已读只降颜色
     final titleStyle = mj != null
         ? TextStyle(
-            fontFamily: MojianTokens.serifFamily,
+            fontFamily: mj.titleFamily,
             fontWeight: FontWeight.w600,
             fontSize: 15,
             height: 1.4,

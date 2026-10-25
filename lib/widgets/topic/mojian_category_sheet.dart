@@ -133,7 +133,7 @@ class _MojianCategorySheetState extends ConsumerState<MojianCategorySheet> {
                 Text(
                   l10n.category_categories,
                   style: TextStyle(
-                    fontFamily: MojianTokens.serifFamily,
+                    fontFamily: MojianTokens.titleFamilyFor(context),
                     fontWeight: FontWeight.w700,
                     fontSize: 21,
                     letterSpacing: 1.2,
@@ -241,7 +241,7 @@ class _MojianCategorySheetState extends ConsumerState<MojianCategorySheet> {
               child: Text(
                 l10n.category_noCategoriesFound,
                 style: TextStyle(
-                  fontFamily: MojianTokens.serifFamily,
+                  fontFamily: MojianTokens.titleFamilyFor(context),
                   fontSize: 16,
                   color: mj.ink2,
                 ),
@@ -262,7 +262,7 @@ class _MojianCategorySheetState extends ConsumerState<MojianCategorySheet> {
               Text(
                 title,
                 style: TextStyle(
-                  fontFamily: MojianTokens.serifFamily,
+                  fontFamily: MojianTokens.titleFamilyFor(context),
                   fontWeight: FontWeight.w600,
                   fontSize: 12,
                   letterSpacing: 3,
@@ -439,7 +439,7 @@ class _CategoryTile extends StatelessWidget {
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
-                                fontFamily: MojianTokens.serifFamily,
+                                fontFamily: MojianTokens.titleFamilyFor(context),
                                 fontWeight: FontWeight.w600,
                                 fontSize: 15.5,
                                 color: mj.ink,

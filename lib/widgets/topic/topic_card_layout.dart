@@ -672,7 +672,7 @@ class TopicCardLayout {
         : messageStyle
         ? subjectColor
         : titleColor;
-    final titleFamily = mj != null ? MojianTokens.serifFamily : null;
+    final titleFamily = mj?.titleFamily;
     final titleHeight = mjRow ? 1.45 : 1.3;
 
     final tb =

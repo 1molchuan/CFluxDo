@@ -24,7 +24,7 @@ class MojianSectionLabel extends StatelessWidget {
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
-              fontFamily: MojianTokens.serifFamily,
+              fontFamily: MojianTokens.titleFamilyFor(context),
               fontWeight: FontWeight.w600,
               fontSize: 12.5,
               letterSpacing: 2.4,

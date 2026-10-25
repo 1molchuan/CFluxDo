@@ -450,9 +450,9 @@ class _ChatChannelTile extends StatelessWidget {
                                   overflow: TextOverflow.ellipsis,
                                   style: theme.textTheme.titleSmall?.copyWith(
                                     fontWeight: FontWeight.w600,
-                                    fontFamily: mojianRow != null
-                                        ? MojianTokens.serifFamily
-                                        : null,
+                                    fontFamily: mojianRow == null
+                                        ? null
+                                        : MojianTokens.titleFamilyOf(context),
                                     fontSize: mojianRow != null ? 15.5 : null,
                                   ),
                                 ),

@@ -55,10 +55,24 @@ class MojianTokens extends ThemeExtension<MojianTokens> {
     required this.accent,
     required this.jade,
     required this.gold,
+    this.titleFamily = serifFamily,
   });
 
   /// 标题宋体（pubspec 里的字体族名）
   static const serifFamily = 'MojianSerif';
+
+  /// 标题实际用的字体族：默认宋体；用户自己选了字体（自选文件 / 系统字体 /
+  /// 推荐字体）时就是那个字体——用户明确选的字体必须全局生效，标题不能
+  /// 还是宋体。各处标题样式一律取这里，不要直接写 [serifFamily]。
+  final String titleFamily;
+
+  /// 没有墨笺令牌（经典 / Claude 风格）时返回 null，跟随全局字体
+  static String? titleFamilyOf(BuildContext context) =>
+      Theme.of(context).extension<MojianTokens>()?.titleFamily;
+
+  /// 墨笺专属组件用：没有令牌时退回宋体（与改动前行为一致）
+  static String titleFamilyFor(BuildContext context) =>
+      titleFamilyOf(context) ?? serifFamily;
 
   final Color paper;
   final Color paper2;
@@ -82,10 +96,12 @@ class MojianTokens extends ThemeExtension<MojianTokens> {
     MojianAccent accent, {
     bool black = false,
     Color? accentColor,
+    String? titleFamily,
   }) {
     final light = brightness == Brightness.light;
     final oled = !light && black;
     return MojianTokens(
+      titleFamily: titleFamily ?? serifFamily,
       paper: light
           ? const Color(0xFFF6F2EA)
           : oled
@@ -137,8 +153,10 @@ class MojianTokens extends ThemeExtension<MojianTokens> {
     Color? accent,
     Color? jade,
     Color? gold,
+    String? titleFamily,
   }) {
     return MojianTokens(
+      titleFamily: titleFamily ?? this.titleFamily,
       paper: paper ?? this.paper,
       paper2: paper2 ?? this.paper2,
       paper3: paper3 ?? this.paper3,
@@ -160,6 +178,7 @@ class MojianTokens extends ThemeExtension<MojianTokens> {
     if (other == null) return this;
     Color c(Color a, Color b) => Color.lerp(a, b, t)!;
     return MojianTokens(
+      titleFamily: t < 0.5 ? titleFamily : other.titleFamily,
       paper: c(paper, other.paper),
       paper2: c(paper2, other.paper2),
       paper3: c(paper3, other.paper3),
@@ -374,9 +393,12 @@ class MojianTheme {
   }
   /// 标题类文字换成宋体：display / headline / titleLarge（AppBar 标题、对话框标题都走这里）。
   /// 正文、标签、按钮仍用用户选的正文字体。
-  static TextTheme serifTitles(TextTheme base) {
+  static TextTheme serifTitles(
+    TextTheme base, {
+    String family = MojianTokens.serifFamily,
+  }) {
     TextStyle? serif(TextStyle? s, FontWeight w) => s?.copyWith(
-      fontFamily: MojianTokens.serifFamily,
+      fontFamily: family,
       fontWeight: w,
       letterSpacing: 0.2,
     );
@@ -397,6 +419,7 @@ class MojianTheme {
     required ColorScheme scheme,
     required MojianAccent accent,
     required String? fontFamily,
+    String? titleFontFamily,
     required PageTransitionsTheme pageTransitionsTheme,
     required IconThemeData iconTheme,
     required IconThemeData primaryIconTheme,
@@ -412,6 +435,7 @@ class MojianTheme {
       accent,
       black: black,
       accentColor: scheme.primary,
+      titleFamily: titleFontFamily,
     );
     final stadium = WidgetStatePropertyAll<OutlinedBorder>(
       const StadiumBorder(),
@@ -436,8 +460,8 @@ class MojianTheme {
           quoteBackground: Colors.transparent,
           quoteRadius: 0,
           quoteTextColor: t.ink2,
-          quoteFontFamily: MojianTokens.serifFamily,
-          headingFontFamily: MojianTokens.serifFamily,
+          quoteFontFamily: t.titleFamily,
+          headingFontFamily: t.titleFamily,
           headingColor: t.ink,
           ruleColor: t.rule,
         ),
@@ -664,7 +688,7 @@ class MojianTheme {
         circularTrackPadding: EdgeInsets.zero,
       ),
     );
-    final textTheme = serifTitles(base.textTheme);
+    final textTheme = serifTitles(base.textTheme, family: t.titleFamily);
     return base.copyWith(
       textTheme: textTheme,
       appBarTheme: base.appBarTheme.copyWith(

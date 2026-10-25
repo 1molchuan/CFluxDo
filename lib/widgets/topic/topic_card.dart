@@ -387,7 +387,7 @@ class TopicCard extends ConsumerWidget {
           : FontWeight.w500,
       height: mj != null ? 1.45 : 1.3,
       color: mj == null ? titleColor : (isFullyRead ? mj.ink3 : mj.ink),
-      fontFamily: mj != null ? MojianTokens.serifFamily : null,
+      fontFamily: mj?.titleFamily,
     );
 
     // Card 壳换轻装(视觉逐项等价):cardTheme elevation=0 无阴影无 tint,
@@ -1150,7 +1150,7 @@ class CompactTopicCard extends ConsumerWidget {
     // 墨笺:置顶行也是宋体单行标题,已读只降颜色
     final compactTitleStyle = mj != null
         ? theme.textTheme.labelMedium?.copyWith(
-            fontFamily: MojianTokens.serifFamily,
+            fontFamily: mj.titleFamily,
             fontSize: 14.5,
             fontWeight: FontWeight.w600,
             color: isUnread ? mj.ink : mj.ink2,

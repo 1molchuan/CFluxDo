@@ -30,7 +30,7 @@ class MojianLedgerCard extends StatelessWidget {
 
   /// 大号数字(余额、积分)
   static TextStyle figureStyle(MojianTokens mj) => TextStyle(
-    fontFamily: MojianTokens.serifFamily,
+    fontFamily: mj.titleFamily,
     fontSize: 34,
     fontWeight: FontWeight.w700,
     height: 1.1,
@@ -86,7 +86,7 @@ class MojianLedgerCard extends StatelessWidget {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
-                          fontFamily: MojianTokens.serifFamily,
+                          fontFamily: MojianTokens.titleFamilyFor(context),
                           fontSize: 13,
                           fontWeight: FontWeight.w600,
                           letterSpacing: 2,

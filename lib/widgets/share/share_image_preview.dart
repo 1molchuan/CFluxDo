@@ -127,6 +127,7 @@ ThemeData buildShareImageThemeData(
       ),
       accent: themeState.mojianAccent,
       fontFamily: currentTheme.textTheme.bodyMedium?.fontFamily,
+      titleFontFamily: themeState.titleFontFamilyName,
       pageTransitionsTheme: currentTheme.pageTransitionsTheme,
       iconTheme: const IconThemeData(),
       primaryIconTheme: const IconThemeData(),

@@ -1234,7 +1234,7 @@ class _DrawerTabSwitcher extends StatelessWidget {
               Text(
                 label,
                 style: TextStyle(
-                  fontFamily: MojianTokens.serifFamily,
+                  fontFamily: MojianTokens.titleFamilyFor(context),
                   fontSize: 16,
                   fontWeight: FontWeight.w600,
                   color: selected ? mj.ink : mj.ink3,

@@ -129,7 +129,7 @@ class _BannerHeader extends StatelessWidget {
               color: fg,
               fontWeight: FontWeight.w700,
               letterSpacing: 0.3,
-              fontFamily: mj != null ? MojianTokens.serifFamily : null,
+              fontFamily: mj?.titleFamily,
             ),
           ),
           if (count > 1) ...[

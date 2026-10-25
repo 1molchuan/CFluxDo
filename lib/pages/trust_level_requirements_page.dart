@@ -561,7 +561,7 @@ class _TrustLevelRequirementsPageState
                     Text(
                       _data!.title,
                       style: TextStyle(
-                        fontFamily: mj != null ? MojianTokens.serifFamily : null,
+                        fontFamily: mj?.titleFamily,
                         fontSize: 28,
                         fontWeight: mj != null ? FontWeight.w700 : FontWeight.w600,
                         color: mj?.ink ?? colorScheme.onSurface,
@@ -719,7 +719,7 @@ class _TrustLevelRequirementsPageState
                   '${ring.current}',
                   style: theme.textTheme.titleMedium?.copyWith(
                     fontWeight: mj != null ? FontWeight.w700 : FontWeight.w800,
-                    fontFamily: mj != null ? MojianTokens.serifFamily : null,
+                    fontFamily: mj?.titleFamily,
                     color: mj?.ink ?? colorScheme.onSurface,
                   ),
                 ),
@@ -1023,7 +1023,7 @@ class _TrustLevelRequirementsPageState
                 veto.value,
                 style: theme.textTheme.headlineSmall?.copyWith(
                   fontWeight: FontWeight.w600,
-                  fontFamily: mj != null ? MojianTokens.serifFamily : null,
+                  fontFamily: mj?.titleFamily,
                   color: iconColor,
                 ),
               ),

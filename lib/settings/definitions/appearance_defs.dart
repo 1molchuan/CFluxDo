@@ -1317,124 +1317,208 @@ class _FontSection extends ConsumerWidget {
     final state = ref.watch(themeProvider);
     final customPath = state.customFontPath;
     final customExists = customPath != null && File(customPath).existsSync();
-    final installedFamily = state.installedFontFamily;
-    final hintStyle = theme.textTheme.bodySmall?.copyWith(
-      color: cs.onSurfaceVariant,
+    final customIsRecommended = RecommendedFontService.isRecommendedFontPath(
+      customPath,
     );
+    final installedFamily = state.installedFontFamily;
+    final notifier = ref.read(themeProvider.notifier);
 
-    // 每项的标签都用该字体自身的 family 渲染（未选中也生效，先看到效果）
-    final customFamily = state.customFontFamilyName;
-    final options = <(String, AppFontFamily, String?)>[
-      (l10n.appearance_fontSystem, AppFontFamily.system, null),
-      ('MiSans', AppFontFamily.miSans, 'MiSans'),
-      (l10n.appearance_fontInstalled, AppFontFamily.installed, installedFamily),
-      (l10n.appearance_fontCustom, AppFontFamily.custom, customFamily),
-    ];
-
-    return RadioGroup<AppFontFamily>(
-      groupValue: state.fontFamily,
-      onChanged: (value) {
-        if (value == null) return;
-        // 还没选过字体就把选择入口先拉起来，取消则保持原选择
-        if (value == AppFontFamily.custom && !customExists) {
-          unawaited(_pickCustomFont(context, ref));
-          return;
-        }
-        if (value == AppFontFamily.installed && installedFamily == null) {
-          unawaited(_pickInstalledFont(context, ref));
-          return;
-        }
-        ref.read(themeProvider.notifier).setFontFamily(value);
-      },
-      child: Column(
-        children: [
-          for (final (label, family, previewFamily) in options)
-            RadioListTile<AppFontFamily>(
-              title: Text(
-                label,
-                style: previewFamily == null
-                    ? null
-                    : TextStyle(fontFamily: previewFamily),
-              ),
-              subtitle: switch (family) {
-                AppFontFamily.custom when customPath == null => Text(
-                  l10n.appearance_fontCustomHint,
-                  style: hintStyle,
-                ),
-                AppFontFamily.installed when installedFamily == null => Text(
-                  l10n.appearance_fontInstalledHint,
-                  style: hintStyle,
-                ),
-                _ => null,
-              },
-              value: family,
-            ),
-          if (installedFamily != null) ...[
-            const SizedBox(height: 4),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-              child: Row(
-                children: [
-                  Icon(
-                    Symbols.text_fields_rounded,
-                    size: 20,
-                    color: cs.primary,
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      state.installedFontName ?? installedFamily,
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        fontFamily: installedFamily,
-                      ),
-                    ),
-                  ),
-                  TextButton(
-                    onPressed: () => _pickInstalledFont(context, ref),
-                    child: Text(l10n.appearance_fontInstalledChange),
-                  ),
-                ],
-              ),
-            ),
-          ],
-          if (customPath != null) ...[
-            const SizedBox(height: 4),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-              child: Row(
-                children: [
-                  Icon(
-                    Symbols.font_download_rounded,
-                    size: 20,
-                    color: customExists ? cs.primary : cs.error,
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      customExists
-                          ? state.customFontName ?? l10n.appearance_fontCustom
-                          : l10n.appearance_fontCustomMissing,
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: customExists ? cs.onSurface : cs.error,
-                      ),
-                    ),
-                  ),
-                  TextButton(
-                    onPressed: () => _pickCustomFont(context, ref),
-                    child: Text(l10n.appearance_fontCustomChange),
-                  ),
-                  TextButton(
-                    onPressed: () =>
-                        ref.read(themeProvider.notifier).removeCustomFont(),
-                    child: Text(l10n.appearance_fontCustomRemove),
-                  ),
-                ],
-              ),
-            ),
-          ],
-          const _RecommendedFontsBlock(),
-        ],
+    // 当前字体：名字 + 来源，预览用它自己渲染
+    final previewFamily = state.fontFamilyName;
+    final (String currentName, String? currentSource) = switch (state.fontFamily) {
+      AppFontFamily.system => (l10n.appearance_fontSystem, null),
+      AppFontFamily.miSans => ('MiSans', l10n.appearance_fontMiSansDesc),
+      AppFontFamily.installed => (
+        state.installedFontName ?? installedFamily ?? l10n.appearance_fontInstalled,
+        l10n.appearance_fontInstalled,
       ),
+      AppFontFamily.custom => (
+        customExists
+            ? (state.customFontName ?? l10n.appearance_fontCustomTitle)
+            : l10n.appearance_fontCustomMissing,
+        customIsRecommended
+            ? l10n.appearance_recommendedFonts
+            : l10n.appearance_fontCustomTitle,
+      ),
+    };
+    final currentBroken = state.fontFamily == AppFontFamily.custom && !customExists;
+
+    final selectedInstalled = state.fontFamily == AppFontFamily.installed;
+    final selectedCustomFile =
+        state.fontFamily == AppFontFamily.custom && !customIsRecommended;
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // ── 当前字体 ──
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+          child: Container(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+            decoration: BoxDecoration(
+              color: cs.surfaceContainerHigh.withValues(alpha: 0.55),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  l10n.appearance_fontPreviewText,
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontFamily: previewFamily,
+                    height: 1.4,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  currentSource == null
+                      ? l10n.appearance_fontCurrent(currentName)
+                      : '${l10n.appearance_fontCurrent(currentName)} · $currentSource',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: currentBroken ? cs.error : cs.onSurfaceVariant,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  l10n.appearance_fontCurrentHint,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: cs.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        // ── 选项 ──
+        _FontChoiceTile(
+          selected: state.fontFamily == AppFontFamily.system,
+          title: l10n.appearance_fontSystem,
+          subtitle: l10n.appearance_fontSystemDesc,
+          onTap: () => notifier.setFontFamily(AppFontFamily.system),
+        ),
+        _FontChoiceTile(
+          selected: state.fontFamily == AppFontFamily.miSans,
+          title: 'MiSans',
+          titleFamily: 'MiSans',
+          subtitle: l10n.appearance_fontMiSansDesc,
+          onTap: () => notifier.setFontFamily(AppFontFamily.miSans),
+        ),
+        _FontChoiceTile(
+          selected: selectedInstalled,
+          title: l10n.appearance_fontInstalled,
+          titleFamily: selectedInstalled ? installedFamily : null,
+          subtitle: installedFamily == null
+              ? l10n.appearance_fontInstalledHint
+              : l10n.appearance_fontPicked(
+                  state.installedFontName ?? installedFamily,
+                ),
+          picker: true,
+          // 已经选过：点一下切回去；再点一次打开选择器换别的
+          onTap: () => installedFamily == null || selectedInstalled
+              ? _pickInstalledFont(context, ref)
+              : notifier.setFontFamily(AppFontFamily.installed),
+          onPick: installedFamily == null
+              ? null
+              : () => _pickInstalledFont(context, ref),
+        ),
+        _FontChoiceTile(
+          selected: selectedCustomFile,
+          title: l10n.appearance_fontCustomTitle,
+          titleFamily:
+              selectedCustomFile && customExists ? state.customFontFamilyName : null,
+          subtitle: customPath == null || customIsRecommended
+              ? l10n.appearance_fontCustomHint
+              : customExists
+              ? l10n.appearance_fontPicked(
+                  state.customFontName ?? l10n.appearance_fontCustomTitle,
+                )
+              : l10n.appearance_fontCustomMissing,
+          subtitleError: selectedCustomFile && !customExists,
+          picker: true,
+          onTap: () => customPath == null || customIsRecommended || selectedCustomFile
+              ? _pickCustomFont(context, ref)
+              : notifier.setFontFamily(AppFontFamily.custom),
+          onPick: customPath == null || customIsRecommended
+              ? null
+              : () => _pickCustomFont(context, ref),
+          onRemove: selectedCustomFile && customPath != null
+              ? () => notifier.removeCustomFont()
+              : null,
+        ),
+        const _RecommendedFontsBlock(),
+      ],
+    );
+  }
+}
+
+/// 字体选项行：左侧单选圆点，右侧可选「更换」「移除」与展开箭头
+class _FontChoiceTile extends StatelessWidget {
+  const _FontChoiceTile({
+    required this.selected,
+    required this.title,
+    required this.onTap,
+    this.titleFamily,
+    this.subtitle,
+    this.subtitleError = false,
+    this.picker = false,
+    this.onPick,
+    this.onRemove,
+  });
+
+  final bool selected;
+  final String title;
+  final String? titleFamily;
+  final String? subtitle;
+  final bool subtitleError;
+  final bool picker;
+  final VoidCallback onTap;
+  final VoidCallback? onPick;
+  final VoidCallback? onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    final l10n = context.l10n;
+    final actions = <Widget>[
+      if (onPick != null)
+        TextButton(
+          onPressed: onPick,
+          child: Text(l10n.appearance_fontCustomChange),
+        ),
+      if (onRemove != null)
+        TextButton(
+          onPressed: onRemove,
+          child: Text(l10n.appearance_fontCustomRemove),
+        ),
+      if (picker && onPick == null)
+        Icon(Symbols.chevron_right_rounded, color: cs.onSurfaceVariant),
+    ];
+    return ListTile(
+      contentPadding: const EdgeInsets.fromLTRB(16, 0, 8, 0),
+      leading: Icon(
+        selected ? Symbols.radio_button_checked_rounded : Symbols.radio_button_unchecked_rounded,
+        color: selected ? cs.primary : cs.onSurfaceVariant,
+        fill: selected ? 1 : 0,
+      ),
+      title: Text(
+        title,
+        style: theme.textTheme.bodyLarge?.copyWith(fontFamily: titleFamily),
+      ),
+      subtitle: subtitle == null
+          ? null
+          : Text(
+              subtitle!,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: subtitleError ? cs.error : cs.onSurfaceVariant,
+              ),
+            ),
+      trailing: actions.isEmpty
+          ? null
+          : Row(mainAxisSize: MainAxisSize.min, children: actions),
+      onTap: onTap,
     );
   }
 }
@@ -3183,7 +3267,7 @@ class _MojianMiniPreview extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = tokens;
     TextStyle serif(double size) => TextStyle(
-      fontFamily: MojianTokens.serifFamily,
+      fontFamily: t.titleFamily,
       fontWeight: FontWeight.w600,
       fontSize: size,
       height: 1.2,

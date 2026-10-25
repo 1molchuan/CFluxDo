@@ -168,6 +168,14 @@ class ThemeState {
       ? null
       : CustomFontService.familyNameFor(customFontPath!);
 
+  /// 用户自己选的字体（自选文件 / 系统字体 / 推荐字体）要全局生效，墨笺的
+  /// 宋体标题也换成它；「系统默认」和内置 MiSans 保持宋体标题（原设计）。
+  /// null = 标题沿用主题默认。
+  String? get titleFontFamilyName => switch (fontFamily) {
+    AppFontFamily.installed || AppFontFamily.custom => fontFamilyName,
+    AppFontFamily.system || AppFontFamily.miSans => null,
+  };
+
   /// 获取实际用于 ThemeData 的 fontFamily 字符串
   String? get fontFamilyName {
     switch (fontFamily) {

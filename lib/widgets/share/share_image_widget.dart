@@ -145,7 +145,7 @@ class ShareImageWidget extends ConsumerWidget {
     final tags = detail.tags ?? const <Tag>[];
     final small = TextStyle(fontSize: 12, color: mj.ink3, height: 1.4);
     final titleStyle = TextStyle(
-      fontFamily: MojianTokens.serifFamily,
+      fontFamily: mj.titleFamily,
       fontSize: 21,
       fontWeight: FontWeight.w700,
       height: 1.42,
@@ -186,7 +186,7 @@ class ShareImageWidget extends ConsumerWidget {
                 Text(
                   'LINUX DO',
                   style: TextStyle(
-                    fontFamily: MojianTokens.serifFamily,
+                    fontFamily: mj.titleFamily,
                     fontSize: 12.5,
                     fontWeight: FontWeight.w600,
                     letterSpacing: 2.4,

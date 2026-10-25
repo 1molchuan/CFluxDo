@@ -704,6 +704,7 @@ ThemeData _buildThemeForStyle(
         scheme: scheme,
         accent: themeState.mojianAccent,
         fontFamily: themeState.fontFamilyName,
+        titleFontFamily: themeState.titleFontFamilyName,
         pageTransitionsTheme: fullscreenSwipeBack
             ? _fullscreenSwipePageTransitionsTheme
             : _pageTransitionsTheme,
