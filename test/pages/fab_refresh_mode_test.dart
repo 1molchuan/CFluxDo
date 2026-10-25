@@ -44,6 +44,36 @@ void main() {
       fabRefreshModeFromScroll(user(ScrollDirection.forward, pixels: 0)),
       isFalse,
     );
+    // 首页列表贴顶时停在折叠锚位（头部可折叠段高度）而不是 0：
+    // 锚位以内都算顶部，松手（idle）落在带内也退出刷新模式
+    expect(
+      fabRefreshModeFromScroll(
+        user(ScrollDirection.forward, pixels: 48),
+        topExtent: 124,
+      ),
+      isFalse,
+    );
+    expect(
+      fabRefreshModeFromScroll(
+        user(ScrollDirection.idle, pixels: 100),
+        topExtent: 124,
+      ),
+      isFalse,
+    );
+    expect(
+      fabRefreshModeFromScroll(
+        user(ScrollDirection.forward, pixels: 125),
+        topExtent: 124,
+      ),
+      isTrue,
+    );
+    expect(
+      fabRefreshModeFromScroll(
+        ScrollUpdateNotification(metrics: metrics(pixels: 60), context: context),
+        topExtent: 124,
+      ),
+      isFalse,
+    );
     // 横向（TabBarView）不参与
     expect(
       fabRefreshModeFromScroll(

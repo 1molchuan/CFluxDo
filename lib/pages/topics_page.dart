@@ -94,21 +94,27 @@ final fabRefreshModeProvider = StateProvider<bool>((ref) => false);
 
 /// 根据一条列表滚动通知推导 FAB 刷新模式；null = 这条通知不改变模式。
 /// 只认用户拖拽方向（UserScrollNotification），惯性滚动与回弹不会误切；
-/// 已经在顶部时不进入刷新模式（下拉刷新就在手边）。
+/// 已经在顶部时不进入刷新模式（下拉刷新就在手边），滚回顶部即退出。
+///
+/// 「顶部」= 列表位置不超过 [topExtent]：首页列表在头部折叠时会被钉在
+/// 折叠锚位（胶囊行 + 工具段，几十到一百多像素）而不是 0，拿 0 当顶
+/// 会让按钮回到最上面后仍停在刷新态、创作入口消失。
 @visibleForTesting
-bool? fabRefreshModeFromScroll(ScrollNotification notification) {
-  if (notification.metrics.axis != Axis.vertical) return null;
+bool? fabRefreshModeFromScroll(
+  ScrollNotification notification, {
+  double topExtent = 0,
+}) {
+  final metrics = notification.metrics;
+  if (metrics.axis != Axis.vertical) return null;
+  final atTop = metrics.pixels <= metrics.minScrollExtent + topExtent + 0.5;
   if (notification is UserScrollNotification) {
     return switch (notification.direction) {
-      ScrollDirection.forward => notification.metrics.pixels > 0,
+      ScrollDirection.forward => !atTop,
       ScrollDirection.reverse => false,
-      ScrollDirection.idle => null,
+      ScrollDirection.idle => atTop ? false : null,
     };
   }
-  if (notification is ScrollUpdateNotification &&
-      notification.metrics.pixels <= 0) {
-    return false;
-  }
+  if (notification is ScrollUpdateNotification && atTop) return false;
   return null;
 }
 
@@ -1409,8 +1415,11 @@ class _TopicsPageState extends ConsumerState<TopicsPage>
           // 搜索落位格：展开态零宽（右簇紧凑无空洞），折叠时随 morph
           // 同曲线张开迎接胶囊缩成的图标（胶囊本体在
           // _CollapsibleHeader 的 overlay 层绘制，这里只占位）
-          _SearchSlotSpacer(controller: _headerController),
+          // 点数药丸放在搜索落位格**左边**：落位格的位置是按「右缘 - 🔔」
+          // 常量推算的（见 _CollapsibleHeader），放右边会被折叠后的
+          // 搜索图标压住
           if (isLoggedIn) const _ScorePill(),
+          _SearchSlotSpacer(controller: _headerController),
           if (isLoggedIn && !Responsive.showNavigationRail(context))
             const NotificationIconButton(compact: true),
           if (kDebugMode)
@@ -1681,8 +1690,16 @@ class _TopicsPageState extends ConsumerState<TopicsPage>
       if (!userDriven) return false;
     }
 
-    // FAB 创作/刷新模式随用户拖拽方向切换（只在真变化时写，避免每帧通知）
-    final nextFabMode = fabRefreshModeFromScroll(notification);
+    // FAB 创作/刷新模式随用户拖拽方向切换（只在真变化时写，避免每帧通知）；
+    // 顶部判定放宽到头部可折叠段：列表贴顶时位置是折叠锚位，不是 0
+    final nextFabMode = fabRefreshModeFromScroll(
+      notification,
+      topExtent: _collapsibleExtentFor(
+        _visiblePinnedIds,
+        ref.read(tabTagsProvider(_currentCategoryId())),
+        navRowAlways: _navRowAlways,
+      ),
+    );
     if (nextFabMode != null && ref.read(fabRefreshModeProvider) != nextFabMode) {
       ref.read(fabRefreshModeProvider.notifier).state = nextFabMode;
     }
