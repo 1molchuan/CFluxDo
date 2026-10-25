@@ -8,8 +8,8 @@ import 'package:m3e_ui/m3e_ui.dart' show SegmentedCardStyle;
 import 'claude_theme.dart';
 import 'theme_resolver.dart';
 
-/// 界面风格：墨笺（默认）/ Claude（人文温润陶土）/ 经典（Material 外观）
-enum UiStyle { mojian, claude, classic }
+/// 界面风格：墨笺（默认）/ Claude / 经典 / VS Code（仅 Windows）。
+enum UiStyle { mojian, claude, classic, vscode }
 
 /// 墨笺的强调色。只落在链接、选中、未读、进度这类少量位置；
 /// 按钮、开关、悬浮按钮一律用墨色，避免满屏强调色。

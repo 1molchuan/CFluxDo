@@ -1,7 +1,9 @@
 import 'package:app_icons/app_icons.dart';
 import 'package:common_ui/common_ui.dart';
 import 'package:flutter/material.dart';
+
 import '../../l10n/s.dart';
+import 'composer_island.dart';
 
 /// 文档操作的统一图标规格。
 class ComposerActionButton extends StatelessWidget {
@@ -26,20 +28,42 @@ class ComposerActionButton extends StatelessWidget {
     tapTargetSize: MaterialTapTargetSize.shrinkWrap,
   );
 
+  static ButtonStyle styleOf(BuildContext context) {
+    final terminal = ComposerTerminalScope.maybeOf(context);
+    return terminal == null
+        ? buttonStyle
+        : IconButton.styleFrom(
+            minimumSize: const Size.square(32),
+            maximumSize: const Size.square(32),
+            padding: const EdgeInsets.all(6),
+            shape: const RoundedRectangleBorder(),
+            foregroundColor: terminal.muted,
+            hoverColor: terminal.hover,
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          );
+  }
+
   @override
   Widget build(BuildContext context) => IconButton(
     tooltip: label,
     onPressed: onPressed,
     color: color,
-    constraints: const BoxConstraints.tightFor(width: 44, height: 44),
-    padding: const EdgeInsets.all(10),
-    style: buttonStyle,
+    constraints: ComposerTerminalScope.maybeOf(context) == null
+        ? const BoxConstraints.tightFor(width: 44, height: 44)
+        : const BoxConstraints.tightFor(width: 32, height: 32),
+    padding: ComposerTerminalScope.maybeOf(context) == null
+        ? const EdgeInsets.all(10)
+        : const EdgeInsets.all(6),
+    style: styleOf(context),
     icon: busy
         ? const SizedBox.square(
             dimension: 18,
             child: CircularProgressIndicator(strokeWidth: 2),
           )
-        : AppIcon(icon, size: 21),
+        : AppIcon(
+            icon,
+            size: ComposerTerminalScope.maybeOf(context) == null ? 21 : 18,
+          ),
   );
 }
 

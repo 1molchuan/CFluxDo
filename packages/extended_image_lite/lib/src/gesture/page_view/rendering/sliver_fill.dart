@@ -19,8 +19,8 @@ import 'package:flutter/rendering.dart';
 ///  * [RenderSliverFixedExtentList], which has a configurable [itemExtent].
 ///  * [RenderSliverList], which does not require its children to have the same
 ///    extent in the main axis.
-class ExtendedRenderSliverFillViewport
-    extends RenderSliverFixedExtentBoxAdaptor {
+// 页面间距不属于子图尺寸，末页也没有尾部间距，不能使用固定步长列表的几何契约。
+class ExtendedRenderSliverFillViewport extends RenderSliverMultiBoxAdaptor {
   /// Creates a sliver that contains multiple box children that each fill the
   /// viewport.
   ///
@@ -36,7 +36,6 @@ class ExtendedRenderSliverFillViewport
        _viewportFraction = viewportFraction,
        _pageSpacing = pageSpacing;
 
-  @override
   double get itemExtent =>
       constraints.viewportMainAxisExtent * viewportFraction;
 
@@ -64,11 +63,9 @@ class ExtendedRenderSliverFillViewport
     markNeedsLayout();
   }
 
-  @override
   double indexToLayoutOffset(double itemExtent, int index) =>
       itemExtent * index;
 
-  @override
   int getMinChildIndexForScrollOffset(double scrollOffset, double itemExtent) {
     if (itemExtent > 0.0) {
       final double actual = scrollOffset / itemExtent;
@@ -82,7 +79,6 @@ class ExtendedRenderSliverFillViewport
     return 0;
   }
 
-  @override
   int getMaxChildIndexForScrollOffset(double scrollOffset, double itemExtent) {
     if (itemExtent > 0.0) {
       final double actual = scrollOffset / itemExtent - 1;
@@ -96,12 +92,11 @@ class ExtendedRenderSliverFillViewport
     return 0;
   }
 
-  @override
   double computeMaxScrollOffset(
     SliverConstraints constraints,
     double itemExtent,
   ) {
-    return childManager.childCount * itemExtent;
+    return math.max(0.0, childManager.childCount * itemExtent - pageSpacing);
   }
 
   @override
@@ -247,7 +242,7 @@ class ExtendedRenderSliverFillViewport
 
     estimatedMaxScrollOffset = math.min(
       estimatedMaxScrollOffset,
-      estimateMaxScrollOffset(
+      childManager.estimateMaxScrollOffset(
         constraints,
         firstIndex: firstIndex,
         lastIndex: lastIndex,

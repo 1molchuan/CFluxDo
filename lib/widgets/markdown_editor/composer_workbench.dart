@@ -37,8 +37,11 @@ class ComposerWorkbench extends StatefulWidget {
   final ComposerToolsAnchor? toolsAnchor;
   final VoidCallback? onExpandTools;
   static double rowHeight(BuildContext context) =>
-      math.max(48, MediaQuery.textScalerOf(context).scale(14) + 24);
+      ComposerTerminalScope.maybeOf(context) != null
+      ? 32
+      : math.max(48, MediaQuery.textScalerOf(context).scale(14) + 24);
   static double occupiedHeight(BuildContext context) {
+    if (ComposerTerminalScope.maybeOf(context) != null) return 40;
     final row = rowHeight(context);
     return (PlatformUtils.isDesktop
             ? row + 4
@@ -341,7 +344,9 @@ class _ComposerWorkbenchState extends State<ComposerWorkbench>
 
   @override
   Widget build(BuildContext context) {
-    final desktop = PlatformUtils.isDesktop;
+    final desktop =
+        PlatformUtils.isDesktop ||
+        ComposerTerminalScope.maybeOf(context) != null;
     final row = ComposerWorkbench.rowHeight(context);
     final viewport = context
         .dependOnInheritedWidgetOfExactType<_WorkbenchViewport>();
@@ -736,10 +741,12 @@ class _ComposerEditorLayoutState extends State<ComposerEditorLayout>
 
   Widget _desktop(BuildContext context) => LayoutBuilder(
     builder: (context, bounds) {
+      final terminal = ComposerTerminalScope.maybeOf(context) != null;
       final topInset = ComposerChromeScope.topInsetOf(context);
       final layout = ComposerDesktopViewport(
         size: bounds.biggest,
         topInset: topInset,
+        terminal: terminal,
         child: const SizedBox.shrink(),
       );
       final side = layout.useRail
@@ -748,6 +755,7 @@ class _ComposerEditorLayoutState extends State<ComposerEditorLayout>
       return ComposerDesktopViewport(
         size: bounds.biggest,
         topInset: topInset,
+        terminal: terminal,
         child: Stack(
           key: const ValueKey('composer-writing-canvas'),
           fit: StackFit.expand,

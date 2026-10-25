@@ -1,5 +1,11 @@
 {
   "@@locale": "en",
+  "post_terminalTitle": "Terminal",
+  "post_terminalExpand": "Expand reply panel",
+  "post_terminalCollapse": "Collapse reply panel",
+  "post_terminalRestore": "Restore reply panel",
+  "post_terminalMaximize": "Maximize reply panel",
+  "post_terminalClose": "Close reply panel",
   "boost_authorProfile": "Profile",
   "boost_created": "Boost sent",
   "boost_danmaku": "Danmaku",

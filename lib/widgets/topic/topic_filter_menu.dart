@@ -2,12 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:app_icons/app_icons.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:common_ui/common_ui.dart';
+
 import '../../providers/topic_list/filter_provider.dart';
 import '../../providers/topic_list/sort_provider.dart';
 import '../../providers/topic_list/tab_state_provider.dart';
 import '../../providers/message_bus/topic_tracking_providers.dart';
 import '../../l10n/s.dart';
 import 'sort_and_tags_bar.dart' show filterOptions, filterLabel;
+import '../../theme/vscode_theme.dart';
 
 /// 忽略动作的菜单值哨兵（与筛选/排序/子过滤的枚举值区分）
 const _dismissAllValue = #topicFilterMenuDismissAll;
@@ -86,6 +88,7 @@ class _TopicFilterMenuButtonState extends ConsumerState<TopicFilterMenuButton> {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final isVscode = VscodeTokens.maybeOf(context) != null;
 
     // 读取追踪状态计数（与原 FilterDropdown 同源）
     final trackingNotifier = ref.watch(topicTrackingStateProvider.notifier);
@@ -282,7 +285,47 @@ class _TopicFilterMenuButtonState extends ConsumerState<TopicFilterMenuButton> {
 
         return items;
       },
-      child: widget.titleStyle
+      child: isVscode && widget.titleStyle
+          ? Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (widget.titlePrefix != null)
+                    Flexible(flex: 2, child: widget.titlePrefix!),
+                  Flexible(
+                    flex: 3,
+                    child: Text(
+                      buttonLabel(),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                        color: colorScheme.onSurface,
+                      ),
+                    ),
+                  ),
+                  if (orderActive)
+                    Container(
+                      width: 4,
+                      height: 4,
+                      margin: const EdgeInsets.only(left: 4),
+                      decoration: BoxDecoration(
+                        color: colorScheme.primary,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                  const SizedBox(width: 3),
+                  Icon(
+                    _menuOpen ? Icons.expand_less : Icons.expand_more,
+                    size: 14,
+                    color: colorScheme.onSurfaceVariant,
+                  ),
+                ],
+              ),
+            )
+          : widget.titleStyle
           ? Padding(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
               child: Row(

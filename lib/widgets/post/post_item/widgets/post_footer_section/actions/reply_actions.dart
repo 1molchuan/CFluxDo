@@ -31,6 +31,11 @@ extension _PostFooterReplyActions on _PostFooterSectionState {
   Future<void> _toggleReplies() async {
     // 过滤模式：打开弹框展示递归回复
     if (widget.useReplyDialog) {
+      final showDetail = widget.onShowPostDetail;
+      if (VscodeTokens.maybeOf(context) != null && showDetail != null) {
+        showDetail();
+        return;
+      }
       showPostRepliesSheet(
         context: context,
         post: widget.post,

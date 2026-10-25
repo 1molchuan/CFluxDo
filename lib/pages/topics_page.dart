@@ -34,6 +34,7 @@ import '../widgets/common/search_capsule.dart';
 import '../widgets/topic/category_drawer.dart';
 import '../widgets/topic/mojian_category_sheet.dart';
 import '../theme/mojian_theme.dart';
+import '../theme/vscode_theme.dart';
 import 'category_topics_page.dart';
 import '../widgets/topic/topic_card_prewarmer.dart';
 import '../widgets/topic/topic_item_builder.dart';
@@ -429,6 +430,7 @@ class _HeaderCollapseController extends ChangeNotifier {
   /// rowProgress（收起 1:1/展开平滑，与胶囊行占位一致）、工具段吃
   /// barProgress，收放/吸附全程贴合。
   double visibleExtentFor(double tabExtent) {
+    if (tabExtent <= 0) return 0;
     final capsuleVisible = _capsuleRowHeight * (1.0 - rowProgress);
     final rest = tabExtent - _capsuleRowHeight;
     final barVisible = rest > 0 ? rest * (1.0 - barProgress) : 0.0;
@@ -761,12 +763,14 @@ class TopicsPage extends ConsumerStatefulWidget {
   const TopicsPage({
     super.key,
     this.onSearchRequested,
+    this.explorerAction,
     this.externalCategoryId,
     this.externalTag,
     this.isActive = true,
   });
 
   final ValueChanged<SearchFilter?>? onSearchRequested;
+  final Widget? explorerAction;
   final int? externalCategoryId;
   final String? externalTag;
 
@@ -796,6 +800,7 @@ class _TopicsPageState extends ConsumerState<TopicsPage>
   int _tabLength = 1; // 初始只有"全部"
   int _currentTabIndex = 0;
   List<int> _visiblePinnedIds = []; // 过滤后的可见分类 ID
+  bool _vscodeExplorerExpanded = true;
   (int?, String?)? _lastExternalSelection;
 
   late final _HeaderCollapseController _headerController;
@@ -827,13 +832,15 @@ class _TopicsPageState extends ConsumerState<TopicsPage>
   /// ScrollEnd 已错过、首建/刷新各有路径），在控制器层统一兜底：
   /// 初始位置跟随胶囊态 + attach 帧末校验。
   ScrollController _listControllerFor(int? categoryId) {
-    double anchor() => _headerController.collapsedAnchorFor(
-      _collapsibleExtentFor(
-        _visiblePinnedIds,
-        ref.read(tabTagsProvider(categoryId)),
-        navRowAlways: _navRowAlways,
-      ),
-    );
+    double anchor() => VscodeTokens.maybeOf(context) != null
+        ? 0
+        : _headerController.collapsedAnchorFor(
+            _collapsibleExtentFor(
+              _visiblePinnedIds,
+              ref.read(tabTagsProvider(categoryId)),
+              navRowAlways: _navRowAlways,
+            ),
+          );
     return _listControllers.putIfAbsent(
       categoryId,
       () => _TabListScrollController(
@@ -1307,13 +1314,146 @@ class _TopicsPageState extends ConsumerState<TopicsPage>
       return categoryMap?[pinnedIds[index - 1]]?.name;
     }
 
-    final titlePrefix = _TitleTabPrefix(
-      headerController: _headerController,
-      tabController: _tabController,
-      nameResolver: tabNameOf,
-      anchorKey: _titlePrefixAnchorKey,
-    );
+    final vscode = VscodeTokens.maybeOf(context);
+    final Widget titlePrefix = vscode != null
+        ? Text(
+            '${tabNameOf(_currentTabIndex) ?? context.l10n.common_all} · ',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 12, color: vscode.muted),
+          )
+        : _TitleTabPrefix(
+            headerController: _headerController,
+            tabController: _tabController,
+            nameResolver: tabNameOf,
+            anchorKey: _titlePrefixAnchorKey,
+          );
     final filterMenu = _buildFilterMenu(isLoggedIn, currentFilter, titlePrefix);
+
+    if (vscode != null) {
+      return ColoredBox(
+        color: vscode.sidebar,
+        child: Column(
+          children: [
+            SizedBox(height: topPadding),
+            SizedBox(
+              height: 35,
+              child: Padding(
+                padding: const EdgeInsets.only(left: 20, right: 8),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        context.l10n.common_explorer,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: vscode.foreground,
+                        ),
+                      ),
+                    ),
+                    if (widget.explorerAction != null) widget.explorerAction!,
+                    IconButton(
+                      constraints: const BoxConstraints.tightFor(
+                        width: 28,
+                        height: 28,
+                      ),
+                      padding: EdgeInsets.zero,
+                      visualDensity: VisualDensity.compact,
+                      icon: const Icon(Icons.search, size: 16),
+                      tooltip: context.l10n.topics_searchHint,
+                      onPressed: _openSearch,
+                    ),
+                    IconButton(
+                      constraints: const BoxConstraints.tightFor(
+                        width: 28,
+                        height: 28,
+                      ),
+                      padding: EdgeInsets.zero,
+                      visualDensity: VisualDensity.compact,
+                      icon: const Icon(Icons.refresh, size: 16),
+                      tooltip: context.l10n.common_refresh,
+                      onPressed: () =>
+                          ref.read(fabRefreshSignalProvider.notifier).trigger(),
+                    ),
+                    IconButton(
+                      constraints: const BoxConstraints.tightFor(
+                        width: 28,
+                        height: 28,
+                      ),
+                      padding: EdgeInsets.zero,
+                      visualDensity: VisualDensity.compact,
+                      icon: const Icon(Icons.folder_open_outlined, size: 16),
+                      tooltip: context.l10n.topics_browseCategories,
+                      onPressed: _openCategoryDrawer,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            Container(
+              constraints: const BoxConstraints(minHeight: 28),
+              color: vscode.panel,
+              child: Row(
+                children: [
+                  Semantics(
+                    expanded: _vscodeExplorerExpanded,
+                    child: IconButton(
+                      key: const ValueKey('vscode-explorer-toggle'),
+                      constraints: const BoxConstraints.tightFor(
+                        width: 22,
+                        height: 28,
+                      ),
+                      padding: EdgeInsets.zero,
+                      visualDensity: VisualDensity.compact,
+                      icon: Icon(
+                        _vscodeExplorerExpanded
+                            ? Icons.keyboard_arrow_down
+                            : Icons.keyboard_arrow_right,
+                        size: 16,
+                      ),
+                      tooltip: _vscodeExplorerExpanded
+                          ? context.l10n.common_collapse
+                          : context.l10n.common_expand,
+                      onPressed: () => setState(
+                        () =>
+                            _vscodeExplorerExpanded = !_vscodeExplorerExpanded,
+                      ),
+                    ),
+                  ),
+                  Icon(
+                    _vscodeExplorerExpanded
+                        ? Icons.folder_open_outlined
+                        : Icons.folder_outlined,
+                    size: 16,
+                    color: vscode.muted,
+                  ),
+                  Expanded(child: filterMenu),
+                ],
+              ),
+            ),
+            if (_vscodeExplorerExpanded && currentTags.isNotEmpty)
+              _buildTagsRow(currentTags),
+            Expanded(
+              // 折叠只隐藏目录内容，保留分页、滚动位置和当前筛选。
+              child: Offstage(
+                offstage: !_vscodeExplorerExpanded,
+                child: TabBarView(
+                  controller: _tabController,
+                  physics: const NeverScrollableScrollPhysics(),
+                  children: [
+                    _buildTabPage(null, topicCategoryMap),
+                    for (final id in pinnedIds)
+                      _buildTabPage(id, topicCategoryMap),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
 
     return Listener(
       onPointerDown: (_) => _cancelSnap(cancelPointerScrollSession: true),
@@ -1452,6 +1592,12 @@ class _TopicsPageState extends ConsumerState<TopicsPage>
         parentCategorySlug: parentSlug,
       );
     }
+    // 编辑器风格在原列表槽位搜索，保留导航栏与用户调整过的分栏宽度。
+    final onSearchRequested = widget.onSearchRequested;
+    if (VscodeTokens.maybeOf(context) != null && onSearchRequested != null) {
+      onSearchRequested(filter);
+      return;
+    }
     // fade 路由：全局 Cupertino 滑动转场会带着整页横移，毁掉胶囊 →
     // 搜索框的 Hero morph（一镜到底）;搜索页单独用淡入配合 Hero 飞行
     Navigator.push(
@@ -1516,14 +1662,15 @@ class _TopicsPageState extends ConsumerState<TopicsPage>
   /// 已选标签行（可折叠段，仅选了标签时存在）：chips + 紧凑 ＋
   Widget _buildTagsRow(List<String> currentTags) {
     final colorScheme = Theme.of(context).colorScheme;
+    final vscode = VscodeTokens.maybeOf(context);
     final currentCategoryId = _currentCategoryId();
     return SizedBox(
-      height: _tagsRowHeight,
+      height: vscode != null ? 28 : _tagsRowHeight,
       child: Align(
-        alignment: Alignment.topLeft,
+        alignment: vscode != null ? Alignment.centerLeft : Alignment.topLeft,
         child: SingleChildScrollView(
           scrollDirection: Axis.horizontal,
-          padding: const EdgeInsets.symmetric(horizontal: 12),
+          padding: EdgeInsets.symmetric(horizontal: vscode != null ? 8 : 12),
           child: Row(
             children: [
               for (final tag in currentTags)
@@ -1539,27 +1686,40 @@ class _TopicsPageState extends ConsumerState<TopicsPage>
                           .where((t) => t != tag)
                           .toList();
                     },
-                    size: const BadgeSize(
-                      padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      radius: 6,
-                      iconSize: 12,
-                      fontSize: 12,
-                    ),
+                    size: vscode != null
+                        ? const BadgeSize(
+                            padding: EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 2,
+                            ),
+                            radius: 2,
+                            iconSize: 10,
+                            fontSize: 11,
+                          )
+                        : const BadgeSize(
+                            padding: EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 4,
+                            ),
+                            radius: 6,
+                            iconSize: 12,
+                            fontSize: 12,
+                          ),
                   ),
                 ),
               InkWell(
                 onTap: _openTagSelection,
-                borderRadius: BorderRadius.circular(6),
+                borderRadius: BorderRadius.circular(vscode != null ? 2 : 6),
                 child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 4,
+                  padding: EdgeInsets.symmetric(
+                    horizontal: vscode != null ? 6 : 8,
+                    vertical: vscode != null ? 2 : 4,
                   ),
                   decoration: BoxDecoration(
                     border: Border.all(
                       color: colorScheme.outlineVariant.withValues(alpha: 0.5),
                     ),
-                    borderRadius: BorderRadius.circular(6),
+                    borderRadius: BorderRadius.circular(vscode != null ? 2 : 6),
                   ),
                   child: Icon(
                     Symbols.add_rounded,
@@ -1903,20 +2063,26 @@ class _TopicsPageState extends ConsumerState<TopicsPage>
     // 计算同源，该 tab 激活时两者必然一致）
     final tags = ref.watch(tabTagsProvider(categoryId));
     return Padding(
-      padding: const EdgeInsets.only(left: 12, right: 12),
+      padding: VscodeTokens.maybeOf(context) != null
+          ? EdgeInsets.zero
+          : const EdgeInsets.only(left: 12, right: 12),
       child: _TopicList(
         key: ValueKey(categoryId),
         categoryId: categoryId,
         categoryMap: categoryMap,
         scrollController: _listControllerFor(categoryId),
-        topInset: _collapsibleExtentFor(
-          _visiblePinnedIds,
-          tags,
-          navRowAlways: _navRowAlways,
-        ),
+        topInset: VscodeTokens.maybeOf(context) != null
+            ? 0
+            : _collapsibleExtentFor(
+                _visiblePinnedIds,
+                tags,
+                navRowAlways: _navRowAlways,
+              ),
         headerController: _headerController,
         onLoginRequired: _goToLogin,
-        parentActive: widget.isActive,
+        parentActive:
+            widget.isActive &&
+            (VscodeTokens.maybeOf(context) == null || _vscodeExplorerExpanded),
       ),
     );
   }
@@ -2995,6 +3161,7 @@ class _TopicListState extends ConsumerState<_TopicList>
 
   final TopicLoadMoreCoordinator _loadMoreCoordinator =
       TopicLoadMoreCoordinator();
+  bool _viewportFillScheduled = false;
   List<String> _lastAutoLoadKeywords = const [];
   Set<String> _lastAutoLoadBlockedUsernames = const <String>{};
   bool? _lastAutoLoadWholeWord;
@@ -3003,10 +3170,12 @@ class _TopicListState extends ConsumerState<_TopicList>
   bool get wantKeepAlive => true;
 
   /// 列表区域顶部圆角
-  static const _topBorderRadius = BorderRadius.only(
-    topLeft: Radius.circular(12),
-    topRight: Radius.circular(12),
-  );
+  BorderRadius get _topBorderRadius => VscodeTokens.maybeOf(context) != null
+      ? BorderRadius.zero
+      : const BorderRadius.only(
+          topLeft: Radius.circular(12),
+          topRight: Radius.circular(12),
+        );
 
   /// overlay 头部可折叠段悬浮在列表上方，列表内容顶部让出的恒定 inset
   double get _headerInset => widget.topInset;
@@ -3050,13 +3219,15 @@ class _TopicListState extends ConsumerState<_TopicList>
 
     // 滚动到可见区域
     if (_scrollController.hasClients) {
-      // 估算位置（顶部 inset + 每个 item 约 80px 高度）
-      final estimatedPosition = _headerInset + newIndex * 80.0;
+      final itemHeight = VscodeTokens.maybeOf(context) != null
+          ? MediaQuery.textScalerOf(context).scale(13) * 1.25 + 8
+          : 80.0;
+      final estimatedPosition = _headerInset + newIndex * itemHeight;
       final viewport = _scrollController.position.viewportDimension;
       final current = _scrollController.position.pixels;
 
       if (estimatedPosition < current ||
-          estimatedPosition > current + viewport - 80) {
+          estimatedPosition > current + viewport - itemHeight) {
         _scrollController.animateTo(
           estimatedPosition.clamp(
             0.0,
@@ -3140,10 +3311,65 @@ class _TopicListState extends ConsumerState<_TopicList>
     );
   }
 
+  bool get _isActiveList =>
+      mounted &&
+      widget.parentActive &&
+      ref.read(currentTabCategoryIdProvider) == widget.categoryId;
+
+  /// 资源管理器的紧凑行可能不足一屏，首屏、后页和窗口变化后自动补足。
+  void _scheduleViewportFill() {
+    if (_viewportFillScheduled ||
+        !_isActiveList ||
+        VscodeTokens.maybeOf(context) == null) {
+      return;
+    }
+    _viewportFillScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _viewportFillScheduled = false;
+      if (!_isActiveList ||
+          VscodeTokens.maybeOf(context) == null ||
+          !_scrollController.hasClients ||
+          _scrollController.positions.length != 1 ||
+          _loadMoreCoordinator.isRunning ||
+          _loadMoreCoordinator.isCoolingDown) {
+        return;
+      }
+      final providerKey = widget.categoryId;
+      final state = ref.read(topicListProvider(providerKey));
+      final notifier = ref.read(topicListProvider(providerKey).notifier);
+      if (state.isLoading ||
+          !state.hasValue ||
+          !notifier.hasMore ||
+          notifier.isLoadMoreFailed) {
+        return;
+      }
+      final position = _scrollController.position;
+      if (!position.hasContentDimensions ||
+          position.viewportDimension <= 0 ||
+          position.maxScrollExtent - position.minScrollExtent > 1) {
+        return;
+      }
+      unawaited(_triggerLoadMore(providerKey));
+    });
+    // 维度通知也可能来自帧后的微任务，确保检查有下一帧可执行。
+    WidgetsBinding.instance.ensureVisualUpdate();
+  }
+
   /// 触发 loadMore，并在关键词命中率高、可见增量不足时自动续加载，
   /// 避免用户在话题列表里看到「滑到底但只多了 1-2 条」。
   Future<void> _triggerLoadMore(int? providerKey) async {
+    final isExplorer = VscodeTokens.maybeOf(context) != null;
     final notifier = ref.read(topicListProvider(providerKey).notifier);
+    if (isExplorer) {
+      if (!_isActiveList) return;
+      final state = ref.read(topicListProvider(providerKey));
+      if (state.isLoading ||
+          !state.hasValue ||
+          !notifier.hasMore ||
+          notifier.isLoadMoreFailed) {
+        return;
+      }
+    }
 
     final prefs = ref.read(preferencesProvider);
     final keywords = prefs.normalizedFilterKeywords;
@@ -3168,12 +3394,15 @@ class _TopicListState extends ConsumerState<_TopicList>
 
     await _loadMoreCoordinator.loadTopicPage(
       loadMore: notifier.loadMore,
-      hasMore: () => notifier.hasMore,
-      isActive: () => mounted,
+      hasMore: () => notifier.hasMore &&
+          (!isExplorer || !notifier.isLoadMoreFailed),
+      isActive: () => isExplorer ? _isActiveList : mounted,
       itemCount: itemCount,
       visibleItemCount: visibleItemCount,
       hasKeywordFilter: keywords.isNotEmpty || blockedUsernames.isNotEmpty,
     );
+    // 等协调器解除单飞后再检查下一轮，避免数据重建早于请求收尾而漏载。
+    _scheduleViewportFill();
   }
 
   void _syncAutoLoadFilter(
@@ -3381,6 +3610,7 @@ class _TopicListState extends ConsumerState<_TopicList>
 
     return visibleTopicsAsync.when(
       data: (topics) {
+        _scheduleViewportFill();
         final newTopicCount = topicUpdateSnapshot.length;
         final hasNewTopics = newTopicCount > 0 || isLoadingTopicUpdates;
         final newTopicOffset = hasNewTopics ? 1 : 0;
@@ -3422,9 +3652,14 @@ class _TopicListState extends ConsumerState<_TopicList>
             borderRadius: _topBorderRadius,
             child: Stack(
               children: [
-                NotificationListener<ScrollUpdateNotification>(
+                NotificationListener<Notification>(
                   onNotification: (notification) {
-                    if (notification.depth == 0) {
+                    if (notification is ScrollMetricsNotification &&
+                        notification.depth == 0) {
+                      _scheduleViewportFill();
+                    }
+                    if (notification is ScrollUpdateNotification &&
+                        notification.depth == 0) {
                       final distance =
                           notification.metrics.maxScrollExtent -
                           notification.metrics.pixels;
@@ -3440,16 +3675,19 @@ class _TopicListState extends ConsumerState<_TopicList>
                     controller: _scrollController,
                     // 顶带吸附下沉在弹道层（继承惯性速度的弹簧 + 起手
                     // 分治迟滞，见 _TopSnapScrollPhysics）
-                    physics: _TopSnapScrollPhysics(
-                      controller: widget.headerController,
-                      parent: const AlwaysScrollableScrollPhysics(),
-                    ),
+                    physics: VscodeTokens.maybeOf(context) != null
+                        ? const AlwaysScrollableScrollPhysics()
+                        : _TopSnapScrollPhysics(
+                            controller: widget.headerController,
+                            parent: const AlwaysScrollableScrollPhysics(),
+                          ),
                     slivers: [
                       SliverPadding(
                         // 底部让出 extendBody 注入的底栏高度（底栏滑出式后
                         // 内容延伸到底栏后面）
                         padding: EdgeInsets.only(
-                          top: _headerInset + 8,
+                          top: _headerInset +
+                              (VscodeTokens.maybeOf(context) != null ? 0 : 8),
                           bottom: 12 + MediaQuery.paddingOf(context).bottom,
                         ),
                         sliver: SliverList.builder(
@@ -3518,7 +3756,13 @@ class _TopicListState extends ConsumerState<_TopicList>
                                   hasMore: notifier.hasMore,
                                   isLoadingMore: notifier.isLoadingMore,
                                   isLoadMoreFailed: notifier.isLoadMoreFailed,
-                                  onRetry: notifier.retryLoadMore,
+                                  onRetry: VscodeTokens.maybeOf(context) == null
+                                      ? notifier.retryLoadMore
+                                      : () async {
+                                          _loadMoreCoordinator.resetCooldown();
+                                          await notifier.retryLoadMore();
+                                          _scheduleViewportFill();
+                                        },
                                 ),
                               );
                             }
@@ -3638,11 +3882,12 @@ class _TopicListState extends ConsumerState<_TopicList>
                 ),
                 // 顶部消隐纱：钉在头部下缘，内容被裁切时 bg→透明
                 // 消散（在 ClipRRect 内 = 随本 tab 横滑一起走）
-                _TopEdgeFade(
-                  headerController: widget.headerController,
-                  scrollController: _scrollController,
-                  topInset: widget.topInset,
-                ),
+                if (VscodeTokens.maybeOf(context) == null)
+                  _TopEdgeFade(
+                    headerController: widget.headerController,
+                    scrollController: _scrollController,
+                    topInset: widget.topInset,
+                  ),
               ],
             ),
           ),

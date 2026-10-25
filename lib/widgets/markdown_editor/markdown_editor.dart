@@ -19,6 +19,7 @@ import 'composer_shortcuts.dart';
 import 'composer_tools_panel.dart';
 import 'composer_quick_panel.dart';
 import 'composer_tools_anchor.dart';
+import 'composer_island.dart';
 import 'composer_workbench.dart';
 import 'composer_panel_height.dart';
 import 'editor_tools.dart';
@@ -894,6 +895,7 @@ class MarkdownEditorState extends ConsumerState<MarkdownEditor> {
 
   /// 构建文本编辑器（可选包含 @提及自动补全）
   Widget _buildTextEditor() {
+    final terminal = ComposerTerminalScope.maybeOf(context) != null;
     final textField = TextField(
       key: _bodyFieldKey,
       controller: widget.controller,
@@ -931,6 +933,10 @@ class MarkdownEditorState extends ConsumerState<MarkdownEditor> {
             ? S.current.editor_hintText
             : widget.hintText,
         border: InputBorder.none,
+        // 终端是整块编辑画布，不能继承主题给普通表单设置的输入框轮廓。
+        enabledBorder: terminal ? InputBorder.none : null,
+        focusedBorder: terminal ? InputBorder.none : null,
+        disabledBorder: terminal ? InputBorder.none : null,
         filled: false,
         isDense: true,
         contentPadding: const EdgeInsets.symmetric(vertical: 12),

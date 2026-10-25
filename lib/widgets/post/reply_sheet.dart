@@ -18,6 +18,7 @@ import '../markdown_editor/composer_shortcuts.dart';
 import '../markdown_editor/composer_switch_fade.dart';
 import '../markdown_editor/composer_workbench.dart';
 import '../markdown_editor/composer_header_actions.dart';
+import '../markdown_editor/composer_island.dart';
 import '../common/character_counts_overlay.dart';
 import '../markdown_editor/composer_view_mode_switcher.dart';
 import '../markdown_editor/markdown_renderer.dart';
@@ -50,6 +51,7 @@ import '../../l10n/s.dart';
 import '../../utils/dialog_utils.dart';
 import '../../providers/shortcut_provider.dart';
 import '../ai/ai_post_review_button.dart';
+import '../../theme/vscode_theme.dart';
 
 import 'package:m3e_ui/m3e_ui.dart';
 
@@ -175,6 +177,21 @@ Future<Post?> showEditSheet({
   }
 }
 
+/// 宿主持有的编辑器控制器；卸载后所有操作都会安全失败。
+class ReplySheetController {
+  _ReplySheetState? _state;
+
+  /// 同步真实正文并关闭；发送中、同步失败或已关闭时返回 false。
+  bool close() => _state?._closeWithCurrentContent(null) ?? false;
+
+  /// 安全追加引用，并重新导入真实编辑文档；忙碌或同步失败时返回 false。
+  bool appendContent(String content) =>
+      _state?._appendContent(content) ?? false;
+
+  /// 回到编辑视图并聚焦正文，卸载后无副作用。
+  void focus() => _state?._focusEditor();
+}
+
 class ReplySheet extends ConsumerStatefulWidget {
   final int? topicId;
   final int? categoryId;
@@ -192,6 +209,12 @@ class ReplySheet extends ConsumerStatefulWidget {
   final bool isPrivateMessageTopic; // 当前话题是否为私信话题
   final bool isPmWithNonHumanUser; // 当前私信话题是否包含非真人用户
   final ValueChanged<PendingPost>? onEnqueued; // 帖子被送审时回调
+  /// 由宿主提供尺寸和关闭行为，不创建弹层或拦截宿主路由返回。
+  final bool embedded;
+
+  /// 嵌入模式统一关闭出口；发送或编辑成功时携带对应帖子。
+  final ValueChanged<Post?>? onClosed;
+  final ReplySheetController? controller;
 
   const ReplySheet({
     super.key,
@@ -209,6 +232,9 @@ class ReplySheet extends ConsumerStatefulWidget {
     this.isPrivateMessageTopic = false,
     this.isPmWithNonHumanUser = false,
     this.onEnqueued,
+    this.embedded = false,
+    this.onClosed,
+    this.controller,
   });
 
   @override
@@ -220,13 +246,84 @@ class _ReplySheetState extends ConsumerState<ReplySheet> {
   bool _richFallback = false;
   bool _allowClose = false;
   bool _richModeEnabled = false;
+  bool _embeddedContentSynchronized = false;
 
-  void _closeWithCurrentContent(dynamic result) {
-    if (!_submitted && !_discarded && !_flushRichContent()) return;
-    setState(() => _allowClose = true);
+  bool _closing = false;
+
+  bool _closeWithCurrentContent(Post? result) {
+    if (!mounted || _closing || _isSubmitting || _submissionPending) {
+      return false;
+    }
+    if (!_submitted && !_discarded && !_flushRichContent()) return false;
+    _finishClose(result);
+    return true;
+  }
+
+  void _finishClose(Post? result) {
+    if (!mounted || _closing) return;
+    _closing = true;
+    _editorKey.currentState?.closeEmojiPanel();
+    _richKey.currentState?.closeEmojiPanel();
+    setState(() {
+      _allowClose = true;
+      _showEmojiPanel = false;
+    });
+    if (widget.embedded) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) widget.onClosed?.call(result);
+      });
+      return;
+    }
     // 等待 PopScope 更新许可；dispose 随后保存刚刚同步的草稿。
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) Navigator.of(context).pop(result);
+    });
+  }
+
+  bool _appendContent(String content) {
+    if (!mounted ||
+        _closing ||
+        _isSubmitting ||
+        _submissionPending ||
+        _isLoadingRaw ||
+        _isLoadingDraft ||
+        (_editorKey.currentState?.hasPendingUploads ?? false) ||
+        (_richKey.currentState?.hasPendingUploads ?? false)) {
+      if (mounted) ToastService.showInfo('编辑器正在加载或处理内容，请稍后重新追加引用');
+      return false;
+    }
+    if (!_flushRichContent()) return false;
+    if (content.isEmpty) return true;
+    // 先导出真实文档，再让新编辑器从追加后的内容重新导入，避免旧文档回写。
+    _richKey.currentState?.prepareForDocumentReplacement();
+    _editorKey.currentState?.closeEmojiPanel();
+    _richKey.currentState?.closeEmojiPanel();
+    setState(() {
+      _richKey = GlobalKey<RichComposerEditorState>();
+      _editorKey = GlobalKey<MarkdownEditorState>();
+      _showEmojiPanel = false;
+      _contentController.value = TextEditingValue(
+        text: '${_contentController.text}$content',
+        selection: TextSelection.collapsed(
+          offset: _contentController.text.length + content.length,
+        ),
+      );
+    });
+    _focusEditor();
+    return true;
+  }
+
+  void _focusEditor() {
+    if (!mounted || _closing) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _closing || _isSubmitting) return;
+      if (_showPreview) setState(() => _showPreview = false);
+      final rich = _richKey.currentState;
+      if (rich != null) {
+        rich.resumeEditing();
+      } else {
+        _contentFocusNode.requestFocus();
+      }
     });
   }
 
@@ -307,7 +404,12 @@ class _ReplySheetState extends ConsumerState<ReplySheet> {
         ? ('@${target.username} · #${target.postNumber}', Symbols.reply_rounded)
         : title != null && title.isNotEmpty
         ? (title, Symbols.reply_rounded)
-        : (_viewMode.label, _viewMode.icon);
+        : (
+            widget.embedded && VscodeTokens.maybeOf(context) != null
+                ? context.l10n.post_replyToTopic
+                : _viewMode.label,
+            _viewMode.icon,
+          );
     return Tooltip(
       message: label,
       child: Padding(
@@ -443,6 +545,28 @@ class _ReplySheetState extends ConsumerState<ReplySheet> {
   }
 
   Widget _buildResponsiveHeader(ThemeData theme, double width) {
+    final terminal = widget.embedded ? VscodeTokens.maybeOf(context) : null;
+    if (terminal != null) {
+      // 宿主已提供面板标题和关闭动作，这里只保留真实文档操作。
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        child: Row(
+          children: [
+            Expanded(child: _buildReplyContext()),
+            _buildHeaderActions(width, minimumTitleWidth: 0),
+          ],
+        ),
+      );
+    }
+    if (widget.embedded) {
+      return SizedBox(
+        height: 48,
+        child: Align(
+          alignment: Alignment.centerRight,
+          child: _buildHeaderActions(width, minimumTitleWidth: 0),
+        ),
+      );
+    }
     final target = widget.replyToPost;
     final compactTarget =
         (width < 600 || !PlatformUtils.isDesktop) &&
@@ -481,7 +605,7 @@ class _ReplySheetState extends ConsumerState<ReplySheet> {
             centerTitle: false,
             automaticallyImplyLeading: false,
             leading: CloseButton(
-              onPressed: () => Navigator.of(context).maybePop(),
+              onPressed: () => _closeWithCurrentContent(null),
             ),
             title: separateTarget
                 ? Text(context.l10n.common_reply)
@@ -570,6 +694,7 @@ class _ReplySheetState extends ConsumerState<ReplySheet> {
   @override
   void initState() {
     super.initState();
+    widget.controller?._state = this;
     EmojiHandler().init();
 
     // 编辑模式：加载帖子原始内容
@@ -618,6 +743,17 @@ class _ReplySheetState extends ConsumerState<ReplySheet> {
           _contentFocusNode.requestFocus();
         }
       });
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant ReplySheet oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller != widget.controller) {
+      if (identical(oldWidget.controller?._state, this)) {
+        oldWidget.controller?._state = null;
+      }
+      widget.controller?._state = this;
     }
   }
 
@@ -693,6 +829,7 @@ class _ReplySheetState extends ConsumerState<ReplySheet> {
 
   /// 舍弃草稿
   Future<void> _discardDraft() async {
+    if (_closing || _isSubmitting || _submissionPending) return;
     final confirm = await showAppDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -711,11 +848,15 @@ class _ReplySheetState extends ConsumerState<ReplySheet> {
       ),
     );
 
-    if (confirm == true && mounted) {
+    if (confirm == true &&
+        mounted &&
+        !_closing &&
+        !_isSubmitting &&
+        !_submissionPending) {
       _discarded = true;
       _draftController?.disable();
       await _draftController?.deleteDraft();
-      if (mounted) Navigator.of(context).pop();
+      if (mounted) _finishClose(null);
     }
   }
 
@@ -877,11 +1018,44 @@ class _ReplySheetState extends ConsumerState<ReplySheet> {
   }
 
   @override
+  void deactivate() {
+    if (widget.embedded) {
+      // 卸载发生在父级构建中；导出只更新正文镜像，不能再调度界面重建。
+      _contentController.removeListener(_onContentChanged);
+      _contentController.removeListener(_onContentLengthChanged);
+      // 父页直接卸载时，必须在富文本子状态释放前导出最后一次输入。
+      final rich = _richKey.currentState;
+      _embeddedContentSynchronized = rich != null
+          ? rich.flushToController()
+          : (_showPreview || _richFallback || !_richModeEnabled);
+    }
+    super.deactivate();
+  }
+
+  @override
+  void activate() {
+    super.activate();
+    if (widget.embedded) {
+      _contentController.addListener(_onContentChanged);
+      _contentController.addListener(_onContentLengthChanged);
+    }
+    // GlobalKey 移动后仍可能继续编辑，不能沿用上次卸载的同步许可。
+    _embeddedContentSynchronized = false;
+  }
+
+  @override
   void dispose() {
+    if (identical(widget.controller?._state, this)) {
+      widget.controller?._state = null;
+    }
     final rich = _richKey.currentState;
     final currentContentSafe = rich != null
         ? rich.flushToController()
-        : (_allowClose || _showPreview || _richFallback || !_richModeEnabled);
+        : (_allowClose ||
+              _showPreview ||
+              _richFallback ||
+              !_richModeEnabled ||
+              (widget.embedded && _embeddedContentSynchronized));
     _draftLifecycle?.dispose();
     // 移除监听器
     _contentController.removeListener(_onContentChanged);
@@ -949,7 +1123,7 @@ class _ReplySheetState extends ConsumerState<ReplySheet> {
   bool _submissionPending = false;
 
   Future<void> _submit() async {
-    if (_submissionPending || _isSubmitting) return;
+    if (_closing || _discarded || _submissionPending || _isSubmitting) return;
     _submissionPending = true;
     try {
       await _submitChecked();
@@ -1050,7 +1224,8 @@ class _ReplySheetState extends ConsumerState<ReplySheet> {
           raw: content,
         );
         if (!mounted) return;
-        Navigator.of(context).pop(updatedPost);
+        _submitted = true;
+        _finishClose(updatedPost);
       } else if (_isPrivateMessage) {
         await DiscourseService().createPrivateMessage(
           targetUsernames: _recipients,
@@ -1063,7 +1238,7 @@ class _ReplySheetState extends ConsumerState<ReplySheet> {
         await _draftController?.deleteDraft();
         _submitted = true;
         if (!mounted) return;
-        Navigator.of(context).pop(null); // 私信模式不返回 Post
+        _finishClose(null); // 私信模式不返回 Post
       } else {
         // 回复模式：返回创建的 Post 对象
         final newPost = await DiscourseService().createReply(
@@ -1077,7 +1252,7 @@ class _ReplySheetState extends ConsumerState<ReplySheet> {
         await _draftController?.deleteDraft();
         _submitted = true;
         if (!mounted) return;
-        Navigator.of(context).pop(newPost);
+        _finishClose(newPost);
       }
     } on PostEnqueuedException catch (e) {
       // 审核场景：删除草稿，提示用户，关闭编辑器
@@ -1113,7 +1288,7 @@ class _ReplySheetState extends ConsumerState<ReplySheet> {
           },
         );
       }
-      Navigator.of(context).pop();
+      _finishClose(null);
     } on DioException catch (_) {
       // 网络错误已由 ErrorInterceptor 处理:发送失败,恢复草稿保存
       _draftController?.enable();
@@ -1134,243 +1309,235 @@ class _ReplySheetState extends ConsumerState<ReplySheet> {
   Widget build(BuildContext context) {
     _richModeEnabled = ref.watch(preferencesProvider).useRichComposer;
     final theme = Theme.of(context);
+    final terminal = widget.embedded ? VscodeTokens.maybeOf(context) : null;
+    final surface = widget.embedded
+        ? (terminal ?? VscodeTokens.of(theme.brightness)).panel
+        : theme.colorScheme.surface;
+    final borderRadius = widget.embedded
+        ? BorderRadius.zero
+        : const BorderRadius.vertical(top: Radius.circular(16));
 
     // 使用 FractionallySizedBox 固定 0.95 高度
     // SafeArea(bottom: false)：顶部安全区域由 SafeArea 处理，
     // 底部安全区域由 ChatBottomPanelContainer 内部管理，避免双重底部间距
     // CallbackShortcuts 包整个弹层:Cmd/Ctrl+Enter 提交(对齐 Discourse
     // composer),焦点在标题输入框时同样生效;守卫与发送按钮一致。
-    final sheet = SafeArea(
-      bottom: false,
-      child: FractionallySizedBox(
-        heightFactor: 0.95,
-        alignment: Alignment.bottomCenter,
-        child: Scaffold(
-          backgroundColor: Colors.transparent,
-          resizeToAvoidBottomInset: false,
-          // PopScope 用于处理表情面板开启时的返回逻辑
-          body: PopScope(
-            canPop: _allowClose && !_showEmojiPanel,
-            onPopInvokedWithResult: (bool didPop, dynamic result) async {
-              if (didPop) return;
-              if (!_showEmojiPanel) {
-                _closeWithCurrentContent(result);
-                return;
-              }
-              if (_showEmojiPanel) {
-                _editorKey.currentState?.closeEmojiPanel();
-                _richKey.currentState?.closeEmojiPanel();
-                setState(() => _showEmojiPanel = false);
-              }
-            },
-            child: Stack(
-              children: [
-                Container(
-                  decoration: BoxDecoration(
-                    color: theme.colorScheme.surface,
-                    borderRadius: const BorderRadius.vertical(
-                      top: Radius.circular(16),
+    final body = Stack(
+      children: [
+        Container(
+          decoration: BoxDecoration(color: surface, borderRadius: borderRadius),
+          child: Column(
+            children: [
+              // 1. 顶部 Header (固定)
+              Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // 拖拽手柄
+                  if (!widget.embedded)
+                    Container(
+                      width: 32,
+                      height: 4,
+                      margin: const EdgeInsets.only(top: 12, bottom: 8),
+                      decoration: BoxDecoration(
+                        color: theme.colorScheme.outlineVariant,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
                     ),
+
+                  LayoutBuilder(
+                    builder: (context, bounds) =>
+                        _buildResponsiveHeader(theme, bounds.maxWidth),
                   ),
-                  child: Column(
-                    children: [
-                      // 1. 顶部 Header (固定)
-                      Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          // 拖拽手柄
-                          Container(
-                            width: 32,
-                            height: 4,
-                            margin: const EdgeInsets.only(top: 12, bottom: 8),
-                            decoration: BoxDecoration(
-                              color: theme.colorScheme.outlineVariant,
-                              borderRadius: BorderRadius.circular(2),
-                            ),
-                          ),
 
-                          LayoutBuilder(
-                            builder: (context, bounds) =>
-                                _buildResponsiveHeader(theme, bounds.maxWidth),
-                          ),
+                  Divider(
+                    height: 1,
+                    color:
+                        terminal?.border ??
+                        theme.colorScheme.outlineVariant.withValues(alpha: 0.5),
+                  ),
+                ],
+              ),
 
-                          Divider(
-                            height: 1,
-                            color: theme.colorScheme.outlineVariant.withValues(
-                              alpha: 0.5,
-                            ),
-                          ),
-                        ],
-                      ),
-
-                      // 新建私信：所有入口都可增删收件人，预设对象保留为首个 chip。
-                      if (_canEditRecipients)
-                        Padding(
-                          padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-                          child: PmRecipientField(
-                            recipients: _recipients,
-                            autofocus: widget.targetUsername == null,
-                            onChanged: _onRecipientsChanged,
-                          ),
-                        ),
-                      // 私信标题输入框（仅私信模式）
-                      if (_isPrivateMessage) ...[
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 16),
-                          child: TextField(
-                            controller: _titleController,
-                            decoration: InputDecoration(
-                              hintText: context.l10n.common_title,
-                              border: InputBorder.none,
-                              contentPadding: const EdgeInsets.symmetric(
-                                vertical: 12,
-                              ),
-                            ),
-                            style: const TextStyle(fontWeight: FontWeight.w600),
-                            textInputAction: TextInputAction.next,
-                            onTap: () {
-                              if (_showEmojiPanel) {
-                                _editorKey.currentState?.closeEmojiPanel();
-                                _richKey.currentState?.closeEmojiPanel();
-                                setState(() => _showEmojiPanel = false);
-                              }
-                            },
-                          ),
-                        ),
-                        Divider(
-                          height: 1,
-                          color: theme.colorScheme.outlineVariant.withValues(
-                            alpha: 0.2,
-                          ),
-                        ),
-                      ],
-
-                      // 2. 编辑器区域(feature flag:富文本 / markdown;
-                      // ComposerSwitchFade 无并存直切+淡入 —— 防双模
-                      // 并存 IME 交接竞态,说明见 create_topic_page)
-                      Expanded(
-                        child: ComposerPreviewPane(
-                          previewing: _showPreview,
-                          previewFooter: ComposerPreviewFooter(
-                            metadata: _buildReplyContext(),
-                            rich:
-                                ref
-                                    .watch(preferencesProvider)
-                                    .useRichComposer &&
-                                !_richFallback,
-                          ),
-                          preview: _buildPreview(theme),
-                          editor: ComposerSwitchFade(
-                            child:
-                                (ref.watch(
-                                      preferencesProvider.select(
-                                        (p) => p.useRichComposer,
-                                      ),
-                                    ) &&
-                                    !_richFallback)
-                                // 富文本的初始导入是一次性的(不监听 controller
-                                // 后续变化)——编辑原帖 raw / 草稿加载完成前挂载
-                                // 会用空 controller 建空文档,之后镜像回写覆盖
-                                // 真内容(毁帖)。内容源就绪后才挂;占位留空,
-                                // 加载视觉由草稿遮罩/RichComposer 自身统一提供
-                                // (双 spinner 叠影)。
-                                ? ((_isLoadingRaw ||
-                                          (_isLoadingDraft && !_reloadingDraft))
-                                      ? const SizedBox.shrink()
-                                      : RichComposerEditor(
-                                          key: _richKey,
-                                          metaBar: PlatformUtils.isDesktop
-                                              ? null
-                                              : _buildReplyContext(),
-                                          onSwitchToSource: () => _setViewMode(
-                                            ComposerViewMode.source,
-                                          ),
-                                          controller: _contentController,
-                                          focusNode: _contentFocusNode,
-                                          hintText:
-                                              context.l10n.editor_hintText,
-                                          bodyOverlay: _buildCharCountOverlay(),
-                                          emojiPanelHeight: _emojiPanelHeight,
-                                          onEmojiPanelChanged: (show) {
-                                            setState(
-                                              () => _showEmojiPanel = show,
-                                            );
-                                          },
-                                          mentionDataSource: (term) =>
-                                              DiscourseService().searchUsers(
-                                                term: term,
-                                                topicId: widget.topicId,
-                                                categoryId: widget.categoryId,
-                                                includeGroups:
-                                                    !_isInPrivateMessageContext,
-                                              ),
-                                          onFallbackToPlain: () {
-                                            if (mounted) {
-                                              setState(
-                                                () => _richFallback = true,
-                                              );
-                                            }
-                                          },
-                                          // 模式切换由编辑台承载。
-                                        ))
-                                : MarkdownEditor(
-                                    key: _editorKey,
-                                    metaBar: PlatformUtils.isDesktop
-                                        ? null
-                                        : _buildReplyContext(),
-                                    onSwitchToRich:
-                                        ref
-                                            .watch(preferencesProvider)
-                                            .useRichComposer
-                                        ? () => _setViewMode(
-                                            ComposerViewMode.rich,
-                                          )
-                                        : null,
-                                    controller: _contentController,
-                                    focusNode: _contentFocusNode,
-                                    hintText: context.l10n.editor_hintText,
-                                    expands: true,
-                                    // 预览已由头部切换器统一承载(对富文本也生效)
-                                    showPreviewButton: false,
-                                    bodyOverlay: _buildCharCountOverlay(),
-                                    emojiPanelHeight: _emojiPanelHeight,
-                                    onEmojiPanelChanged: (show) {
-                                      setState(() => _showEmojiPanel = show);
-                                    },
-                                    mentionDataSource: (term) =>
-                                        DiscourseService().searchUsers(
-                                          term: term,
-                                          topicId: widget.topicId,
-                                          categoryId: widget.categoryId,
-                                          includeGroups:
-                                              !_isInPrivateMessageContext, // 私信不允许提及群组
-                                        ),
-                                  ),
-                          ),
-                        ),
-                      ),
-                    ],
+              // 新建私信：所有入口都可增删收件人，预设对象保留为首个 chip。
+              if (_canEditRecipients)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                  child: PmRecipientField(
+                    recipients: _recipients,
+                    autofocus: widget.targetUsername == null,
+                    onChanged: _onRecipientsChanged,
                   ),
                 ),
-                // 草稿加载遮罩
-                if (_isLoadingDraft)
-                  Positioned.fill(
-                    child: Container(
-                      decoration: BoxDecoration(
-                        color: theme.colorScheme.surface.withValues(alpha: 0.7),
-                        borderRadius: const BorderRadius.vertical(
-                          top: Radius.circular(16),
-                        ),
-                      ),
-                      child: const Center(child: LoadingSpinner()),
+              // 私信标题输入框（仅私信模式）
+              if (_isPrivateMessage) ...[
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: TextField(
+                    controller: _titleController,
+                    decoration: InputDecoration(
+                      hintText: context.l10n.common_title,
+                      border: InputBorder.none,
+                      contentPadding: const EdgeInsets.symmetric(vertical: 12),
                     ),
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                    textInputAction: TextInputAction.next,
+                    onTap: () {
+                      if (_showEmojiPanel) {
+                        _editorKey.currentState?.closeEmojiPanel();
+                        _richKey.currentState?.closeEmojiPanel();
+                        setState(() => _showEmojiPanel = false);
+                      }
+                    },
                   ),
+                ),
+                Divider(
+                  height: 1,
+                  color: theme.colorScheme.outlineVariant.withValues(
+                    alpha: 0.2,
+                  ),
+                ),
               ],
-            ),
+
+              // 2. 编辑器区域(feature flag:富文本 / markdown;
+              // ComposerSwitchFade 无并存直切+淡入 —— 防双模
+              // 并存 IME 交接竞态,说明见 create_topic_page)
+              Expanded(
+                child: ComposerPreviewPane(
+                  previewing: _showPreview,
+                  previewFooter: ComposerPreviewFooter(
+                    metadata: _buildReplyContext(),
+                    rich:
+                        ref.watch(preferencesProvider).useRichComposer &&
+                        !_richFallback,
+                  ),
+                  preview: _buildPreview(theme),
+                  editor: ComposerSwitchFade(
+                    child:
+                        (ref.watch(
+                              preferencesProvider.select(
+                                (p) => p.useRichComposer,
+                              ),
+                            ) &&
+                            !_richFallback)
+                        // 富文本的初始导入是一次性的(不监听 controller
+                        // 后续变化)——编辑原帖 raw / 草稿加载完成前挂载
+                        // 会用空 controller 建空文档,之后镜像回写覆盖
+                        // 真内容(毁帖)。内容源就绪后才挂;占位留空,
+                        // 加载视觉由草稿遮罩/RichComposer 自身统一提供
+                        // (双 spinner 叠影)。
+                        ? ((_isLoadingRaw ||
+                                  (_isLoadingDraft && !_reloadingDraft))
+                              ? const SizedBox.shrink()
+                              : RichComposerEditor(
+                                  key: _richKey,
+                                  metaBar: PlatformUtils.isDesktop
+                                      ? null
+                                      : _buildReplyContext(),
+                                  onSwitchToSource: () =>
+                                      _setViewMode(ComposerViewMode.source),
+                                  controller: _contentController,
+                                  focusNode: _contentFocusNode,
+                                  hintText: context.l10n.editor_hintText,
+                                  bodyOverlay: _buildCharCountOverlay(),
+                                  emojiPanelHeight: _emojiPanelHeight,
+                                  onEmojiPanelChanged: (show) {
+                                    setState(() => _showEmojiPanel = show);
+                                  },
+                                  mentionDataSource: (term) =>
+                                      DiscourseService().searchUsers(
+                                        term: term,
+                                        topicId: widget.topicId,
+                                        categoryId: widget.categoryId,
+                                        includeGroups:
+                                            !_isInPrivateMessageContext,
+                                      ),
+                                  onFallbackToPlain: () {
+                                    if (mounted) {
+                                      setState(() => _richFallback = true);
+                                    }
+                                  },
+                                  // 模式切换由编辑台承载。
+                                ))
+                        : MarkdownEditor(
+                            key: _editorKey,
+                            metaBar: PlatformUtils.isDesktop
+                                ? null
+                                : _buildReplyContext(),
+                            onSwitchToRich:
+                                ref.watch(preferencesProvider).useRichComposer
+                                ? () => _setViewMode(ComposerViewMode.rich)
+                                : null,
+                            controller: _contentController,
+                            focusNode: _contentFocusNode,
+                            hintText: context.l10n.editor_hintText,
+                            expands: true,
+                            // 预览已由头部切换器统一承载(对富文本也生效)
+                            showPreviewButton: false,
+                            bodyOverlay: _buildCharCountOverlay(),
+                            emojiPanelHeight: _emojiPanelHeight,
+                            onEmojiPanelChanged: (show) {
+                              setState(() => _showEmojiPanel = show);
+                            },
+                            mentionDataSource: (term) =>
+                                DiscourseService().searchUsers(
+                                  term: term,
+                                  topicId: widget.topicId,
+                                  categoryId: widget.categoryId,
+                                  includeGroups:
+                                      !_isInPrivateMessageContext, // 私信不允许提及群组
+                                ),
+                          ),
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
-      ),
+        // 草稿加载遮罩
+        if (_isLoadingDraft)
+          Positioned.fill(
+            child: Container(
+              decoration: BoxDecoration(
+                color: surface.withValues(alpha: 0.7),
+                borderRadius: borderRadius,
+              ),
+              child: const Center(child: LoadingSpinner()),
+            ),
+          ),
+      ],
     );
+    // 嵌入模式不注册路由返回拦截，也不套弹窗高度和安全区域约束。
+    final sheet = widget.embedded
+        ? SizedBox.expand(child: body)
+        : SafeArea(
+            bottom: false,
+            child: FractionallySizedBox(
+              heightFactor: 0.95,
+              alignment: Alignment.bottomCenter,
+              child: Scaffold(
+                backgroundColor: Colors.transparent,
+                resizeToAvoidBottomInset: false,
+                body: PopScope<Post?>(
+                  canPop:
+                      _allowClose &&
+                      !_showEmojiPanel &&
+                      !_isSubmitting &&
+                      !_submissionPending,
+                  onPopInvokedWithResult: (didPop, result) {
+                    if (didPop) return;
+                    if (!_showEmojiPanel) {
+                      _closeWithCurrentContent(result);
+                      return;
+                    }
+                    _editorKey.currentState?.closeEmojiPanel();
+                    _richKey.currentState?.closeEmojiPanel();
+                    setState(() => _showEmojiPanel = false);
+                  },
+                  child: body,
+                ),
+              ),
+            ),
+          );
 
     return CallbackShortcuts(
       bindings: {
@@ -1381,7 +1548,9 @@ class _ReplySheetState extends ConsumerState<ReplySheet> {
             if (!_isSubmitting && !_isLoadingRaw) _submit();
           },
       },
-      child: sheet,
+      child: terminal != null
+          ? ComposerTerminalScope(tokens: terminal, child: sheet)
+          : sheet,
     );
   }
 }

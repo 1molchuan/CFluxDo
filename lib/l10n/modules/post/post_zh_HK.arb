@@ -1,5 +1,11 @@
 {
   "@@locale": "zh_HK",
+  "post_terminalTitle": "終端機",
+  "post_terminalExpand": "展開回覆面板",
+  "post_terminalCollapse": "收起回覆面板",
+  "post_terminalRestore": "還原回覆面板",
+  "post_terminalMaximize": "最大化回覆面板",
+  "post_terminalClose": "關閉回覆面板",
   "poll_closed": "已關閉",
   "poll_count": "計數",
   "poll_percentage": "百分比",

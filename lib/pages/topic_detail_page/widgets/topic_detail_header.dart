@@ -4,17 +4,20 @@ import 'package:flutter/material.dart';
 import 'package:app_icons/app_icons.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+
 import '../../../l10n/s.dart';
 import '../../../models/category.dart';
 import '../../../models/topic.dart';
 import '../../../providers/discourse_providers.dart';
 import '../../../services/discourse_cache_manager.dart';
 import '../../../theme/mojian_theme.dart';
+import '../../../theme/vscode_theme.dart';
 import '../../../utils/font_awesome_helper.dart';
 import '../../../utils/tag_icon_list.dart';
 import '../../../utils/url_helper.dart';
 import '../../../widgets/topic/topic_summary_widget.dart';
 import '../../../widgets/common/emoji_text.dart';
+import '../../../widgets/common/vscode_peek_section.dart';
 import '../../../utils/time_utils.dart';
 import '../../../widgets/common/relative_time_text.dart';
 import '../../../utils/number_utils.dart';
@@ -50,6 +53,23 @@ class TopicDetailHeader extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
+    final vscode = theme.extension<VscodeTokens>();
+    final titleStyle = vscode == null
+        ? theme.textTheme.titleLarge?.copyWith(
+            fontWeight: FontWeight.w600,
+            height: 1.4,
+            letterSpacing: 0.2,
+          )
+        : theme.textTheme.titleMedium?.copyWith(
+            fontFamily: 'Consolas',
+            fontFamilyFallback: VscodeTheme.codeFontFallback(
+              theme.textTheme.bodyMedium?.fontFamily,
+            ),
+            fontSize: 18,
+            fontWeight: FontWeight.w500,
+            height: 1.4,
+            color: vscode.foreground,
+          );
 
     // 获取分类信息
     final categoryMap = ref.watch(categoryMapProvider).value;
@@ -84,13 +104,17 @@ class TopicDetailHeader extends ConsumerWidget {
       );
     }
 
-    return Container(
-      padding: EdgeInsets.fromLTRB(16, showTitle ? 20 : 12, 16, 16),
+    Widget buildContent() => Container(
+      padding: vscode == null
+          ? EdgeInsets.fromLTRB(16, showTitle ? 20 : 12, 16, 16)
+          : const EdgeInsets.fromLTRB(16, 10, 16, 10),
       decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
+        color: vscode?.background ?? theme.colorScheme.surface,
         border: Border(
           bottom: BorderSide(
-            color: theme.colorScheme.outlineVariant.withValues(alpha: 0.3),
+            color:
+                vscode?.border ??
+                theme.colorScheme.outlineVariant.withValues(alpha: 0.3),
             width: 0.5,
           ),
         ),
@@ -101,12 +125,13 @@ class TopicDetailHeader extends ConsumerWidget {
           if (showTitle)
             SelectableText.rich(
               TextSpan(
-                style: theme.textTheme.titleLarge?.copyWith(
-                  fontWeight: FontWeight.w600,
-                  height: 1.4,
-                  letterSpacing: 0.2,
-                ),
+                style: titleStyle,
                 children: [
+                  if (vscode != null)
+                    TextSpan(
+                      text: '# ',
+                      style: TextStyle(color: vscode.syntaxKeyword),
+                    ),
                   if (detail.isPrivateMessage)
                     WidgetSpan(
                       alignment: PlaceholderAlignment.middle,
@@ -146,19 +171,22 @@ class TopicDetailHeader extends ConsumerWidget {
                   ...EmojiText.buildEmojiSpans(
                     context,
                     detail.title,
-                    theme.textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.w600,
-                      height: 1.4,
-                    ),
+                    titleStyle,
                   ),
                 ],
               ),
-              key: headerKey,
+              key: vscode == null ? headerKey : null,
             )
           else
-            SizedBox(key: headerKey),
+            SizedBox(key: vscode == null ? headerKey : null),
 
-          SizedBox(height: showTitle ? 16 : 8),
+          SizedBox(
+            height: vscode != null
+                ? 8
+                : showTitle
+                ? 16
+                : 8,
+          ),
 
           // 分类与标签（私信话题不显示）
           if (!detail.isPrivateMessage &&
@@ -166,7 +194,7 @@ class TopicDetailHeader extends ConsumerWidget {
                   (detail.tags != null && detail.tags!.isNotEmpty))) ...[
             Wrap(
               spacing: 6,
-              runSpacing: 8,
+              runSpacing: vscode != null ? 4 : 8,
               crossAxisAlignment: WrapCrossAlignment.center,
               children: [
                 // 分类 Badge
@@ -213,7 +241,7 @@ class TopicDetailHeader extends ConsumerWidget {
                   ),
               ],
             ),
-            const SizedBox(height: 16),
+            SizedBox(height: vscode != null ? 8 : 16),
           ],
 
           // 指定(discourse-assign)标识:有指定对象才显示,点开直接跳到
@@ -222,12 +250,13 @@ class TopicDetailHeader extends ConsumerWidget {
           if (detail.isAssigned) ...[
             InkWell(
               borderRadius: BorderRadius.circular(16),
-              onTap: () => unawaited(
-                showAssignSheet(context, ref, topicId: detail.id),
-              ),
+              onTap: () =>
+                  unawaited(showAssignSheet(context, ref, topicId: detail.id)),
               child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 6,
+                ),
                 decoration: BoxDecoration(
                   color: theme.colorScheme.primaryContainer.withValues(
                     alpha: 0.5,
@@ -315,7 +344,7 @@ class TopicDetailHeader extends ConsumerWidget {
           ),
 
           // AI 摘要 & 订阅按钮
-          const SizedBox(height: 16),
+          SizedBox(height: vscode != null ? 8 : 16),
           CollapsibleTopicSummary(
             topicId: detail.id,
             topicDetail: detail,
@@ -328,6 +357,14 @@ class TopicDetailHeader extends ConsumerWidget {
           ),
         ],
       ),
+    );
+
+    if (vscode == null) return buildContent();
+    return VscodePeekSection(
+      key: headerKey,
+      label: '话题信息',
+      summary: category?.name,
+      builder: (_) => buildContent(),
     );
   }
 

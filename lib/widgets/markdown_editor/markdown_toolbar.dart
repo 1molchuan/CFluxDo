@@ -28,6 +28,7 @@ import '../common/fading_edge_scroll_view.dart';
 import '../content/discourse_html_content/image_utils.dart';
 import 'composer_workbench.dart';
 import 'composer_tool_style.dart';
+import 'composer_island.dart';
 import 'composer_desktop_layout.dart';
 import 'composer_desktop_workbench.dart';
 import 'composer_tools_anchor.dart';
@@ -1200,7 +1201,9 @@ class MarkdownToolbarState extends State<MarkdownToolbar> {
             : _desktopAction(() => tool.onMenuSelected!(this, value)),
         padding: EdgeInsets.zero,
         iconSize: 20,
-        style: IconButton.styleFrom(minimumSize: const Size(48, 48)),
+        style: ComposerTerminalScope.maybeOf(context) != null
+            ? composerToolButtonStyle(context)
+            : IconButton.styleFrom(minimumSize: const Size(48, 48)),
       );
     }
 

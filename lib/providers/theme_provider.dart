@@ -138,6 +138,13 @@ class ThemeState {
   bool get isMojian => uiStyle == UiStyle.mojian;
   bool get isClaude => uiStyle == UiStyle.claude;
   bool get isClassic => uiStyle == UiStyle.classic;
+  bool get isVscode => uiStyle == UiStyle.vscode;
+
+  /// VS Code 只支持原生 Windows；读取备份和程序写入时使用同一限制。
+  static bool get supportsVscode => !kIsWeb && Platform.isWindows;
+
+  static UiStyle supportedUiStyle(UiStyle style) =>
+      style == UiStyle.vscode && !supportsVscode ? UiStyle.mojian : style;
 
   /// 墨笺壁纸取色的明/暗两档;未启用或系统不支持时为 null(用预设强调色)
   (Color, Color)? get mojianAccentPair =>
@@ -153,6 +160,7 @@ class ThemeState {
   /// 当前生效的种子色（色卡预览、主题合成、预热等场景使用）
   Color get effectiveSeedColor {
     if (isClaude) return const Color(0xFFDA7756);
+    if (isVscode) return const Color(0xFF005FB8);
     return switch (accentSource) {
       AccentSource.dynamic => dynamicPrimary ?? seedColor,
       AccentSource.palette => AppPalettes.byId(paletteId).seedColor,
@@ -411,9 +419,10 @@ class ThemeNotifier extends StateNotifier<ThemeState> {
       installedFontName: installedFontName,
       m3eEnabled: prefs.getBool(_m3eEnabledKey) ?? true,
       background: background,
-      uiStyle:
-          UiStyle.values.asNameMap()[prefs.getString(_uiStyleKey)] ??
-          UiStyle.mojian,
+      uiStyle: ThemeState.supportedUiStyle(
+        UiStyle.values.asNameMap()[prefs.getString(_uiStyleKey)] ??
+            UiStyle.mojian,
+      ),
       mojianAccent:
           MojianAccent.values.asNameMap()[prefs.getString(_mojianAccentKey)] ??
           MojianAccent.values.asNameMap()[prefs.getString(
@@ -540,6 +549,7 @@ class ThemeNotifier extends StateNotifier<ThemeState> {
   }
 
   Future<void> setUiStyle(UiStyle style) async {
+    style = ThemeState.supportedUiStyle(style);
     state = state.copyWith(uiStyle: style);
     _syncSplashStyle();
     await _prefs.setString(_uiStyleKey, style.name);

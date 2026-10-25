@@ -13,6 +13,7 @@ import 'package:ai_model_manager/ai_model_manager.dart';
 import 'package:m3e_ui/m3e_ui.dart';
 
 import '../../l10n/s.dart';
+import '../../models/vscode_body_style.dart';
 import '../../pages/topic_card_style_settings_page.dart';
 import '../../providers/app_icon_provider.dart';
 import '../../providers/locale_provider.dart';
@@ -27,6 +28,7 @@ import '../../theme/app_background.dart';
 import '../../theme/app_palettes.dart';
 import '../../theme/mojian_theme.dart';
 import '../../theme/claude_theme.dart';
+import '../../theme/vscode_theme.dart';
 import '../../theme/theme_resolver.dart';
 import '../../utils/dialog_utils.dart';
 import '../../widgets/common/app_bottom_sheet.dart';
@@ -77,8 +79,82 @@ List<SettingsGroup> buildAppearanceGroups(BuildContext context) {
           id: 'uiStyle',
           title: l10n.appearance_uiStyle,
           subtitle:
-              '${l10n.appearance_styleMojian} ${l10n.appearance_styleClaude} ${l10n.appearance_styleClassic}',
+              '${l10n.appearance_styleMojian} ${l10n.appearance_styleClaude} ${l10n.appearance_styleClassic}'
+              '${ThemeState.supportsVscode ? ' ${l10n.appearance_styleVscode}' : ''}',
           builder: (context, ref) => const _UiStyleSection(),
+        ),
+      ],
+    ),
+
+    // ── VS Code 正文 ───────────────────────────────────────────────
+    SettingsGroup(
+      title: l10n.appearance_vscodeBody,
+      icon: Symbols.code_rounded,
+      visibleWhen: (ref) =>
+          ref.watch(themeProvider.select((state) => state.isVscode)),
+      items: [
+        CustomModel(
+          id: 'vscodeBodyStyle',
+          title: l10n.appearance_vscodeBodyStyle,
+          subtitle:
+              '${l10n.appearance_vscodeBodyCompact} ${l10n.appearance_vscodeBodyProgramming} Java Python',
+          builder: (context, ref) {
+            final style = ref.watch(
+              preferencesProvider.select((state) => state.vscodeBodyStyle),
+            );
+            final language = ref.watch(
+              preferencesProvider.select((state) => state.vscodeCodeLanguage),
+            );
+            return Column(
+              children: [
+                ListTile(
+                  title: Text(l10n.appearance_vscodeBodyStyle),
+                  trailing: DropdownButton<VscodeBodyStyle>(
+                    value: style,
+                    items: [
+                      DropdownMenuItem(
+                        value: VscodeBodyStyle.compact,
+                        child: Text(l10n.appearance_vscodeBodyCompact),
+                      ),
+                      DropdownMenuItem(
+                        value: VscodeBodyStyle.programming,
+                        child: Text(l10n.appearance_vscodeBodyProgramming),
+                      ),
+                    ],
+                    onChanged: (value) {
+                      if (value != null) {
+                        ref.read(preferencesProvider.notifier)
+                            .setVscodeBodyStyle(value);
+                      }
+                    },
+                  ),
+                ),
+                if (style == VscodeBodyStyle.programming)
+                  ListTile(
+                    title: Text(l10n.appearance_vscodeCodeLanguage),
+                    trailing: DropdownButton<VscodeCodeLanguage>(
+                      value: language,
+                      items: const [
+                        DropdownMenuItem(
+                          value: VscodeCodeLanguage.java,
+                          child: Text('Java'),
+                        ),
+                        DropdownMenuItem(
+                          value: VscodeCodeLanguage.python,
+                          child: Text('Python'),
+                        ),
+                      ],
+                      onChanged: (value) {
+                        if (value != null) {
+                          ref.read(preferencesProvider.notifier)
+                              .setVscodeCodeLanguage(value);
+                        }
+                      },
+                    ),
+                  ),
+              ],
+            );
+          },
         ),
       ],
     ),
@@ -110,6 +186,7 @@ List<SettingsGroup> buildAppearanceGroups(BuildContext context) {
                 currentMode,
                 black: themeState.blackEnabled,
               ),
+              UiStyle.vscode => VscodeTheme.resolve(currentMode),
               UiStyle.classic => ThemeResolver.resolve(
                 mode: currentMode,
                 neutral: themeState.neutralEnabled,
@@ -181,6 +258,8 @@ List<SettingsGroup> buildAppearanceGroups(BuildContext context) {
     SettingsGroup(
       title: l10n.appearance_surfaceStyle,
       icon: Symbols.contrast_rounded,
+      visibleWhen: (ref) =>
+          ref.watch(themeProvider.select((state) => !state.isVscode)),
       items: [
         SwitchModel(
           id: 'neutral',
@@ -3044,7 +3123,7 @@ class _TransparentTrackShape extends RoundedRectSliderTrackShape {
   }
 }
 
-/// 界面风格：墨笺 / 经典两张卡；墨笺下再给出强调色。
+/// 各风格按可用宽度换行，Windows 额外提供编辑器风格。
 class _UiStyleSection extends ConsumerWidget {
   const _UiStyleSection();
 
@@ -3077,53 +3156,82 @@ class _UiStyleSection extends ConsumerWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 620),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: _StyleCard(
-                  selected: s.isMojian,
-                  title: l10n.appearance_styleMojian,
-                  description: l10n.appearance_styleMojianDesc,
-                  preview: _MojianMiniPreview(
-                    tokens: MojianTokens.of(
-                      brightness,
-                      s.mojianAccent,
-                      black: s.blackEnabled,
-                      accentColor: switch (s.mojianAccentPair) {
-                        final p? =>
-                          brightness == Brightness.light ? p.$1 : p.$2,
-                        null => null,
-                      },
+          constraints: const BoxConstraints(maxWidth: 820),
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final count = ThemeState.supportsVscode ? 4 : 3;
+              final columns = math.min(
+                count,
+                math.max(1, ((constraints.maxWidth + 12) / 172).floor()),
+              );
+              final width =
+                  (constraints.maxWidth - 12 * (columns - 1)) / columns;
+              return Wrap(
+                spacing: 12,
+                runSpacing: 12,
+                children: [
+                  SizedBox(
+                    width: width,
+                    child: _StyleCard(
+                      selected: s.isMojian,
+                      title: l10n.appearance_styleMojian,
+                      description: l10n.appearance_styleMojianDesc,
+                      preview: _MojianMiniPreview(
+                        tokens: MojianTokens.of(
+                          brightness,
+                          s.mojianAccent,
+                          black: s.blackEnabled,
+                          accentColor: switch (s.mojianAccentPair) {
+                            final p? =>
+                              brightness == Brightness.light ? p.$1 : p.$2,
+                            null => null,
+                          },
+                        ),
+                      ),
+                      onTap: () => notifier.setUiStyle(UiStyle.mojian),
                     ),
                   ),
-                  onTap: () => notifier.setUiStyle(UiStyle.mojian),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _StyleCard(
-                  selected: s.isClaude,
-                  title: l10n.appearance_styleClaude,
-                  description: l10n.appearance_styleClaudeDesc,
-                  preview: _ClaudeMiniPreview(
-                    tokens: ClaudeTokens.of(brightness, black: s.blackEnabled),
+                  SizedBox(
+                    width: width,
+                    child: _StyleCard(
+                      selected: s.isClaude,
+                      title: l10n.appearance_styleClaude,
+                      description: l10n.appearance_styleClaudeDesc,
+                      preview: _ClaudeMiniPreview(
+                        tokens: ClaudeTokens.of(
+                          brightness,
+                          black: s.blackEnabled,
+                        ),
+                      ),
+                      onTap: () => notifier.setUiStyle(UiStyle.claude),
+                    ),
                   ),
-                  onTap: () => notifier.setUiStyle(UiStyle.claude),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _StyleCard(
-                  selected: s.isClassic,
-                  title: l10n.appearance_styleClassic,
-                  description: l10n.appearance_styleClassicDesc,
-                  preview: _ClassicMiniPreview(scheme: classicScheme),
-                  onTap: () => notifier.setUiStyle(UiStyle.classic),
-                ),
-              ),
-            ],
+                  SizedBox(
+                    width: width,
+                    child: _StyleCard(
+                      selected: s.isClassic,
+                      title: l10n.appearance_styleClassic,
+                      description: l10n.appearance_styleClassicDesc,
+                      preview: _ClassicMiniPreview(scheme: classicScheme),
+                      onTap: () => notifier.setUiStyle(UiStyle.classic),
+                    ),
+                  ),
+                  if (ThemeState.supportsVscode)
+                    SizedBox(
+                      width: width,
+                      child: _StyleCard(
+                        selected: s.isVscode,
+                        title: l10n.appearance_styleVscode,
+                        description: l10n.appearance_styleVscodeDesc,
+                        preview: _VscodeMiniPreview(
+                          tokens: VscodeTokens.of(brightness),
+                        ),
+                        onTap: () => notifier.setUiStyle(UiStyle.vscode),
+                      ),
+                    ),
+                ],
+              );
+            },
           ),
         ),
         if (s.isMojian) ...[
@@ -3168,7 +3276,106 @@ class _UiStyleSection extends ConsumerWidget {
             ),
           ),
         ],
+        if (s.isVscode) ...[
+          const SizedBox(height: 14),
+          Text(
+            l10n.appearance_vscodeFixedThemeHint,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ],
       ],
+    );
+  }
+}
+
+/// 以活动栏、资源列表和语法色线条展示主题，不依赖任何论坛示例数据。
+class _VscodeMiniPreview extends StatelessWidget {
+  const _VscodeMiniPreview({required this.tokens});
+
+  final VscodeTokens tokens;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = tokens;
+    return ColoredBox(
+      color: t.background,
+      child: Column(
+        children: [
+          Container(height: 10, color: t.panel),
+          Expanded(
+            child: Row(
+              children: [
+                Container(
+                  width: 15,
+                  color: t.sidebar,
+                  padding: const EdgeInsets.symmetric(vertical: 6),
+                  child: Column(
+                    children: [
+                      Icon(
+                        Icons.description_outlined,
+                        size: 9,
+                        color: t.foreground,
+                      ),
+                      const SizedBox(height: 8),
+                      Icon(Icons.search, size: 9, color: t.muted),
+                    ],
+                  ),
+                ),
+                Container(
+                  width: 31,
+                  color: t.sidebar,
+                  padding: const EdgeInsets.fromLTRB(3, 6, 3, 0),
+                  child: Column(
+                    children: [
+                      for (var i = 0; i < 4; i++)
+                        Container(
+                          height: 3,
+                          margin: const EdgeInsets.only(bottom: 6),
+                          color: i == 1 ? t.selection : t.border,
+                        ),
+                    ],
+                  ),
+                ),
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.all(6),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        for (final color in [
+                          t.syntaxKeyword,
+                          t.foreground,
+                          t.syntaxComment,
+                          t.syntaxString,
+                        ])
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 7),
+                            child: Row(
+                              children: [
+                                Container(
+                                  width: 3,
+                                  height: 3,
+                                  color: t.lineNumber,
+                                ),
+                                const SizedBox(width: 5),
+                                Expanded(
+                                  child: Container(height: 3, color: color),
+                                ),
+                              ],
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Container(height: 5, color: t.accent),
+        ],
+      ),
     );
   }
 }

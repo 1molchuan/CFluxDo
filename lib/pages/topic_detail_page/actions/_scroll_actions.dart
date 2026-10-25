@@ -35,6 +35,21 @@ extension _ScrollActions on _TopicDetailPageState {
     }
   }
 
+  void _onPostListLayout() {
+    if (!mounted || _isRefreshing || _isNestedView) return;
+    if (VscodeTokens.maybeOf(context) == null) return;
+    final params = _params;
+    if (ref.read(topicDetailProvider(params)).isLoading) return;
+    final notifier = ref.read(topicDetailProvider(params).notifier);
+    // 只补尾部；头部分页仍由用户滚动触发，保留 center 定位与上翻语义。
+    // loadMore 内部沿用单飞、失败需手动重试及空页到头闸门。
+    _controller.loadMoreAfterLayout(
+      hasMoreAfter: notifier.hasMoreAfter,
+      isLoadingMore: notifier.isLoadingMore,
+      loadMore: notifier.loadMore,
+    );
+  }
+
   void _updateStreamIndexForPostNumber(int postNumber) {
     // 初始定位完成前，eyeline 上报的可能是定位途中经过的楼层，
     // 会让进度条数字从低楼层爬升、污染视口位置记录。
