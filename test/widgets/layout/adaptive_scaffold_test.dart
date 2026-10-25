@@ -126,4 +126,69 @@ void main() {
     expect(find.byType(NavigationBar), findsNothing);
     expect(find.text('平行视界内容'), findsOneWidget);
   });
+
+  testWidgets('手机端 body 保留 Scaffold 注入的底栏 inset（extendBody），顶部 inset 由站点条吃掉', (
+    tester,
+  ) async {
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.binding.setSurfaceSize(const Size(390, 844));
+
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final container = ProviderContainer(
+      overrides: [sharedPreferencesProvider.overrideWithValue(prefs)],
+    );
+    addTearDown(container.dispose);
+
+    EdgeInsets? bodyPadding;
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: TranslationProvider(
+          child: MaterialApp(
+            home: MediaQuery(
+              data: const MediaQueryData(
+                size: Size(390, 844),
+                padding: EdgeInsets.only(top: 44, bottom: 20),
+                viewPadding: EdgeInsets.only(top: 44, bottom: 20),
+              ),
+              child: AdaptiveScaffold(
+                selectedIndex: 0,
+                onDestinationSelected: (_) {},
+                destinations: const [
+                  AdaptiveDestination(
+                    id: 'home',
+                    icon: Icon(Icons.home_outlined),
+                    selectedIcon: Icon(Icons.home),
+                    label: '首页',
+                  ),
+                  AdaptiveDestination(
+                    id: 'bookmarks',
+                    icon: Icon(Icons.bookmark_outline_rounded),
+                    selectedIcon: Icon(Icons.bookmark_rounded),
+                    label: '书签',
+                  ),
+                ],
+                body: Builder(
+                  builder: (context) {
+                    bodyPadding = MediaQuery.paddingOf(context);
+                    return const SizedBox.expand(child: Text('body'));
+                  },
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final navHeight = tester.getSize(find.byType(NavigationBar)).height;
+    expect(navHeight, greaterThan(0));
+    // 底栏在 body 后面（extendBody），FAB / 列表尾部靠这份 inset 让位；
+    // 1.2.2-beta 用外层 context 重建 MediaQuery 把它丢成 0，FAB 整个被底栏盖住
+    expect(bodyPadding!.bottom, navHeight);
+    // 状态栏 inset 由站点切换条上方的 SafeArea 消费，body 不再重复让位
+    expect(bodyPadding!.top, 0);
+  });
 }
