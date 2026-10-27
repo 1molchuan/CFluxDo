@@ -253,9 +253,10 @@ class RecommendedFontService extends ChangeNotifier {
   static String familyNameFor(String path) =>
       CustomFontService.familyNameFor(path);
 
-  /// 是否是推荐字体目录下的文件
+  /// 是否是推荐字体目录下的文件（Windows 上目录分隔符是 `\`，拼上文件名
+  /// 那一段又是 `/`，两种都认）
   static bool isRecommendedFontPath(String? path) =>
-      path != null && path.contains('/$_dirName/');
+      path != null && RegExp('[/\\\\]$_dirName[/\\\\]').hasMatch(path);
 
   /// 载入清单（内置 → 缓存的远端 → 远端刷新）并扫描已安装文件。可重复调用。
   Future<void> ensureLoaded() => _loading ??= _load();

@@ -224,5 +224,13 @@
   "appearance_recommendedFontDomestic": "CN mirror",
   "appearance_recommendedFontFailed": "Download failed, please try again later",
   "appearance_recommendedFontLoadFailed": "The font file could not be loaded",
-  "appearance_recommendedFontCancel": "Cancel download"
+  "appearance_recommendedFontCancel": "Cancel download",
+  "appearance_fontPreviewTitle": "Titles look like this",
+  "appearance_fontSerifTitles": "Serif titles",
+  "appearance_fontSerifTitlesDesc": "Ink & Paper page titles, topic titles and post headings use a serif face. Turn off to use the body font everywhere.",
+  "appearance_fontChoose": "Choose a font",
+  "appearance_fontImported": "Imported font",
+  "appearance_fontDownloaded": "Downloaded",
+  "appearance_fontMissingGlyphHint": "Characters a font doesn't have fall back to the system font.",
+  "appearance_fontInstalledLatinOnly": "Phone system fonts are mostly Latin-only, so Chinese text keeps the default font. Pick a recommended font or import one to change Chinese text."
 }

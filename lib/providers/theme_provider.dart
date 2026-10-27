@@ -10,6 +10,7 @@ import 'package:flutter_riverpod/legacy.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../services/custom_font_service.dart';
+import '../services/recommended_font_service.dart';
 import '../services/fonts/system_font_service.dart';
 import '../theme/accent_colors.dart';
 import '../theme/app_background.dart';
@@ -96,6 +97,16 @@ class ThemeState {
   /// 选中的系统字体展示名（中文界面为本地化名，可能等于 family）
   final String? installedFontName;
 
+  /// 用户导入的字体文件（与当前选中的字体无关：换成推荐字体后它仍留在
+  /// 列表里，点一下就能换回来）
+  final String? importedFontPath;
+
+  /// 导入字体的原始文件名，仅用于界面展示
+  final String? importedFontName;
+
+  /// 墨笺标题是否用宋体；null = 没设过，按 [serifTitles] 的默认规则
+  final bool? mojianSerifTitles;
+
   /// M3E 组件风格总开关（加载动画/进度条/滑块/按钮形变/下拉刷新）
   final bool m3eEnabled;
 
@@ -128,6 +139,9 @@ class ThemeState {
     this.customFontName,
     this.installedFontFamily,
     this.installedFontName,
+    this.importedFontPath,
+    this.importedFontName,
+    this.mojianSerifTitles,
     this.m3eEnabled = true,
     this.background = const AppBackground(),
     this.uiStyle = UiStyle.mojian,
@@ -168,13 +182,21 @@ class ThemeState {
       ? null
       : CustomFontService.familyNameFor(customFontPath!);
 
-  /// 用户自己选的字体（自选文件 / 系统字体 / 推荐字体）要全局生效，墨笺的
-  /// 宋体标题也换成它；「系统默认」和内置 MiSans 保持宋体标题（原设计）。
-  /// null = 标题沿用主题默认。
-  String? get titleFontFamilyName => switch (fontFamily) {
-    AppFontFamily.installed || AppFontFamily.custom => fontFamilyName,
-    AppFontFamily.system || AppFontFamily.miSans => null,
-  };
+  /// 墨笺的标题（页面标题、话题标题、帖子小标题与引用）是否用宋体。
+  /// 用户在字体页开关过就听用户的；没动过时「系统默认」和内置 MiSans 用
+  /// 宋体（原设计），自己选的字体（导入 / 系统 / 推荐）全局生效、标题也换。
+  bool get serifTitles =>
+      mojianSerifTitles ??
+      switch (fontFamily) {
+        AppFontFamily.system || AppFontFamily.miSans => true,
+        AppFontFamily.installed || AppFontFamily.custom => false,
+      };
+
+  /// 墨笺标题的字体族：null = 宋体；不用宋体时跟正文同一个字体（系统默认
+  /// 取平台的正文字体名，传 null 会被当成宋体）。
+  String? get titleFontFamilyName => serifTitles
+      ? null
+      : fontFamilyName ?? MojianTheme.platformBodyFamily;
 
   /// 获取实际用于 ThemeData 的 fontFamily 字符串
   String? get fontFamilyName {
@@ -206,9 +228,13 @@ class ThemeState {
     String? customFontName,
     String? installedFontFamily,
     String? installedFontName,
+    String? importedFontPath,
+    String? importedFontName,
+    bool? mojianSerifTitles,
 
     // 显式清空自选字体（copyWith 的 null 表示「不改」）
     bool clearCustomFont = false,
+    bool clearImportedFont = false,
     bool? m3eEnabled,
     AppBackground? background,
     UiStyle? uiStyle,
@@ -235,6 +261,13 @@ class ThemeState {
           : customFontName ?? this.customFontName,
       installedFontFamily: installedFontFamily ?? this.installedFontFamily,
       installedFontName: installedFontName ?? this.installedFontName,
+      importedFontPath: clearImportedFont
+          ? null
+          : importedFontPath ?? this.importedFontPath,
+      importedFontName: clearImportedFont
+          ? null
+          : importedFontName ?? this.importedFontName,
+      mojianSerifTitles: mojianSerifTitles ?? this.mojianSerifTitles,
       m3eEnabled: m3eEnabled ?? this.m3eEnabled,
       background: background ?? this.background,
       uiStyle: uiStyle ?? this.uiStyle,
@@ -257,6 +290,9 @@ class ThemeNotifier extends StateNotifier<ThemeState> {
   static const String _schemeVariantKey = 'scheme_variant';
   static const String _customColorsKey = 'custom_colors';
   static const String _fontFamilyKey = 'font_family';
+  static const String _importedFontPathKey = 'imported_font_path';
+  static const String _importedFontNameKey = 'imported_font_name';
+  static const String _mojianSerifTitlesKey = 'mojian_serif_titles';
   static const String _m3eEnabledKey = 'm3e_enabled';
   static const String _bgImagePathKey = 'bg_image_path';
   static const String _bgScrimLightKey = 'bg_scrim_light';
@@ -383,6 +419,15 @@ class ThemeNotifier extends StateNotifier<ThemeState> {
     }
     final customFontPath = prefs.getString(CustomFontService.pathPrefKey);
     final customFontName = prefs.getString(CustomFontService.namePrefKey);
+    // 以前导入的字体只记在「当前字体文件」里：没有单独记录时从那里认领
+    var importedFontPath = prefs.getString(_importedFontPathKey);
+    var importedFontName = prefs.getString(_importedFontNameKey);
+    if (importedFontPath == null &&
+        customFontPath != null &&
+        !RecommendedFontService.isRecommendedFontPath(customFontPath)) {
+      importedFontPath = customFontPath;
+      importedFontName = customFontName;
+    }
 
     // ── 透明模式与背景配置 ──
     final background = AppBackground(
@@ -409,6 +454,9 @@ class ThemeNotifier extends StateNotifier<ThemeState> {
       customFontName: customFontName,
       installedFontFamily: installedFontFamily,
       installedFontName: installedFontName,
+      importedFontPath: importedFontPath,
+      importedFontName: importedFontName,
+      mojianSerifTitles: prefs.getBool(_mojianSerifTitlesKey),
       m3eEnabled: prefs.getBool(_m3eEnabledKey) ?? true,
       background: background,
       uiStyle:
@@ -602,9 +650,34 @@ class ThemeNotifier extends StateNotifier<ThemeState> {
     await _prefs.setString(CustomFontService.namePrefKey, name);
   }
 
-  /// 移除自选字体：删掉字体文件与记录；当前用的就是它时回退系统默认。
-  Future<void> removeCustomFont() async {
-    final oldPath = state.customFontPath;
+  /// 导入一个字体文件并启用（调用前须已由 CustomFontService 导入并注册）。
+  /// 只留一份导入字体：之前导入的那份文件删掉。
+  Future<void> importFont({required String path, required String name}) async {
+    final oldPath = state.importedFontPath;
+    state = state.copyWith(importedFontPath: path, importedFontName: name);
+    await _prefs.setString(_importedFontPathKey, path);
+    await _prefs.setString(_importedFontNameKey, name);
+    await setCustomFont(path: path, name: name);
+    if (oldPath != null && oldPath != path) {
+      await CustomFontService.delete(oldPath);
+    }
+  }
+
+  /// 删掉导入的字体：文件与记录都清掉；正在用它时回退系统默认。
+  Future<void> removeImportedFont() async {
+    final path = state.importedFontPath;
+    if (path == null) return;
+    await stopUsingFontFile(path);
+    state = state.copyWith(clearImportedFont: true);
+    await _prefs.remove(_importedFontPathKey);
+    await _prefs.remove(_importedFontNameKey);
+    await CustomFontService.delete(path);
+  }
+
+  /// 字体文件 [path] 要没了（推荐字体被删 / 导入字体被删）：当前记录的就是
+  /// 它时清掉记录，正在用时回退系统默认。不删文件。
+  Future<void> stopUsingFontFile(String path) async {
+    if (state.customFontPath != path) return;
     final wasActive = state.fontFamily == AppFontFamily.custom;
     state = state.copyWith(
       fontFamily: wasActive ? AppFontFamily.system : state.fontFamily,
@@ -615,7 +688,12 @@ class ThemeNotifier extends StateNotifier<ThemeState> {
     }
     await _prefs.remove(CustomFontService.pathPrefKey);
     await _prefs.remove(CustomFontService.namePrefKey);
-    await CustomFontService.delete(oldPath);
+  }
+
+  /// 墨笺标题是否用宋体（用户明确设置，之后不再按所选字体自动决定）
+  Future<void> setMojianSerifTitles(bool value) async {
+    state = state.copyWith(mojianSerifTitles: value);
+    await _prefs.setBool(_mojianSerifTitlesKey, value);
   }
 }
 

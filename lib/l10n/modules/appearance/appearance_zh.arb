@@ -224,5 +224,13 @@
   "appearance_recommendedFontDomestic": "国内镜像",
   "appearance_recommendedFontFailed": "下载失败，请稍后重试",
   "appearance_recommendedFontLoadFailed": "字体文件无法加载",
-  "appearance_recommendedFontCancel": "取消下载"
+  "appearance_recommendedFontCancel": "取消下载",
+  "appearance_fontPreviewTitle": "标题这样显示",
+  "appearance_fontSerifTitles": "标题用宋体",
+  "appearance_fontSerifTitlesDesc": "墨笺风格的页面标题、话题标题和帖子小标题用宋体；关掉后和正文用同一个字体",
+  "appearance_fontChoose": "选择字体",
+  "appearance_fontImported": "导入的字体",
+  "appearance_fontDownloaded": "已下载",
+  "appearance_fontMissingGlyphHint": "字体里没有的字会自动用系统字体补上。",
+  "appearance_fontInstalledLatinOnly": "手机系统里能选的多是西文字体，中文仍是默认字体；要换中文字体请选上面的推荐字体或导入字体文件"
 }

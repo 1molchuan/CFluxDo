@@ -224,5 +224,13 @@
   "appearance_recommendedFontDomestic": "國內鏡像",
   "appearance_recommendedFontFailed": "下載失敗，請稍後重試",
   "appearance_recommendedFontLoadFailed": "字體檔案無法載入",
-  "appearance_recommendedFontCancel": "取消下載"
+  "appearance_recommendedFontCancel": "取消下載",
+  "appearance_fontPreviewTitle": "標題這樣顯示",
+  "appearance_fontSerifTitles": "標題用宋體",
+  "appearance_fontSerifTitlesDesc": "墨箋風格的頁面標題、話題標題和帖子小標題用宋體；關掉後和正文用同一個字體",
+  "appearance_fontChoose": "選擇字體",
+  "appearance_fontImported": "匯入的字體",
+  "appearance_fontDownloaded": "已下載",
+  "appearance_fontMissingGlyphHint": "字體裡沒有的字會自動用系統字體補上。",
+  "appearance_fontInstalledLatinOnly": "手機系統裡能選的多是西文字體，中文仍是預設字體；要換中文字體請選上面的推薦字體或匯入字體檔案"
 }

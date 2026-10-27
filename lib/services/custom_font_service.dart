@@ -6,6 +6,8 @@ import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'recommended_font_service.dart';
+
 /// 用户自选字体（本地字体文件）的导入、注册与文件管理。
 ///
 /// 内置字体走 asset，编译期就登记在 `FontManifest.json` 里；用户自选的字体只能
@@ -97,7 +99,7 @@ class CustomFontService {
   static Future<void> delete(String? path) async {
     if (path == null) return;
     // 推荐字体的文件归 RecommendedFontService 管：取消选用不等于删文件
-    if (path.contains('/recommended_fonts/')) return;
+    if (RecommendedFontService.isRecommendedFontPath(path)) return;
     try {
       final file = File(path);
       if (file.existsSync()) {

@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:fluxdo_render/fluxdo_render.dart' show FluxdoRenderStyle;
 import 'package:common_ui/common_ui.dart' show MenuQuickActionStyle;
@@ -199,6 +200,12 @@ class MojianTokens extends ThemeExtension<MojianTokens> {
 /// 墨笺的配色与组件主题。
 class MojianTheme {
   MojianTheme._();
+
+  /// 不设字体时本平台正文的字体名（Android 的 Roboto、Windows 的 Segoe UI
+  /// 等）。标题不用宋体、正文又是系统默认时，标题字体要显式给这个名字。
+  static String? get platformBodyFamily => Typography.material2021(
+    platform: defaultTargetPlatform,
+  ).black.bodyMedium?.fontFamily;
 
   /// 墨笺的 ColorScheme。所有 role 显式给出，不走 fromSeed：
   /// primary 是强调色（链接、选中、进度都取它），secondary 是中性墨色，
