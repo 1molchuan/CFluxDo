@@ -5,11 +5,15 @@ import 'package:collection/collection.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 
+import '../../../constants.dart';
 import '../../browser_trust_coordinator.dart';
 import '../../cf_challenge_service.dart';
+import '../background_gate.dart';
+import '../cf/cf_challenge_classifier.dart';
 import '../exceptions/api_exception.dart';
 import '../cookie/cookie_jar_service.dart';
 import '../flux_request_spec.dart';
+import '../recovery/retry_after.dart';
 import '../request_scheduler_config.dart';
 
 /// 请求优先级
@@ -226,6 +230,16 @@ class RequestSchedulerInterceptor extends Interceptor {
     final priority = _inferPriority(options);
     final maxConcurrent = RequestSchedulerConfig.maxConcurrent;
 
+    // 后台请求先给前台让路、遵守限流退避（见 BackgroundGate）；在入队前等，
+    // 不占并发槽位。前台请求只记一笔时间。
+    if (priority == _Priority.low) {
+      await BackgroundGate.instance.waitForTurn(
+        cancelToken: options.cancelToken,
+      );
+    } else {
+      BackgroundGate.instance.markForeground();
+    }
+
     // cancelToken 已取消，直接拒绝
     if (options.cancelToken?.isCancelled ?? false) {
       handler.reject(
@@ -303,8 +317,24 @@ class RequestSchedulerInterceptor extends Interceptor {
     if (err.requestOptions.extra.remove('_schedulerCounted') == true) {
       _release(err.requestOptions);
     }
+    _reportRateLimit(err);
     handler.next(err);
   }
+
+  /// 主站的真限流 429 让所有后台请求一起退避。本拦截器在恢复层之前，
+  /// 静默请求的原始 429 也看得到；CF 挑战型 429 归过盾流程，不算。
+  static void _reportRateLimit(DioException err) {
+    final response = err.response;
+    if (response?.statusCode != 429) return;
+    if (err.requestOptions.uri.host.toLowerCase() != _mainHost) return;
+    if (CfChallengeClassifier.isChallengeResponse(response)) return;
+    final seconds = extractRetryAfterSeconds(response);
+    BackgroundGate.instance.reportRateLimited(
+      retryAfter: seconds == null ? null : Duration(seconds: seconds),
+    );
+  }
+
+  static String get _mainHost => Uri.parse(AppConstants.baseUrl).host;
 
   void _release(RequestOptions options) {
     final state = _stateFor(options);

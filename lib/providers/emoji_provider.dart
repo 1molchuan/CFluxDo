@@ -40,7 +40,7 @@ final emojiGroupsProvider =
       yield snapshotGroups;
       // 后台刷新:失败静默(快照已在展示,不打扰)。
       try {
-        final fresh = await service.getEmojisRaw();
+        final fresh = await service.getEmojisRaw(background: true);
         final freshJson = jsonEncode(fresh);
         if (freshJson != snapshotJson) {
           await _EmojiSnapshotStore.save(freshJson);

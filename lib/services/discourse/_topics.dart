@@ -656,8 +656,19 @@ mixin _TopicsMixin on _DiscourseServiceBase {
   /// 获取话题主贴的 HTML 内容
   /// 走 posts#by_number 单帖接口(只回一帖 JSON),
   /// 比 /t/:id/1.json 的 TopicView(20 楼 chunk + 话题详情)轻量得多
-  Future<String?> getTopicFirstPostCooked(int topicId) async {
-    final response = await _dio.get('/posts/by_number/$topicId/1.json');
+  ///
+  /// [background]：列表摘要预取（低优先级、不触发过盾，失败由调用方冷却后再取）；
+  /// 长按预览是用户在等，照常发。
+  Future<String?> getTopicFirstPostCooked(
+    int topicId, {
+    bool background = false,
+  }) async {
+    final response = await _dio.get(
+      '/posts/by_number/$topicId/1.json',
+      options: background
+          ? Options(extra: const {'isSilent': true})
+          : null,
+    );
     return (response.data as Map<String, dynamic>)['cooked'] as String?;
   }
 }

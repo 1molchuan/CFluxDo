@@ -84,6 +84,7 @@ class _TopicExpandableExcerptState
         fallbackImageUrl: topic.imageUrl,
         service: ref.read(discourseServiceProvider),
         allowFetch: true,
+        stillWanted: () => mounted && generation == _loadGeneration,
       );
       if (mounted && generation == _loadGeneration && data != null) {
         setState(() => _excerptData = data);

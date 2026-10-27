@@ -3,13 +3,14 @@ import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fluxdo/services/discourse/discourse_service.dart';
 import 'package:fluxdo/services/topic_excerpt_service.dart';
+import 'package:fluxdo/utils/scroll_busy_signal.dart';
 
 class _Discourse extends Fake implements DiscourseService {
   int calls = 0;
   Future<String?> Function(int)? loader;
 
   @override
-  Future<String?> getTopicFirstPostCooked(int id) {
+  Future<String?> getTopicFirstPostCooked(int id, {bool background = false}) {
     calls++;
     return loader?.call(id) ??
         Future.value('<p>完整首楼内容</p><img src="/uploads/photo.jpg">');
@@ -22,6 +23,7 @@ void main() {
   setUp(() {
     excerpts.clear();
     api = _Discourse();
+    ScrollBusySignal.resetForTest();
   });
 
   test('隐藏文字、隐藏图片及嵌套引用不会出现在摘要里', () {
@@ -186,5 +188,59 @@ void main() {
     await Future.wait(requests);
     expect(api.calls, 6);
     expect(peak, 4);
+  });
+
+  test('列表在滚动时先不发预取，停下 400ms 后再发', () async {
+    ScrollBusySignal.touch();
+    final pending = excerpts.getOrFetchExcerpt(
+      1,
+      service: api,
+      allowFetch: true,
+    );
+    await Future<void>.delayed(const Duration(milliseconds: 150));
+    expect(api.calls, 0);
+    final data = await pending;
+    expect(api.calls, 1);
+    expect(data?.text, contains('完整首楼内容'));
+  });
+
+  test('等滚动停下期间卡片已经划走：不发请求，也不记失败', () async {
+    ScrollBusySignal.touch();
+    var wanted = true;
+    final pending = excerpts.getOrFetchExcerpt(
+      1,
+      service: api,
+      allowFetch: true,
+      stillWanted: () => wanted,
+    );
+    wanted = false;
+    expect(await pending, isNull);
+    expect(api.calls, 0);
+    // 回来再看时照常取（没有进 15 秒失败冷却）
+    final again = await excerpts.getOrFetchExcerpt(
+      1,
+      service: api,
+      allowFetch: true,
+    );
+    expect(api.calls, 1);
+    expect(again?.text, contains('完整首楼内容'));
+  });
+
+  test('同一话题有别的卡片还要，就照发', () async {
+    ScrollBusySignal.touch();
+    final gone = excerpts.getOrFetchExcerpt(
+      1,
+      service: api,
+      allowFetch: true,
+      stillWanted: () => false,
+    );
+    final kept = excerpts.getOrFetchExcerpt(
+      1,
+      service: api,
+      allowFetch: true,
+      stillWanted: () => true,
+    );
+    await Future.wait([gone, kept]);
+    expect(api.calls, 1);
   });
 }

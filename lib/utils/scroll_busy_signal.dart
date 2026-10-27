@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart';
+
 /// 全局滚动繁忙信号:近期是否有列表在滚动。
 ///
 /// 由 app 根部的 NotificationListener 喂入(见 main.dart 的
@@ -20,4 +22,28 @@ class ScrollBusySignal {
 
   static bool get isBusy =>
       DateTime.now().difference(_lastScrollAt) < _busyWindow;
+
+  /// 滚动是否已经停了至少 [idle]
+  static bool isIdleFor(Duration idle) =>
+      DateTime.now().difference(_lastScrollAt) >= idle;
+
+  /// 等到滚动已经停了 [idle] 再返回；一直在滚最多等 [maxWait]。
+  /// 给预取类后台请求用：快速划过的卡片不在滚动中逐个发请求。
+  static Future<void> waitIdle(
+    Duration idle, {
+    Duration maxWait = const Duration(seconds: 8),
+  }) async {
+    final start = DateTime.now();
+    while (true) {
+      final now = DateTime.now();
+      final left = idle - now.difference(_lastScrollAt);
+      final budget = maxWait - now.difference(start);
+      if (left <= Duration.zero || budget <= Duration.zero) return;
+      await Future<void>.delayed(left < budget ? left : budget);
+    }
+  }
+
+  @visibleForTesting
+  static void resetForTest() =>
+      _lastScrollAt = DateTime.fromMillisecondsSinceEpoch(0);
 }

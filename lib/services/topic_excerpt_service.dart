@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:html/dom.dart' as dom;
 import 'package:html/parser.dart' as html;
 
+import '../utils/scroll_busy_signal.dart';
 import '../utils/url_helper.dart';
 import 'discourse/discourse_service.dart';
 import 'topic_preview_preloader.dart';
@@ -32,12 +33,18 @@ class TopicExcerptService {
   /// 在途异步拉取任务，避免同一话题并发重复请求
   final Map<int, Future<TopicExcerptData?>> _inFlight = {};
 
+  /// 在途预取的等候方（null = 一定要）：网络请求发出前只要还有一个要，就照发
+  final Map<int, List<bool Function()?>> _wanters = {};
+
   /// 记录加载失败的话题 ID（15 秒内不重试，避免网络错误时死循环拉取）
   final Map<int, DateTime> _failedCooldown = {};
   static const Duration _failedCooldownDuration = Duration(seconds: 15);
 
   /// 最大并发网络请求数
   static const int _maxConcurrent = 4;
+
+  /// 预取前要求列表已停止滚动这么久
+  static const Duration _scrollIdleBeforeFetch = Duration(milliseconds: 400);
   int _currentRunning = 0;
   final List<Future<void> Function()> _pendingQueue = [];
 
@@ -190,6 +197,7 @@ class TopicExcerptService {
     String? fallbackImageUrl,
     DiscourseService? service,
     bool allowFetch = false,
+    bool Function()? stillWanted,
   }) async {
     final cached = _cache[topicId];
     TopicExcerptData? withFallback(TopicExcerptData? data) => _withListData(
@@ -217,18 +225,32 @@ class TopicExcerptService {
 
     // 优先复用正在进行的网络任务
     if (_inFlight.containsKey(topicId)) {
+      _wanters[topicId]?.add(stillWanted);
       return withFallback(await _inFlight[topicId]);
     }
 
     final completer = Completer<TopicExcerptData?>();
     _inFlight[topicId] = completer.future;
+    _wanters[topicId] = [stillWanted];
 
     _scheduleFetch(() async {
       try {
-        // 先检查是否有在途的预加载任务
+        // 长按预览已经在取的直接用；否则这是预取：等列表停下再发，
+        // 快速划过、已经不在屏上的卡片就不发了（不记失败，回来再取）
+        var preloaded = TopicPreviewPreloader.take(topicId);
+        if (preloaded == null &&
+            !ScrollBusySignal.isIdleFor(_scrollIdleBeforeFetch)) {
+          await ScrollBusySignal.waitIdle(_scrollIdleBeforeFetch);
+          final wanters = _wanters[topicId] ?? const [];
+          if (!wanters.any((wanted) => wanted == null || wanted())) {
+            completer.complete(null);
+            return;
+          }
+          preloaded = TopicPreviewPreloader.take(topicId);
+        }
         String? cooked =
-            await (TopicPreviewPreloader.take(topicId) ??
-                service.getTopicFirstPostCooked(topicId));
+            await (preloaded ??
+                service.getTopicFirstPostCooked(topicId, background: true));
 
         if (cooked != null && cooked.isNotEmpty) {
           final cleaned = cleanExcerpt(cooked);
@@ -248,6 +270,7 @@ class TopicExcerptService {
         completer.complete(null);
       } finally {
         _inFlight.remove(topicId);
+        _wanters.remove(topicId);
       }
     });
 
@@ -288,6 +311,7 @@ class TopicExcerptService {
   void clear() {
     _cache.clear();
     _inFlight.clear();
+    _wanters.clear();
     _failedCooldown.clear();
   }
 }
