@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:collection' show UnmodifiableListView;
 import 'dart:io' as io;
 import 'dart:math' as math;
@@ -1013,6 +1014,16 @@ class _CfChallengePageState extends State<CfChallengePage> {
   Timer? _pageReadyFallbackTimer;
   Timer? _sitekeyDiscoveryTimer;
 
+  /// 站点自己的 Turnstile（预授权）在本页的辅助状态，见 [_injectPreclearanceAssist]。
+  _PreclearanceAssist _preclearance = _PreclearanceAssist.none;
+
+  /// 本页已注入辅助的次数（挑战页重载会重来，最多 [_maxPreclearanceInjections] 次）。
+  int _preclearanceInjections = 0;
+  static const _maxPreclearanceInjections = 2;
+
+  /// 辅助还在跑时，后台静默预算多给这么久再弹到前台。
+  static const _preclearanceGraceExtension = 8;
+
   /// 后台验证的「正在自动验证」胶囊是否已露出。多数非交互挑战一两秒就过，
   /// 这时不打扰用户；过了 [_backgroundPillDelay] 还在验证才显示。
   bool _pillVisible = false;
@@ -1033,7 +1044,8 @@ class _CfChallengePageState extends State<CfChallengePage> {
   final Set<String> _initialCfClearances = {};
 
   int get _activeMaxCheckCount => _isBackground
-      ? (widget.foregroundAfter?.inSeconds ?? _backgroundMaxCheckCount)
+      ? (widget.foregroundAfter?.inSeconds ?? _backgroundMaxCheckCount) +
+            (_preclearance.running ? _preclearanceGraceExtension : 0)
       : _foregroundMaxCheckCount;
 
   @override
@@ -2397,11 +2409,14 @@ class _CfChallengePageState extends State<CfChallengePage> {
 
     _injectChallengeInterceptor(controller);
     unawaited(_discoverSitekeyFromDom(controller, generation));
+    unawaited(_injectPreclearanceAssist(controller, generation));
     // 动态插入的普通 Turnstile widget 可能晚于 commit 出现。只补探一次，
     // 不挂常驻轮询、不监听 challenge iframe 的临时配置。
     _sitekeyDiscoveryTimer?.cancel();
     _sitekeyDiscoveryTimer = Timer(const Duration(seconds: 2), () {
       unawaited(_discoverSitekeyFromDom(controller, generation));
+      // 挑战页的标记可能晚于 commit 出现：辅助脚本幂等，再试一次
+      unawaited(_injectPreclearanceAssist(controller, generation));
     });
     _startTimeout();
     _startChallengeRevealProbe(controller, generation);
@@ -2427,6 +2442,140 @@ class _CfChallengePageState extends State<CfChallengePage> {
     } catch (e) {
       debugPrint('[CfChallenge] 发现 Turnstile 配置失败: $e');
     }
+  }
+
+  /// 挑战页上加载站点**自己公开嵌入的** Turnstile（与 [CfClearanceRefreshService]
+  /// 续期用的是同一个 sitekey、同一种预授权）。
+  ///
+  /// 2026-10-27 模拟器实测（Mac 出口，cf_clearance 失效）：Managed Challenge
+  /// 要求点勾选框，同一页面里这个 widget 6～13 秒静默签出 cf_clearance（575 字符，
+  /// 原生链路认；clearance 失效和完全没有两种情况都过了），验证轮次照常经轮询定稿，
+  /// 用户什么都没点。它要互动时
+  /// （before-interactive）立刻移除，只留页面自己的挑战给用户，绝不替用户点。
+  /// 只在本站有缓存的公开配置时做；IDC Flare 这类没有的站点照旧。
+  Future<void> _injectPreclearanceAssist(
+    InAppWebViewController controller,
+    int generation,
+  ) async {
+    bool valid() =>
+        mounted && !_hasPopped && !_handedOff && generation == _loadGeneration;
+    if (!valid()) return;
+    if (_preclearanceInjections >= _maxPreclearanceInjections) return;
+    // 冷启动撞盾时配置可能还没从缓存读出来
+    await CfClearanceRefreshService().ensureConfigurationLoaded();
+    if (!valid()) return;
+    final sitekey = CfClearanceRefreshService().sitekey;
+    if (sitekey == null || sitekey.isEmpty) return;
+    final pageHost = (await controller.getUrl())?.host.toLowerCase();
+    if (!valid() || pageHost != Uri.parse(AppConstants.baseUrl).host) return;
+    try {
+      final result = await controller
+          .evaluateJavascript(source: _preclearanceAssistScript(sitekey))
+          .timeout(const Duration(seconds: 2));
+      if (!valid()) return;
+      if (result == 'loading' || result == 'rendered') {
+        _preclearanceInjections++;
+        setState(() => _preclearance = _PreclearanceAssist.pending);
+        CfChallengeLogger.log(
+          '[PRECLEARANCE] site Turnstile assist injected ($result, '
+          'attempt $_preclearanceInjections)',
+        );
+      }
+    } catch (e) {
+      debugPrint('[CfChallenge] 注入预授权辅助失败: $e');
+    }
+  }
+
+  void _onPreclearanceEvent(List<dynamic> args) {
+    if (!mounted || _hasPopped || _handedOff) return;
+    final data = args.isNotEmpty && args.first is Map
+        ? (args.first as Map).cast<String, dynamic>()
+        : const <String, dynamic>{};
+    final event = data['event']?.toString() ?? 'unknown';
+    switch (event) {
+      case 'rendered':
+        setState(() => _preclearance = _PreclearanceAssist.rendered);
+      case 'token':
+        CfChallengeLogger.log(
+          '[PRECLEARANCE] site Turnstile token (len=${data['length']})',
+        );
+        setState(() => _preclearance = _PreclearanceAssist.token);
+        // 预授权的 cf_clearance 由这次 token 一并签出：按完成迹象定稿
+        // （1.5 秒稳定），不必按「无迹象」等 6 秒
+        widget.signals.completionHint('site turnstile preclearance token');
+      case 'interactive':
+      case 'error':
+        CfChallengeLogger.log(
+          '[PRECLEARANCE] site Turnstile assist stopped: $event'
+          '${data['error'] == null ? '' : ' (${data['error']})'}',
+        );
+        setState(() => _preclearance = _PreclearanceAssist.stopped);
+    }
+  }
+
+  /// 幂等：同一文档只装一次；不是挑战页（没有 `_cf_chl_opt` / 挑战表单）不装。
+  static String _preclearanceAssistScript(String sitekey) {
+    final encodedSitekey = jsonEncode(sitekey);
+    return '''
+(function(sitekey) {
+  try {
+    if (window.__fluxdoPreclearance) return 'already';
+    var isChallenge = typeof window._cf_chl_opt !== 'undefined' ||
+      !!document.querySelector('#challenge-form, #challenge-running, #challenge-stage');
+    if (!isChallenge) return 'not_challenge';
+    window.__fluxdoPreclearance = true;
+    function report(event, extra) {
+      var payload = extra || {};
+      payload.event = event;
+      try { window.flutter_inappwebview.callHandler('onCfPreclearance', payload); } catch (_) {}
+    }
+    var box = document.createElement('div');
+    box.id = '__fluxdo_preclearance';
+    box.setAttribute('aria-hidden', 'true');
+    box.style.cssText = 'position:fixed;left:0;bottom:0;width:300px;height:65px;overflow:hidden;';
+    (document.body || document.documentElement).appendChild(box);
+    var widgetId = null;
+    function stop() {
+      try { if (widgetId !== null) window.turnstile.remove(widgetId); } catch (_) {}
+      try { box.remove(); } catch (_) {}
+    }
+    function render() {
+      if (!window.turnstile || typeof window.turnstile.render !== 'function') {
+        report('error', { error: 'turnstile api missing' });
+        stop();
+        return;
+      }
+      try {
+        widgetId = window.turnstile.render(box, {
+          sitekey: sitekey,
+          appearance: 'interaction-only',
+          callback: function(token) { report('token', { length: token ? token.length : 0 }); },
+          'before-interactive-callback': function() { report('interactive'); stop(); },
+          'error-callback': function(error) { report('error', { error: String(error || 'unknown') }); stop(); return true; },
+          'unsupported-callback': function() { report('error', { error: 'unsupported' }); stop(); }
+        });
+        report('rendered');
+      } catch (e) {
+        report('error', { error: String(e && e.message ? e.message : e) });
+        stop();
+      }
+    }
+    if (window.turnstile && typeof window.turnstile.render === 'function') {
+      render();
+      return 'rendered';
+    }
+    var script = document.createElement('script');
+    script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
+    script.async = true;
+    script.onload = render;
+    script.onerror = function() { report('error', { error: 'api load failed' }); stop(); };
+    (document.head || document.documentElement).appendChild(script);
+    return 'loading';
+  } catch (e) {
+    return 'error';
+  }
+})($encodedSitekey);
+''';
   }
 
   /// 页面就绪后立刻探一次内容
@@ -2536,6 +2685,10 @@ class _CfChallengePageState extends State<CfChallengePage> {
               handlerName: 'onChallengeNavigation',
               callback: _onChallengeNavigation,
             );
+            controller.addJavaScriptHandler(
+              handlerName: 'onCfPreclearance',
+              callback: _onPreclearanceEvent,
+            );
           },
           onLoadStart: (controller, url) {
             if (_hasPopped || _handedOff) return;
@@ -2546,6 +2699,8 @@ class _CfChallengePageState extends State<CfChallengePage> {
             _loadStopFallbackTimer?.cancel();
             _pageReadyFallbackTimer?.cancel();
             _hasMarkedPageReady = false;
+            // 新文档里原来的辅助 widget 已随旧 JS 上下文没了
+            _preclearance = _PreclearanceAssist.none;
             // 新一次导航重新起算预算：只清 _hasTimedOut 不清计数，旧计时器
             // 下一拍会立刻再记一次超时（2026-10-12 实测两条 FAILED 相隔 3 秒）。
             _hasTimedOut = false;
@@ -3358,4 +3513,16 @@ class _BouncingDots extends StatelessWidget {
       ],
     );
   }
+}
+
+/// 挑战页上站点 Turnstile 预授权辅助的状态。
+enum _PreclearanceAssist {
+  none,
+  pending,
+  rendered,
+  token,
+  stopped;
+
+  /// 还可能静默签出 cf_clearance（后台预算据此多等一会儿）。
+  bool get running => this == pending || this == rendered || this == token;
 }
