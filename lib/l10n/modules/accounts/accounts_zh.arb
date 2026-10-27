@@ -50,5 +50,7 @@
       }
     }
   },
-  "accounts_busy": "正在人机验证或切换中，请稍后再试"
+  "accounts_busy": "正在人机验证或切换中，请稍后再试",
+  "accounts_switchedUnverified": "已切换到 {name}，网络不稳，暂时没能向网站确认登录状态",
+  "@accounts_switchedUnverified": {"placeholders": {"name": {"type": "String"}}}
 }

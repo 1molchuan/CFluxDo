@@ -23,10 +23,15 @@ import '../site_context.dart';
 import '../site_data_lifecycle.dart';
 import '../user_api_key_service.dart';
 import 'account_store.dart';
+import 'account_verification.dart';
 
 enum AccountSwitchOutcome {
   /// 已切到目标账号
   switched,
+
+  /// 已切到目标账号，但网络不稳没能向服务端确认（之后由正常的登录态检查
+  /// 接着确认，确实失效才会按登录过期处理）
+  switchedUnverified,
 
   /// 目标账号登录已失效（已标记要重新登录），回到了原来的账号
   targetInvalidRestored,
@@ -41,6 +46,9 @@ enum AccountSwitchOutcome {
   busy,
 }
 
+/// 写入一个账号凭据后的核对结论（见 [AccountSwitcher._attach]）
+enum _Attach { confirmed, unverified, invalid }
+
 /// 多账号切换。
 ///
 /// 切换 = 本地退出当前账号（不调服务端登出，它的会话照样有效）+ 用目标账号
@@ -50,10 +58,11 @@ enum AccountSwitchOutcome {
 /// 2. 走本地登出（会话代推进、在途请求作废、MessageBus 停、jar / WebView 的
 ///    登录 cookie 清掉，cf_clearance 保留并推回 WebView），清掉上一个账号的
 ///    界面状态；
-/// 3. 把目标账号的 cookie 写进 jar 与 WebView，按登录收口的同一条路采纳
-///    `_t`，重新拉首页预加载数据，**确认服务端认的确实是目标账号**才广播
-///    登录成功；不认（登录过期 / 在别处退出）就标记要重新登录、按同样步骤
-///    切回原账号。
+/// 3. 把目标账号的 cookie 写进 jar（以它为准）再推给 WebView，重新拉首页
+///    预加载数据，**核对服务端认的是不是目标账号**（见
+///    [verifySwitchedAccount]）：是就广播登录成功；服务端明确不认（登录
+///    过期 / 在别处退出）才标记要重新登录、按同样步骤切回原账号；网络不稳
+///    问不到结论时留在目标账号，交给正常的登录态检查。
 ///
 /// 全程不碰 cf_clearance（设备 / 出口级），也不调任何登出 API。
 class AccountSwitcher {
@@ -76,6 +85,7 @@ class AccountSwitcher {
   Future<SavedAccount?> saveCurrent() async {
     final user = _service.currentUserNotifier.value;
     if (user == null) return null;
+    final generation = AuthSession().generation;
     try {
       await SessionTokenAuthority.instance.reconcile(
         reason: 'account_snapshot',
@@ -84,6 +94,12 @@ class AccountSwitcher {
       debugPrint('[AccountSwitcher] 快照前对账失败（继续用 jar 里的值）: $e');
     }
     final cookies = await _jar.exportAccountCookies();
+    // 对账期间已经切走 / 登出（面板打开时的快照慢于切换）：jar 里可能已是
+    // 别的账号，存进来会把这个账号的凭据换成别人的
+    if (!AuthSession().isValid(generation) ||
+        _service.currentUserNotifier.value?.id != user.id) {
+      return null;
+    }
     if (!cookies.any((cookie) => cookie.name == '_t')) return null;
     final account = SavedAccount(
       userId: user.id,
@@ -121,10 +137,13 @@ class AccountSwitcher {
       _log('account_switch_begin', target: target, previous: previous);
 
       await _detach(container, previous: previous);
-      if (await _attach(target, targetCookies)) {
+      final attached = await _attach(target, targetCookies);
+      if (attached != _Attach.invalid) {
         await store.markNeedsLogin(target.userId, needsLogin: false);
         _log('account_switch_done', target: target, previous: previous);
-        return AccountSwitchOutcome.switched;
+        return attached == _Attach.confirmed
+            ? AccountSwitchOutcome.switched
+            : AccountSwitchOutcome.switchedUnverified;
       }
 
       await store.markNeedsLogin(target.userId, needsLogin: true);
@@ -132,7 +151,7 @@ class AccountSwitcher {
       await _detach(container);
       if (previous != null &&
           previousCookies != null &&
-          await _attach(previous, previousCookies)) {
+          await _attach(previous, previousCookies) != _Attach.invalid) {
         return AccountSwitchOutcome.targetInvalidRestored;
       }
       _log('account_switch_restore_failed', target: target, previous: previous);
@@ -187,7 +206,7 @@ class AccountSwitcher {
     try {
       // 登录页里可能留下了半截会话：先按切换的方式清一遍
       await _detach(container);
-      return await _attach(previous, cookies);
+      return await _attach(previous, cookies) != _Attach.invalid;
     } finally {
       _busy = false;
     }
@@ -250,12 +269,19 @@ class AccountSwitcher {
       ..clearLiveImages();
   }
 
-  /// 用 [cookies] 登录 [account]，服务端确认是这个账号才广播登录成功。
-  Future<bool> _attach(
+  /// 用 [cookies] 登录 [account]。服务端确认是这个账号、或网络不稳问不到
+  /// 结论时广播登录成功；服务端明确不认时什么都不广播，返回
+  /// [_Attach.invalid]。
+  Future<_Attach> _attach(
     SavedAccount account,
     List<CanonicalCookie> cookies,
   ) async {
+    // 先推进会话代再写 cookie：本地登出后按游客身份发出的请求就此作废，
+    // 它们的响应不会落在目标账号的 cookie 之后
+    AuthSession().advance();
     await _jar.replaceAccountCookies(cookies);
+    final token = await _jar.getTToken() ?? '';
+    if (token.isEmpty) return _Attach.invalid;
     for (final cookie in cookies) {
       await WebViewCookiePush.instance.push(
         name: cookie.name,
@@ -266,19 +292,12 @@ class AccountSwitcher {
         clearVariantsFirst: true,
       );
     }
-    final generation = AuthSession().advance();
-    final adopted = await SessionTokenAuthority.instance.adoptLoginToken(
-      reason: 'account_switch',
-      generation: generation,
-    );
-    final token = await _jar.getTToken() ?? '';
-    if (token.isEmpty) return false;
-    if (!adopted) {
-      // WebView 没写进去时 jar 里的值仍可用，对账会再推一次
-      SessionTokenAuthority.instance
-        ..resetLineage()
-        ..markAgreed(token);
-    }
+    // 存下的凭据是唯一来源：WebView 只跟着写，不反过来采纳它的值（它若
+    // 残留了别的值，采纳进 jar 就把存好的凭据冲掉了）。没推进去的由对账
+    // 再推一次。
+    SessionTokenAuthority.instance
+      ..resetLineage()
+      ..markAgreed(token);
 
     await _service.saveUsername(account.username);
     _service.setToken(token);
@@ -291,19 +310,36 @@ class AccountSwitcher {
     } catch (e) {
       debugPrint('[AccountSwitcher] 预加载失败: $e');
     }
-    final user = PreloadedDataService().currentUserSync;
-    final userId = (user?['id'] as num?)?.toInt();
-    if (userId != account.userId) {
-      _log(
-        'account_switch_verify_failed',
-        target: account,
-        extra: {'preloadedUser': user == null ? 'none' : 'other'},
-      );
-      return false;
+    final preloaded = PreloadedDataService().currentUserSync;
+    final result = await verifySwitchedAccount(
+      userId: account.userId,
+      preloadedUser: preloaded,
+      probe: () => _service.probeCurrentSession(source: 'account_switch'),
+    );
+    // 核对请求可能刚轮换过 `_t`：广播用 jar 里最新的
+    final liveToken = await _jar.getTToken();
+    final current = liveToken == null || liveToken.isEmpty ? token : liveToken;
+    switch (result.check) {
+      case AccountCheck.confirmed:
+        _service.currentUserNotifier.value = User.fromJson(result.user!);
+        _service.onLoginSuccess(current, forceBrowserSessionSync: true);
+        return _Attach.confirmed;
+      case AccountCheck.unknown:
+        _log('account_switch_unverified', target: account);
+        _service.onLoginSuccess(current, forceBrowserSessionSync: true);
+        return _Attach.unverified;
+      case AccountCheck.wrongAccount:
+      case AccountCheck.rejected:
+        _log(
+          'account_switch_verify_failed',
+          target: account,
+          extra: {
+            'check': result.check.name,
+            'preloadedUser': preloaded == null ? 'none' : 'other',
+          },
+        );
+        return _Attach.invalid;
     }
-    _service.currentUserNotifier.value = User.fromJson(user!);
-    _service.onLoginSuccess(token, forceBrowserSessionSync: true);
-    return true;
   }
 
   Future<void> _clearWebViewAccountCookies() async {

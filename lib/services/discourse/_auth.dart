@@ -478,6 +478,12 @@ mixin _AuthMixin on _DiscourseServiceBase {
     }
   }
 
+  /// 用 jar 里的会话问一次服务端当前是谁（多账号切换核对身份）。
+  /// 不走恢复链、不计 strike；结论口径同 [_probeJarSession]。
+  Future<SessionTokenProbeResult> probeCurrentSession({
+    required String source,
+  }) => _probeJarSession(source: source);
+
   /// 2xx 响应里服务端静默删 `_t` 的指令被拦下（jar 不动），由
   /// [SessionTokenAuthority] 转来：当强信号交给 probe。恢复链会依次试
   /// WebView 候选、上一枚值、User API Key，都不行才登出并留下日志；若只是

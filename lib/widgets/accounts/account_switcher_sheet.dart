@@ -54,12 +54,10 @@ class _AccountSwitcherSheetState extends ConsumerState<AccountSwitcherSheet> {
     if (mounted) ref.invalidate(savedAccountsProvider);
   }
 
-  /// 关掉面板、回到首页再切：切换会清掉上一个账号的页面状态
+  /// 关掉面板、回到首页再切：切换会清掉上一个账号的页面状态。
+  /// 标了「要重新登录」的账号也先用存下的凭据试一次（以前切换时网络一抖
+  /// 就会误标），服务端确实不认再打开登录页。
   Future<void> _switchTo(SavedAccount account) async {
-    if (account.needsLogin) {
-      await _addAccount();
-      return;
-    }
     final container = ProviderScope.containerOf(context, listen: false);
     final navigator = Navigator.of(context, rootNavigator: true);
     navigator.popUntil((route) => route.isFirst);
@@ -77,9 +75,20 @@ class _AccountSwitcherSheetState extends ConsumerState<AccountSwitcherSheet> {
       loading.hide();
     }
     AppStateRefresher.refreshAll(container);
+    if (account.needsLogin &&
+        (outcome == AccountSwitchOutcome.targetInvalidRestored ||
+            outcome == AccountSwitchOutcome.targetNeedsLogin ||
+            outcome == AccountSwitchOutcome.loggedOut)) {
+      if (navigator.mounted) await _addAccount(container, navigator);
+      return;
+    }
     switch (outcome) {
       case AccountSwitchOutcome.switched:
         ToastService.showSuccess(S.current.accounts_switched(account.username));
+      case AccountSwitchOutcome.switchedUnverified:
+        ToastService.showInfo(
+          S.current.accounts_switchedUnverified(account.username),
+        );
       case AccountSwitchOutcome.targetInvalidRestored:
         ToastService.showError(
           S.current.accounts_targetInvalid(account.username),
@@ -93,9 +102,17 @@ class _AccountSwitcherSheetState extends ConsumerState<AccountSwitcherSheet> {
     }
   }
 
-  Future<void> _addAccount() async {
+  void _onAddAccount() {
     final container = ProviderScope.containerOf(context, listen: false);
     final navigator = Navigator.of(context, rootNavigator: true);
+    _addAccount(container, navigator);
+  }
+
+  /// 面板可能已经关了：容器和导航器由调用方先取好
+  static Future<void> _addAccount(
+    ProviderContainer container,
+    NavigatorState navigator,
+  ) async {
     navigator.popUntil((route) => route.isFirst);
     SavedAccount? previous;
     try {
@@ -203,7 +220,7 @@ class _AccountSwitcherSheetState extends ConsumerState<AccountSwitcherSheet> {
                 ),
               ),
               title: Text(S.current.accounts_addAccount),
-              onTap: _addAccount,
+              onTap: _onAddAccount,
             ),
           ],
         ),
