@@ -34,10 +34,12 @@ mixin TopicListUpdatesMixin<T extends ConsumerStatefulWidget>
   ValueListenable<TickerModeData>? _tickerMode;
   AppLifecycleListener? _lifecycleListener;
 
-  /// 提示条点开前先在后台把这一批取好：新事件攒一会儿再取，两次至少隔
-  /// 这么久；取好的超过 [_prefetchMaxAge] 或期间又来了新事件就不用
-  static const _prefetchDelay = Duration(seconds: 3);
-  static const _prefetchMinInterval = Duration(seconds: 20);
+  /// 提示条点开前先在后台把这一批取好：新事件停了 [_prefetchQuiet] 才取
+  /// （事件一直在来的热闹列表上取了也白取——点开时期间又有新事件，照样要
+  /// 请求），两次至少隔 [_prefetchMinInterval]；取好的超过
+  /// [_prefetchMaxAge] 或期间又来了新事件就不用
+  static const _prefetchQuiet = Duration(seconds: 5);
+  static const _prefetchMinInterval = Duration(seconds: 30);
   static const _prefetchMaxAge = Duration(seconds: 60);
   static const _prefetchExcerptLimit = 10;
 
@@ -157,8 +159,9 @@ mixin TopicListUpdatesMixin<T extends ConsumerStatefulWidget>
   }
 
   void _schedulePrefetch() {
-    if (_prefetchTimer?.isActive ?? false) return;
-    var wait = _prefetchDelay;
+    // 防抖：每来一个事件就重新计时
+    _prefetchTimer?.cancel();
+    var wait = _prefetchQuiet;
     final last = _lastPrefetchAt;
     if (last != null) {
       final remaining = _prefetchMinInterval - DateTime.now().difference(last);

@@ -224,9 +224,14 @@ void main() {
     await tester.pump();
     expect(requests, isEmpty, reason: '先攒一会儿再取');
     await tester.pump(const Duration(seconds: 3));
+    publish(3);
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 3));
+    expect(requests, isEmpty, reason: '事件还在来：重新计时');
+    await tester.pump(const Duration(seconds: 2));
     await tester.pump();
     expect(requests, hasLength(1));
-    expect(requests.single.ids, [1, 2]);
+    expect(requests.single.ids, [1, 2, 3]);
     expect(requests.single.background, isTrue);
 
     final state = tester.state<_HostState>(find.byType(_Host));
@@ -235,7 +240,7 @@ void main() {
     expect(usedPrefetch, [true]);
     expect(requests, hasLength(1), reason: '点开不再请求');
     expect(applied, [
-      [1, 2],
+      [1, 2, 3],
     ]);
   });
 
@@ -243,7 +248,7 @@ void main() {
     await pumpHost(tester, enabled: false);
     publish(1);
     await tester.pump();
-    await tester.pump(const Duration(seconds: 3));
+    await tester.pump(const Duration(seconds: 5));
     await tester.pump();
     expect(requests, hasLength(1));
     publish(2);
