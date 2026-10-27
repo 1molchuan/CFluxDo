@@ -20,6 +20,7 @@ import 'package:fluxdo/models/topic.dart';
 import 'package:fluxdo/providers/theme_provider.dart'
     show sharedPreferencesProvider;
 import 'package:fluxdo/services/local_notification_service.dart';
+import 'package:fluxdo/widgets/content/discourse_html_content/lazy_image.dart';
 import 'package:fluxdo/widgets/post/post_item/post_item.dart';
 import 'package:fluxdo/widgets/post/post_item/post_render_prep.dart';
 import 'package:fluxdo/widgets/post/post_item/render_parse_cache.dart';
@@ -267,7 +268,8 @@ void main() {
           plan,
           cursor,
           budget,
-          paragraphWarmer: () => PostRenderPrep.probeParagraphWarmer(context),
+          paragraphWarmer: () =>
+              PostRenderPrep.probeParagraphWarmer(context, plan.callbacks),
         );
         expect(outcome, isNot(PostWarmOutcome.probeMissing));
         if (outcome == PostWarmOutcome.done) return;
@@ -283,6 +285,25 @@ void main() {
       final misses = FlattenCache.misses;
       await tester.pumpWidget(_host(prefs, PostItem(post: post, topicId: 1)));
       expect(FlattenCache.misses - misses, 0);
+      // 命中的产物带的是挂载那组 handler:图片走主项目的 LazyImage(网关 +
+      // 磁盘缓存),不是子包兜底的 Image.network
+      expect(find.byType(LazyImage), findsNWidgets(2));
+    });
+
+    testWidgets('对照:预热不传 handler,挂载命中后图片落到子包兜底', (tester) async {
+      await convergeProbe(tester);
+      final post = _imagePost();
+      final unit = PostRenderPrep.planFor(post, topicId: 1).unitAt(0);
+      ParagraphWarmup.warmParagraphs(
+        nodes: unit.nodes,
+        ctx: ParagraphWarmupProbe.snapshot()!,
+        context: tester.element(find.byType(Scaffold)),
+        totalImagesInPost: unit.totalImagesInPost,
+        budgetMicros: 1 << 40,
+      );
+
+      await tester.pumpWidget(_host(prefs, PostItem(post: post, topicId: 1)));
+      expect(find.byType(LazyImage), findsNothing);
     });
 
     testWidgets('长帖各 chunk', (tester) async {

@@ -2,6 +2,7 @@ import 'package:flutter/widgets.dart';
 import 'package:fluxdo_render/fluxdo_render.dart';
 
 import '../../../models/topic.dart';
+import '../../../utils/fluxdo_render_callbacks.dart';
 import '../small_action_item.dart' show PostTypes;
 import 'render_parse_cache.dart';
 import 'segmented_long_post.dart';
@@ -43,7 +44,7 @@ abstract final class PostRenderPrep {
   /// 楼层的渲染计划:形态判定 + 长帖分块数据(切分 eager、单块解析 lazy,
   /// 解析状态在 [RenderParseCache] 全局 LRU)。
   ///
-  /// [topicId] / [onQuoteImage] 只进长帖 callbacks(链接点击追踪、图片引用
+  /// [topicId] / [onQuoteImage] 只进 callbacks(链接点击追踪、图片引用
   /// 菜单),不影响形态与缓存 key。
   static PostRenderPlan planFor(
     Post post, {
@@ -56,6 +57,8 @@ abstract final class PostRenderPrep {
         post: post,
         signature: signature,
         kind: PostRenderKind.system,
+        topicId: topicId,
+        onQuoteImage: onQuoteImage,
       );
     }
     final longData = NewEngineLongPostData.tryBuild(
@@ -68,6 +71,8 @@ abstract final class PostRenderPrep {
       signature: signature,
       kind: longData == null ? PostRenderKind.short : PostRenderKind.long,
       longData: longData,
+      topicId: topicId,
+      onQuoteImage: onQuoteImage,
     );
   }
 
@@ -136,11 +141,15 @@ abstract final class PostRenderPrep {
   /// 其余 key 输入(inlines 身份、totalImagesInPost)取自挂载单位本身,
   /// 与 FluxdoRender 内部同式。探针未收敛返回 null。
   ///
-  /// handler 不传:预热产物按 (inlines 身份, style, theme, 图片数) 进全局
-  /// 缓存,handler 不进 key;内容同身份 → 命中的是 span/排版,recognizer
-  /// 行为经 mount 桥现取活 context,共享 static handler + 无 post 语境的
-  /// 兜底即可。[context] 仅供 flatten 同步读主题色。
-  static UnitParagraphWarmer? probeParagraphWarmer(BuildContext context) {
+  /// handler 必须传挂载那一组([PostRenderPlan.callbacks]):预热产物按
+  /// (inlines 身份, style, theme, 图片数) 进全局缓存,handler 不进 key,
+  /// 挂载命中就原样用预热时冻结的闭包。不传就是子包兜底 —— 链接 / @ 点了
+  /// 没反应,图片和 emoji 走 Image.network:不经网关、不走 ECH,相对地址
+  /// (IDC Flare 的 /uploads/…)直接破图。[context] 仅供 flatten 同步读主题色。
+  static UnitParagraphWarmer? probeParagraphWarmer(
+    BuildContext context,
+    FluxdoRenderCallbacks callbacks,
+  ) {
     final snapshot = ParagraphWarmupProbe.snapshot();
     if (snapshot == null) return null;
     return (unit, {required startIndex, required budgetMicros}) =>
@@ -149,6 +158,14 @@ abstract final class PostRenderPrep {
           ctx: snapshot,
           context: context,
           totalImagesInPost: unit.totalImagesInPost,
+          linkHandler: callbacks.linkHandler,
+          emojiImageBuilder: callbacks.emojiImageBuilder,
+          mentionTapHandler: callbacks.mentionTapHandler,
+          imageContentBuilder: callbacks.imageContentBuilder,
+          footnoteTapHandler: callbacks.footnoteTapHandler,
+          localDateBuilder: callbacks.localDateBuilder,
+          mathInlineBuilder: callbacks.mathInlineBuilder,
+          onDownloadAttachment: callbacks.onDownloadAttachment,
           startIndex: startIndex,
           budgetMicros: budgetMicros,
         );
@@ -215,10 +232,15 @@ class PostRenderPlan {
     required this.signature,
     required this.kind,
     this.longData,
+    this.topicId,
+    this.onQuoteImage,
   });
 
   /// 计划所属的帖子(签名复用时刷新为最新实例)
   final Post post;
+
+  final int? topicId;
+  final void Function(String quote, Post post)? onQuoteImage;
 
   /// 建计划时的内容签名([PostRenderPrep.signatureOf])
   final int signature;
@@ -260,12 +282,31 @@ class PostRenderPlan {
     );
   }
 
+  /// 挂载用的那组 callbacks(预热段落要冻结同一组 handler,见
+  /// [PostRenderPrep.probeParagraphWarmer]):长帖就是 chunk 段挂载的
+  /// 那份;短帖与 PostItem 同参构造,闭包语义相同
+  late final FluxdoRenderCallbacks callbacks =
+      longData?.callbacks ?? _shortCallbacks();
+
+  FluxdoRenderCallbacks _shortCallbacks() {
+    final unit = PostRenderPrep.shortUnit(post);
+    return FluxdoRenderCallbacks.forPost(
+      post: post,
+      topicId: topicId,
+      onQuoteImage: onQuoteImage,
+      preprocessedCooked: unit.cookedHtml,
+      parsedNodes: unit.nodes,
+    );
+  }
+
   /// 换帖子实例、保留解析产物(签名未变时)
   PostRenderPlan _withPost(Post post) => PostRenderPlan._(
     post: post,
     signature: signature,
     kind: kind,
     longData: longData,
+    topicId: topicId,
+    onQuoteImage: onQuoteImage,
   );
 }
 
