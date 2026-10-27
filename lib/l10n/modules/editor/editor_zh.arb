@@ -163,5 +163,7 @@
   "table_column_target": "第 {number} 列",
   "table_format_unavailable": "暂不支持单元格文本格式",
   "@table_row_target": {"placeholders": {"number": {"type": "int"}}},
-  "@table_column_target": {"placeholders": {"number": {"type": "int"}}}
+  "@table_column_target": {"placeholders": {"number": {"type": "int"}}},
+  "hashtag_typeCategory": "分类",
+  "hashtag_typeTag": "标签"
 }

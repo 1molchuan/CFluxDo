@@ -21,6 +21,7 @@ import '../../models/badge.dart';
 import '../../models/tag_search_result.dart';
 import '../../models/tag_notification_level.dart';
 import '../../models/mention_user.dart';
+import '../../models/hashtag_suggestion.dart';
 import '../../models/draft.dart';
 import '../../models/invite_link.dart';
 import '../../models/template.dart';

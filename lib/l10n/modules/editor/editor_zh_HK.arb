@@ -163,5 +163,7 @@
   "table_column_target": "第 {number} 欄",
   "table_format_unavailable": "暫不支援儲存格文字格式",
   "@table_row_target": {"placeholders": {"number": {"type": "int"}}},
-  "@table_column_target": {"placeholders": {"number": {"type": "int"}}}
+  "@table_column_target": {"placeholders": {"number": {"type": "int"}}},
+  "hashtag_typeCategory": "分類",
+  "hashtag_typeTag": "標籤"
 }

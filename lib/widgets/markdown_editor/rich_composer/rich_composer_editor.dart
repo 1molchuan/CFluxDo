@@ -52,7 +52,8 @@ import 'package:fluxdo_render/fluxdo_render.dart'
         LocalDateRun,
         LinkRun,
         MentionRun,
-        NodeFactory;
+        NodeFactory,
+        TextRun;
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:image_picker/image_picker.dart';
@@ -68,6 +69,7 @@ import '../../../constants.dart';
 import '../../../l10n/s.dart';
 import '../../../providers/preferences_provider.dart';
 import '../../../services/discourse_cache_manager.dart';
+import '../../../models/hashtag_suggestion.dart';
 import '../../../models/mention_user.dart';
 import '../../../services/app_error_handler.dart';
 import '../../../services/discourse/discourse_service.dart';
@@ -83,6 +85,7 @@ import '../../../utils/url_helper.dart';
 import '../../common/fading_edge_scroll_view.dart';
 import '../../common/smart_avatar.dart';
 import '../../content/discourse_html_content/image_utils.dart';
+import '../../hashtag/hashtag_suggestion_tile.dart';
 import '../../mention/mention_autocomplete.dart';
 import '../composer_workbench.dart';
 import '../composer_table_panel.dart';
@@ -193,6 +196,7 @@ class RichComposerEditor extends StatefulWidget {
     this.emojiPanelHeight = 280.0,
     this.onEmojiPanelChanged,
     this.mentionDataSource,
+    this.hashtagDataSource,
     this.onFallbackToPlain,
     this.onSwitchToSource,
     this.semanticCodec,
@@ -227,6 +231,9 @@ class RichComposerEditor extends StatefulWidget {
   final double emojiPanelHeight;
   final ValueChanged<bool>? onEmojiPanelChanged;
   final MentionDataSource? mentionDataSource;
+
+  /// `#` 补全数据源（分类 / 标签）；null 时不弹 `#` 下拉
+  final HashtagDataSource? hashtagDataSource;
 
   /// 初始导入失败(cook 不可用/草稿含不可解析内容)时回调 —— 宿主应
   /// 切回纯文本 MarkdownEditor。
@@ -750,6 +757,13 @@ class RichComposerEditorState extends State<RichComposerEditor> {
   String _mentionQuery = '';
   Timer? _mentionDebounce;
 
+  // `#` 分类 / 标签补全状态(与 mention 同构:远端搜索,防抖)
+  OverlayEntry? _hashtagOverlay;
+  List<HashtagSuggestion> _hashtagCandidates = const [];
+  int _hashtagSelected = 0;
+  String? _hashtagQuery;
+  Timer? _hashtagDebounce;
+
   // `:` emoji 补全状态(与 mention 同构,但候选来自本地别名索引,不防抖 ——
   // 索引在会话开始时一次性拉好,之后每次按键都是内存里过滤)
   OverlayEntry? _emojiOverlay;
@@ -891,6 +905,8 @@ class RichComposerEditorState extends State<RichComposerEditor> {
     _serializeDebounce?.cancel();
     _mentionDebounce?.cancel();
     _removeMentionOverlay();
+    _hashtagDebounce?.cancel();
+    _removeHashtagOverlay();
     _removeEmojiOverlay();
     EmojiAliasService().invalidate();
     _linkToolbarOverlay?.remove();
@@ -1132,9 +1148,11 @@ class RichComposerEditorState extends State<RichComposerEditor> {
     if (_blockPicker != null) {
       _dismissMention();
       _dismissEmoji();
+      _dismissHashtag();
     } else {
       _updateMentionQuery();
       _updateEmojiQuery();
+      _updateHashtagQuery();
     }
   }
 
@@ -1257,6 +1275,28 @@ class RichComposerEditorState extends State<RichComposerEditor> {
           return true;
         case LogicalKeyboardKey.escape:
           _dismissMention();
+          return true;
+      }
+    }
+    // `#` 浮层键盘导航(同 mention)
+    if (_hashtagOverlay != null && _hashtagCandidates.isNotEmpty) {
+      final n = _hashtagCandidates.length;
+      switch (event.logicalKey) {
+        case LogicalKeyboardKey.arrowDown:
+          setState(() => _hashtagSelected = (_hashtagSelected + 1) % n);
+          _hashtagOverlay!.markNeedsBuild();
+          return true;
+        case LogicalKeyboardKey.arrowUp:
+          setState(() => _hashtagSelected = (_hashtagSelected - 1 + n) % n);
+          _hashtagOverlay!.markNeedsBuild();
+          return true;
+        case LogicalKeyboardKey.enter:
+        case LogicalKeyboardKey.numpadEnter:
+        case LogicalKeyboardKey.tab:
+          _insertHashtag(_hashtagCandidates[_hashtagSelected.clamp(0, n - 1)]);
+          return true;
+        case LogicalKeyboardKey.escape:
+          _dismissHashtag();
           return true;
       }
     }
@@ -1714,6 +1754,129 @@ class RichComposerEditorState extends State<RichComposerEditor> {
   void _removeMentionOverlay() {
     _mentionOverlay?.remove();
     _mentionOverlay = null;
+  }
+
+  // -----------------------------------------------------------------
+  // `#` 分类 / 标签补全(监听光标前缀 `#word`,对齐网页编辑器)
+  // -----------------------------------------------------------------
+
+  void _updateHashtagQuery() {
+    final dataSource = widget.hashtagDataSource;
+    final editor = _editor;
+    if (dataSource == null || editor == null) return;
+    final sel = editor.selection;
+    if (sel == null || !sel.isCollapsed) {
+      _dismissHashtag();
+      return;
+    }
+    final block = editor.textBlockById(sel.extent.blockId);
+    if (block == null) {
+      _dismissHashtag();
+      return;
+    }
+    final before = block.content.text.substring(0, sel.extent.offset);
+    final m = hashtagQueryPattern.firstMatch(before);
+    if (m == null) {
+      _dismissHashtag();
+      return;
+    }
+    final query = m.group(1)!;
+    if (query == _hashtagQuery) return;
+    _hashtagQuery = query;
+    _hashtagDebounce?.cancel();
+    _hashtagDebounce = Timer(const Duration(milliseconds: 250), () async {
+      if (!mounted) return;
+      final result = await dataSource(query);
+      if (!mounted || _hashtagQuery != query) return;
+      _hashtagCandidates = result;
+      _hashtagSelected = 0;
+      if (_hashtagCandidates.isEmpty) {
+        _removeHashtagOverlay();
+      } else if (_hashtagOverlay == null) {
+        _showHashtagOverlay();
+      } else {
+        _hashtagOverlay!.markNeedsBuild();
+      }
+    });
+  }
+
+  void _showHashtagOverlay() {
+    _removeHashtagOverlay();
+    _hashtagOverlay = OverlayEntry(
+      builder: (context) {
+        const menuWidth = 260.0;
+        final anchor = _overlayAnchor(
+          context,
+          menuWidth: menuWidth,
+          maxHeight: 260,
+        );
+        return Positioned(
+          left: anchor.left,
+          top: anchor.top,
+          bottom: anchor.bottom,
+          width: menuWidth,
+          child: _FloatingPanel(
+            maxHeight: anchor.maxHeight,
+            child: ListView.builder(
+              shrinkWrap: true,
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              itemCount: _hashtagCandidates.length,
+              itemBuilder: (context, i) {
+                final suggestion = _hashtagCandidates[i];
+                return HashtagSuggestionTile(
+                  suggestion: suggestion,
+                  selected: i == _hashtagSelected,
+                  onTap: () => _insertHashtag(suggestion),
+                );
+              },
+            ),
+          ),
+        );
+      },
+    );
+    Overlay.of(context).insert(_hashtagOverlay!);
+  }
+
+  void _insertHashtag(HashtagSuggestion suggestion) {
+    final editor = _editor;
+    if (editor == null) return;
+    final sel = editor.selection;
+    if (sel == null) return;
+    final block = editor.textBlockById(sel.extent.blockId);
+    if (block == null) return;
+    final before = block.content.text.substring(0, sel.extent.offset);
+    final m = hashtagQueryPattern.firstMatch(before);
+    if (m == null) return;
+    final start = before.lastIndexOf('#');
+    // 删掉 #query,插入 hashtag 原子(序列化回 `#ref`)+ 空格
+    editor.updateSelection(
+      EditorSelection(
+        base: EditorPosition(blockId: block.id, offset: start),
+        extent: EditorPosition(blockId: block.id, offset: sel.extent.offset),
+      ),
+    );
+    editor.deleteSelection();
+    editor.insertAtom(
+      LinkRun(
+        href: suggestion.relativeUrl,
+        hashtagRef: suggestion.ref,
+        children: [TextRun(suggestion.insertText)],
+      ),
+    );
+    editor.insertText(' ');
+    _dismissHashtag();
+  }
+
+  void _dismissHashtag() {
+    _hashtagQuery = null;
+    _hashtagSelected = 0;
+    _hashtagDebounce?.cancel();
+    _removeHashtagOverlay();
+  }
+
+  void _removeHashtagOverlay() {
+    _hashtagOverlay?.remove();
+    _hashtagOverlay = null;
   }
 
   /// 回车软换行偏好。本 State 不是 ConsumerState(改继承会牵动整个

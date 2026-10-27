@@ -137,6 +137,31 @@ mixin _SearchMixin on _DiscourseServiceBase {
     }
   }
 
+  /// 编辑器 `#` 补全：按搜索词找分类和标签（分类在前），[term] 为空时
+  /// 服务端给常用分类和标签。需要登录；失败返回空列表。
+  Future<List<HashtagSuggestion>> searchHashtags(String term) async {
+    try {
+      final response = await _dio.get(
+        '/hashtags/search.json',
+        queryParameters: {
+          'term': term,
+          'order[]': const ['category', 'tag'],
+        },
+        // 与 @ 补全同理：逐字触发，不弹前台验证，也不按 isSilent 降级排队
+        options: Options(extra: {'isSilent': true, 'priority': 'normal'}),
+      );
+      final results = (response.data as Map<String, dynamic>?)?['results'];
+      if (results is! List) return const [];
+      return [
+        for (final item in results)
+          if (item is Map<String, dynamic>) ?HashtagSuggestion.fromJson(item),
+      ];
+    } catch (e) {
+      debugPrint('[DiscourseService] searchHashtags failed: $e');
+      return const [];
+    }
+  }
+
   /// 验证 @ 提及的用户/群组是否有效
   Future<MentionCheckResult> checkMentions(List<String> names) async {
     if (names.isEmpty) {

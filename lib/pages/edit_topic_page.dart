@@ -908,6 +908,9 @@ class _EditTopicPageState extends ConsumerState<EditTopicPage> {
                                   onEmojiPanelChanged: (show) {
                                     setState(() => _showEmojiPanel = show);
                                   },
+                                  hashtagDataSource: (term) => ref
+                                      .read(discourseServiceProvider)
+                                      .searchHashtags(term),
                                   mentionDataSource: (term) => ref
                                       .read(discourseServiceProvider)
                                       .searchUsers(
@@ -946,6 +949,9 @@ class _EditTopicPageState extends ConsumerState<EditTopicPage> {
                             onEmojiPanelChanged: (show) {
                               setState(() => _showEmojiPanel = show);
                             },
+                            hashtagDataSource: (term) => ref
+                                .read(discourseServiceProvider)
+                                .searchHashtags(term),
                             mentionDataSource: (term) => ref
                                 .read(discourseServiceProvider)
                                 .searchUsers(

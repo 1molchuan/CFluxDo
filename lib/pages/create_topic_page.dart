@@ -1405,6 +1405,11 @@ class _CreateTopicPageState extends ConsumerState<CreateTopicPage> {
                                                   () => _showEmojiPanel = show,
                                                 );
                                               },
+                                              hashtagDataSource: (term) => ref
+                                                  .read(
+                                                    discourseServiceProvider,
+                                                  )
+                                                  .searchHashtags(term),
                                               mentionDataSource: (term) => ref
                                                   .read(
                                                     discourseServiceProvider,
@@ -1463,6 +1468,9 @@ class _CreateTopicPageState extends ConsumerState<CreateTopicPage> {
                                         },
                                         // 源码 → 富文本(开关开着即可,
                                         // 门禁降级后也允许重试)
+                                        hashtagDataSource: (term) => ref
+                                            .read(discourseServiceProvider)
+                                            .searchHashtags(term),
                                         mentionDataSource: (term) => ref
                                             .read(discourseServiceProvider)
                                             .searchUsers(

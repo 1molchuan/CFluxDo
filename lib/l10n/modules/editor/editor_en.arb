@@ -135,5 +135,7 @@
   "table_column_target": "Column {number}",
   "table_format_unavailable": "Cell text formatting is not supported yet",
   "@table_row_target": {"placeholders": {"number": {"type": "int"}}},
-  "@table_column_target": {"placeholders": {"number": {"type": "int"}}}
+  "@table_column_target": {"placeholders": {"number": {"type": "int"}}},
+  "hashtag_typeCategory": "Category",
+  "hashtag_typeTag": "Tag"
 }
