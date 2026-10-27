@@ -106,7 +106,12 @@ class _EditTopicPageState extends ConsumerState<EditTopicPage> {
   }
 
   /// 富文本未就绪或导出失败时，绝不能消费 controller 中的旧镜像。
+  ///
+  /// 没有正文编辑器时没有可同步的东西：只能改标题 / 分类 / 标签（如三级用户
+  /// 编辑别人的话题，正文不提交）、或首贴还在加载（提交按钮不可点）。这两种
+  /// 情况按「未就绪」拦下，会让关闭和保存都永远过不去（issue #3）。
   bool _flushRichContent() {
+    if (!_canEditContent || _isLoadingContent) return true;
     final rich = _richKey.currentState;
     final ready = rich != null
         ? rich.flushToController()
