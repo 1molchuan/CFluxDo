@@ -10,7 +10,8 @@ import '../../models/user.dart';
 import '../../providers/app_state_refresher.dart';
 import '../auth_session.dart';
 import '../discourse/discourse_service.dart';
-import '../ld_store/ld_store_service.dart';
+import '../cf_challenge_service.dart';
+import '../../providers/ld_store_providers.dart';
 import '../log/log_writer.dart';
 import '../network/cookie/cookie_jar_service.dart';
 import '../network/cookie/session_cookie_sentinel.dart';
@@ -33,8 +34,11 @@ enum AccountSwitchOutcome {
   /// 目标账号失效，原账号也没能恢复：现在是未登录
   loggedOut,
 
-  /// 正在切换 / 安全存储不可用等，没有动
-  skipped,
+  /// 目标账号没有可用的凭据（已标记要重新登录），没有动
+  targetNeedsLogin,
+
+  /// 正在切换 / 正在人机验证，没有动
+  busy,
 }
 
 /// 多账号切换。
@@ -97,14 +101,17 @@ class AccountSwitcher {
     SavedAccount target,
     ProviderContainer container,
   ) async {
-    if (_busy) return AccountSwitchOutcome.skipped;
+    // 验证页开着时别动 cookie：验证轮次正在等新的 cf_clearance 落进来
+    if (_busy || CfChallengeService().isVerifying) {
+      return AccountSwitchOutcome.busy;
+    }
     _busy = true;
     try {
       final targetCookies = await store.cookiesOf(target);
       if (targetCookies == null ||
           !targetCookies.any((cookie) => cookie.name == '_t')) {
         await store.markNeedsLogin(target.userId, needsLogin: true);
-        return AccountSwitchOutcome.skipped;
+        return AccountSwitchOutcome.targetNeedsLogin;
       }
       await SiteDataLifecycle.flushBeforeSwitch();
       final previous = await saveCurrent();
@@ -218,7 +225,9 @@ class AccountSwitcher {
   }) async {
     if (previous != null && SiteContext.isLinuxDo) {
       try {
-        await LdStoreService().revokeWebSessionFor(previous.username);
+        await container
+            .read(ldStoreServiceProvider)
+            .revokeWebSessionFor(previous.username);
       } catch (_) {}
     }
     await SessionCookieSentinel.instance.cancelAllSweeps();

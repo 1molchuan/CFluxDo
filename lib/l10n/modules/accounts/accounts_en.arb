@@ -14,5 +14,6 @@
   "accounts_switching": "Switching to {name}…",
   "accounts_switched": "Switched to {name}",
   "accounts_targetInvalid": "{name}'s session has expired; switched back. Sign in again to use it.",
-  "accounts_limit": "You can save up to {max} accounts. Remove one first."
+  "accounts_limit": "You can save up to {max} accounts. Remove one first.",
+  "accounts_busy": "Verification or a switch is in progress. Try again shortly."
 }

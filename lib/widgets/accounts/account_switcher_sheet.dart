@@ -86,8 +86,10 @@ class _AccountSwitcherSheetState extends ConsumerState<AccountSwitcherSheet> {
         );
       case AccountSwitchOutcome.loggedOut:
         ToastService.showError(S.current.accounts_loggedOut);
-      case AccountSwitchOutcome.skipped:
-        break;
+      case AccountSwitchOutcome.targetNeedsLogin:
+        ToastService.showError(S.current.accounts_needsLogin);
+      case AccountSwitchOutcome.busy:
+        ToastService.showInfo(S.current.accounts_busy);
     }
   }
 
