@@ -15,6 +15,7 @@ import '../../models/user_action.dart';
 import '../../models/notification.dart';
 import '../../models/category.dart';
 import '../../models/search_result.dart';
+import '../../models/sidebar_section.dart';
 import '../../models/emoji.dart';
 import '../../models/badge.dart';
 import '../../models/tag_search_result.dart';
@@ -87,6 +88,7 @@ part '_onebox.dart';
 part '_reviewables.dart';
 part '_assign.dart';
 part '_chat.dart';
+part '_sidebar_sections.dart';
 
 /// 基类，包含所有共享字段
 abstract class _DiscourseServiceBase {
@@ -151,7 +153,8 @@ class DiscourseService extends _DiscourseServiceBase
         _OneboxMixin,
         _ReviewablesMixin,
         _AssignMixin,
-        _ChatMixin {
+        _ChatMixin,
+        _SidebarSectionsMixin {
   static String get baseUrl => AppConstants.baseUrl;
   static String get _usernameKey => SiteContext.storageKey('linux_do_username');
   static const _summaryCacheDuration = Duration(minutes: 5);

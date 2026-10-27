@@ -1,0 +1,56 @@
+{
+  "@@locale": "zh",
+  "sidebarSection_newSection": "新建分区",
+  "sidebarSection_editSection": "编辑分区",
+  "sidebarSection_syncHint": "和网页侧栏的「自定义分区」同步，在这里改了网页上也会变",
+  "sidebarSection_titleLabel": "分区名称",
+  "sidebarSection_links": "链接",
+  "sidebarSection_addLink": "添加链接",
+  "sidebarSection_addCategory": "添加分类",
+  "sidebarSection_editLink": "编辑链接",
+  "sidebarSection_linkName": "名称",
+  "sidebarSection_linkValue": "地址",
+  "sidebarSection_linkValueHint": "站内路径（如 /c/develop/4、/tag/ai、/t/123）或 https:// 开头的网址",
+  "sidebarSection_icon": "图标",
+  "sidebarSection_deleteSection": "删除分区",
+  "sidebarSection_noLinks": "还没有链接",
+  "sidebarSection_titleRequired": "请填写分区名称",
+  "sidebarSection_needLink": "至少要有一个链接",
+  "sidebarSection_linkIncomplete": "每个链接都要有名称和地址",
+  "sidebarSection_invalidUrl": "地址格式不对",
+  "sidebarSection_readOnly": "全站公开分区，只有管理员能修改",
+  "sidebarSection_discardChanges": "放弃未保存的修改？",
+  "sidebarSection_deleteConfirm": "删除分区「{title}」？网页侧栏里也会一起删除。",
+  "@sidebarSection_deleteConfirm": {
+    "placeholders": {
+      "title": {
+        "type": "String"
+      }
+    }
+  },
+  "sidebarSection_titleTooLong": "分区名称最多 {max} 个字",
+  "@sidebarSection_titleTooLong": {
+    "placeholders": {
+      "max": {
+        "type": "int"
+      }
+    }
+  },
+  "sidebarSection_nameTooLong": "链接名称最多 {max} 个字",
+  "@sidebarSection_nameTooLong": {
+    "placeholders": {
+      "max": {
+        "type": "int"
+      }
+    }
+  },
+  "sidebarSection_tooManyLinks": "一个分区最多 {max} 个链接",
+  "@sidebarSection_tooManyLinks": {
+    "placeholders": {
+      "max": {
+        "type": "int"
+      }
+    }
+  },
+  "sidebarSection_linkNameHint": "写 :表情名: 会显示成表情"
+}

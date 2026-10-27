@@ -978,17 +978,31 @@ class _TopicsPageState extends ConsumerState<TopicsPage>
 
   /// 检测 pinnedCategories 变化，重建 TabController
   void _syncTabsIfNeeded(List<int> pinnedIds) {
+    final previousIds = _visiblePinnedIds;
     final desiredLength = 1 + pinnedIds.length;
     _visiblePinnedIds = pinnedIds;
-    if (desiredLength == _tabLength) return;
-
     final oldIndex = _tabController.index;
+    // 跟着正在看的分类走：只是换了顺序（置顶 / 上移 / 拖拽）时，原下标上
+    // 已经是别的分类了，不能把用户正在看的内容换掉
+    final currentId = oldIndex > 0 && oldIndex - 1 < previousIds.length
+        ? previousIds[oldIndex - 1]
+        : null;
+    final followIndex = currentId == null
+        ? -1
+        : pinnedIds.indexOf(currentId) + 1;
+    if (desiredLength == _tabLength &&
+        (followIndex <= 0 || followIndex == oldIndex)) {
+      return;
+    }
+
     _tabController.removeListener(_handleTabChange);
     _tabController.dispose();
     _tabLength = desiredLength;
     _tabController = TabController(length: _tabLength, vsync: this);
     _tabController.addListener(_handleTabChange);
-    _currentTabIndex = oldIndex < _tabLength ? oldIndex : 0;
+    _currentTabIndex = followIndex > 0
+        ? followIndex
+        : (oldIndex < _tabLength ? oldIndex : 0);
     _tabController.index = _currentTabIndex;
   }
 

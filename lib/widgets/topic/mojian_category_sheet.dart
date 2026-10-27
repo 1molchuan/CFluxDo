@@ -6,8 +6,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../l10n/s.dart';
 import '../../models/category.dart';
+import '../../models/sidebar_section.dart';
+import '../../pages/sidebar_section_edit_page.dart';
 import '../../providers/discourse_providers.dart';
 import '../../providers/pinned_categories_provider.dart';
+import '../../providers/sidebar_sections_provider.dart';
+import '../../utils/sidebar_link_router.dart';
+import '../common/emoji_text.dart';
 import '../../theme/mojian_theme.dart';
 import '../../utils/dialog_utils.dart';
 import 'category_drawer.dart'
@@ -88,6 +93,24 @@ class MojianCategorySheet extends ConsumerStatefulWidget {
 
 class _MojianCategorySheetState extends ConsumerState<MojianCategorySheet> {
   final _query = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    // 网页上可能改过自定义分区：数据旧了就后台刷新
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        ref.read(sidebarSectionsProvider.notifier).refreshIfStale();
+      }
+    });
+  }
+
+  /// 关掉面板再打开：面板自己的 context 关掉后就失效了，用导航器的
+  void _closeThen(void Function(BuildContext navigatorContext) action) {
+    final navigator = Navigator.of(context);
+    navigator.pop();
+    action(navigator.context);
+  }
 
   @override
   void dispose() {
@@ -323,6 +346,28 @@ class _MojianCategorySheetState extends ConsumerState<MojianCategorySheet> {
             18 + MediaQuery.paddingOf(context).bottom,
           ),
           children: [
+            // 网页侧栏的自定义分区（与网页双向同步）
+            if (q.isEmpty && isLoggedIn)
+              _MojianSidebarSections(
+                isAdmin: ref.watch(currentUserProvider).value?.admin ?? false,
+                onOpenLink: (link) => _closeThen(
+                  (navigatorContext) => openSidebarLink(navigatorContext, link),
+                ),
+                onEdit: (section) => _closeThen(
+                  (navigatorContext) => Navigator.of(navigatorContext).push(
+                    MaterialPageRoute(
+                      builder: (_) => SidebarSectionEditPage(section: section),
+                    ),
+                  ),
+                ),
+                onCreate: () => _closeThen(
+                  (navigatorContext) => Navigator.of(navigatorContext).push(
+                    MaterialPageRoute(
+                      builder: (_) => const SidebarSectionEditPage(),
+                    ),
+                  ),
+                ),
+              ),
             if (q.isEmpty && pinned.isNotEmpty) ...[
               section(l10n.category_myCategories, pinned.length),
               grid(pinned),
@@ -364,6 +409,105 @@ class _MojianCategorySheetState extends ConsumerState<MojianCategorySheet> {
           Flexible(child: body),
         ],
       ),
+    );
+  }
+}
+
+/// 墨笺面板里的自定义分区：每个分区一行标题 + 一组链接签
+class _MojianSidebarSections extends ConsumerWidget {
+  const _MojianSidebarSections({
+    required this.isAdmin,
+    required this.onOpenLink,
+    required this.onEdit,
+    required this.onCreate,
+  });
+
+  final bool isAdmin;
+  final ValueChanged<SidebarSectionLink> onOpenLink;
+  final ValueChanged<SidebarSection> onEdit;
+  final VoidCallback onCreate;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final mj = Theme.of(context).extension<MojianTokens>()!;
+    final sections = (ref.watch(sidebarSectionsProvider).value ?? const [])
+        .where((section) => !section.isCommunity && section.links.isNotEmpty)
+        .toList();
+    final titleStyle = TextStyle(
+      fontFamily: MojianTokens.titleFamilyFor(context),
+      fontWeight: FontWeight.w600,
+      fontSize: 12,
+      letterSpacing: 3,
+      color: mj.ink3,
+    );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (final section in sections) ...[
+          Padding(
+            padding: const EdgeInsets.fromLTRB(0, 14, 0, 6),
+            child: Row(
+              children: [
+                Expanded(child: Text(section.title, style: titleStyle)),
+                if (section.canEdit(isAdmin: isAdmin))
+                  IconButton(
+                    tooltip: S.current.sidebarSection_editSection,
+                    visualDensity: VisualDensity.compact,
+                    iconSize: 16,
+                    onPressed: () => onEdit(section),
+                    icon: Icon(Symbols.edit_rounded, color: mj.ink3),
+                  ),
+              ],
+            ),
+          ),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final link in section.links)
+                Material(
+                  color: mj.paper2,
+                  borderRadius: BorderRadius.circular(10),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(10),
+                    onTap: () => onOpenLink(link),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 9,
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          SidebarLinkIcon(link.icon, size: 15, color: mj.ink3),
+                          const SizedBox(width: 7),
+                          ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: 220),
+                            child: EmojiText(
+                              link.name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(fontSize: 13.5, color: mj.ink),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ],
+        Padding(
+          padding: const EdgeInsets.only(top: 6),
+          child: TextButton.icon(
+            onPressed: onCreate,
+            style: TextButton.styleFrom(foregroundColor: mj.ink2),
+            icon: const Icon(Symbols.add_rounded, size: 16),
+            label: Text(S.current.sidebarSection_newSection),
+          ),
+        ),
+      ],
     );
   }
 }

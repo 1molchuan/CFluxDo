@@ -562,17 +562,19 @@ class _EditContent extends ConsumerWidget {
             itemBuilder: (context, index) {
               final category = pinnedCategories[index];
               final color = _parseColor(category.color);
+              final notifier = ref.read(pinnedCategoriesProvider.notifier);
               return _PinnedCategoryTile(
                 key: ValueKey(category.id),
                 category: category,
                 color: color,
                 categoryMap: categoryMap,
                 index: index,
-                onRemove: () {
-                  ref
-                      .read(pinnedCategoriesProvider.notifier)
-                      .remove(category.id);
-                },
+                isFirst: index == 0,
+                isLast: index == pinnedCategories.length - 1,
+                onRemove: () => notifier.remove(category.id),
+                onMoveToTop: () => notifier.moveToTop(category.id),
+                onMoveUp: () => notifier.moveUp(category.id),
+                onMoveDown: () => notifier.moveDown(category.id),
               );
             },
           ),
@@ -699,6 +701,11 @@ class _PinnedCategoryTile extends StatelessWidget {
   final Color color;
   final Map<int, Category> categoryMap;
   final VoidCallback onRemove;
+  final VoidCallback onMoveToTop;
+  final VoidCallback onMoveUp;
+  final VoidCallback onMoveDown;
+  final bool isFirst;
+  final bool isLast;
   final int index;
 
   const _PinnedCategoryTile({
@@ -707,6 +714,11 @@ class _PinnedCategoryTile extends StatelessWidget {
     required this.color,
     required this.categoryMap,
     required this.onRemove,
+    required this.onMoveToTop,
+    required this.onMoveUp,
+    required this.onMoveDown,
+    required this.isFirst,
+    required this.isLast,
     required this.index,
   });
 
@@ -759,7 +771,35 @@ class _PinnedCategoryTile extends StatelessWidget {
                 color: colorScheme.error,
               ),
             ),
-            const SizedBox(width: 12),
+            // 拖拽之外的排法：置顶 / 上移 / 下移（也方便读屏与键盘）
+            PopupMenuButton<VoidCallback>(
+              tooltip: S.current.category_reorderMenu,
+              icon: Icon(
+                Symbols.more_vert_rounded,
+                size: 20,
+                color: colorScheme.outline,
+              ),
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 120),
+              onSelected: (action) => action(),
+              itemBuilder: (_) => [
+                PopupMenuItem(
+                  value: onMoveToTop,
+                  enabled: !isFirst,
+                  child: Text(S.current.category_moveToTop),
+                ),
+                PopupMenuItem(
+                  value: onMoveUp,
+                  enabled: !isFirst,
+                  child: Text(S.current.category_moveUp),
+                ),
+                PopupMenuItem(
+                  value: onMoveDown,
+                  enabled: !isLast,
+                  child: Text(S.current.category_moveDown),
+                ),
+              ],
+            ),
             ReorderableDragStartListener(
               index: index,
               child: Icon(

@@ -6,9 +6,14 @@ import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:m3e_ui/m3e_ui.dart';
 
 import '../../models/category.dart';
+import '../../models/sidebar_section.dart';
 import '../../models/tag_search_result.dart';
+import '../../pages/sidebar_section_edit_page.dart';
 import '../../providers/discourse_providers.dart';
 import '../../providers/pinned_categories_provider.dart';
+import '../../providers/sidebar_sections_provider.dart';
+import '../../utils/sidebar_link_router.dart';
+import '../common/emoji_text.dart';
 import '../../utils/font_awesome_helper.dart';
 import '../../utils/motion_springs.dart';
 import '../../utils/number_utils.dart';
@@ -381,6 +386,9 @@ class _CategoryDrawerState extends ConsumerState<CategoryDrawer> {
       box.localToGlobal(Offset.zero, ancestor: overlay) & box.size,
       Offset.zero & overlay.size,
     );
+    final pinnedIds = ref.read(pinnedCategoriesProvider);
+    final pinnedIndex = pinnedIds.indexOf(category.id);
+    final pinnedCount = pinnedIds.length;
 
     final action = await showMenu<Symbol>(
       context: rowContext,
@@ -406,6 +414,33 @@ class _CategoryDrawerState extends ConsumerState<CategoryDrawer> {
             ],
           ),
         ),
+        // 收藏的分类：在这里也能排顺序（拖拽在「编辑我的分类」里）
+        if (pinned) ...[
+          if (pinnedIndex > 0) ...[
+            PopupMenuItem(
+              value: #moveToTop,
+              child: _menuRow(
+                Symbols.vertical_align_top_rounded,
+                S.current.category_moveToTop,
+              ),
+            ),
+            PopupMenuItem(
+              value: #moveUp,
+              child: _menuRow(
+                Symbols.arrow_upward_rounded,
+                S.current.category_moveUp,
+              ),
+            ),
+          ],
+          if (pinnedIndex >= 0 && pinnedIndex < pinnedCount - 1)
+            PopupMenuItem(
+              value: #moveDown,
+              child: _menuRow(
+                Symbols.arrow_downward_rounded,
+                S.current.category_moveDown,
+              ),
+            ),
+        ],
         if (level != null)
           PopupMenuItem(
             value: #subscription,
@@ -431,11 +466,25 @@ class _CategoryDrawerState extends ConsumerState<CategoryDrawer> {
       case #togglePin:
         final notifier = ref.read(pinnedCategoriesProvider.notifier);
         pinned ? notifier.remove(category.id) : notifier.add(category.id);
+      case #moveToTop:
+        ref.read(pinnedCategoriesProvider.notifier).moveToTop(category.id);
+      case #moveUp:
+        ref.read(pinnedCategoriesProvider.notifier).moveUp(category.id);
+      case #moveDown:
+        ref.read(pinnedCategoriesProvider.notifier).moveDown(category.id);
       case #subscription:
         _openSubscriptionSheet(category);
       default:
     }
   }
+
+  static Widget _menuRow(IconData icon, String label) => Row(
+    children: [
+      Icon(icon, size: 18),
+      const SizedBox(width: 10),
+      Text(label),
+    ],
+  );
 
   /// 分类订阅设置：拉起级别面板（乐观更新 + 失败回退）。
   /// 侧栏已全局化（宿主是 AdaptiveScaffold），订阅逻辑自持。
@@ -578,6 +627,16 @@ class _CategoryDrawerState extends ConsumerState<CategoryDrawer> {
         return ListView(
           padding: const EdgeInsets.fromLTRB(12, 4, 12, 24),
           children: [
+            // —— 网页侧栏的自定义分区（与网页双向同步）——
+            _SidebarSectionsBlock(
+              onOpenLink: (link) {
+                widget.onRequestClose();
+                openSidebarLink(context, link);
+              },
+              onEdit: (section) =>
+                  _closeAndPush(SidebarSectionEditPage(section: section)),
+              onCreate: () => _closeAndPush(const SidebarSectionEditPage()),
+            ),
             // —— 收藏区（点行切首页对应分类 tab，无展开语义）——
             if (pinned.isNotEmpty) ...[
               _SectionLabel(text: S.current.category_myCategories),
@@ -805,6 +864,151 @@ class _CategoryDrawerState extends ConsumerState<CategoryDrawer> {
           ],
         );
       },
+    );
+  }
+}
+
+/// 网页侧栏里的自定义分区（全站公开的 + 自己建的），排在收藏区前面。
+/// 未登录 / 没有分区时只留一个「新建分区」入口（登录后）。
+class _SidebarSectionsBlock extends ConsumerStatefulWidget {
+  const _SidebarSectionsBlock({
+    required this.onOpenLink,
+    required this.onEdit,
+    required this.onCreate,
+  });
+
+  final ValueChanged<SidebarSectionLink> onOpenLink;
+  final ValueChanged<SidebarSection> onEdit;
+  final VoidCallback onCreate;
+
+  @override
+  ConsumerState<_SidebarSectionsBlock> createState() =>
+      _SidebarSectionsBlockState();
+}
+
+class _SidebarSectionsBlockState extends ConsumerState<_SidebarSectionsBlock> {
+  @override
+  void initState() {
+    super.initState();
+    // 抽屉每次打开都会重建本块：数据旧了就后台刷新（网页上可能改过）
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        ref.read(sidebarSectionsProvider.notifier).refreshIfStale();
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final user = ref.watch(currentUserProvider).value;
+    if (user == null) return const SizedBox.shrink();
+    final sections = (ref.watch(sidebarSectionsProvider).value ?? const [])
+        .where((section) => !section.isCommunity && section.links.isNotEmpty)
+        .toList();
+    final colorScheme = Theme.of(context).colorScheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (final section in sections) ...[
+          Row(
+            children: [
+              Expanded(child: _SectionLabel(text: section.title)),
+              if (section.canEdit(isAdmin: user.admin))
+                IconButton(
+                  tooltip: S.current.sidebarSection_editSection,
+                  visualDensity: VisualDensity.compact,
+                  iconSize: 18,
+                  onPressed: () => widget.onEdit(section),
+                  icon: Icon(
+                    Symbols.edit_rounded,
+                    color: colorScheme.onSurfaceVariant,
+                  ),
+                ),
+            ],
+          ),
+          for (final link in section.links)
+            _SidebarLinkRow(link: link, onTap: () => widget.onOpenLink(link)),
+          const SizedBox(height: 12),
+        ],
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton.icon(
+            onPressed: widget.onCreate,
+            icon: const Icon(Symbols.add_rounded, size: 18),
+            label: Text(S.current.sidebarSection_newSection),
+          ),
+        ),
+        const SizedBox(height: 4),
+      ],
+    );
+  }
+}
+
+class _SidebarLinkRow extends StatelessWidget {
+  const _SidebarLinkRow({required this.link, required this.onTap});
+
+  final SidebarSectionLink link;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final mj = theme.extension<MojianTokens>();
+    return Padding(
+      padding: EdgeInsets.only(bottom: mj != null ? 0 : 2),
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(mj != null ? 0 : 14),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              border: mj == null
+                  ? null
+                  : Border(bottom: BorderSide(color: mj.rule, width: 0)),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              child: SizedBox(
+                height: 44,
+                child: Row(
+                  children: [
+                    SizedBox(
+                      width: 32,
+                      child: Center(
+                        child: SidebarLinkIcon(
+                          link.icon,
+                          color: mj?.ink3 ?? colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: EmojiText(
+                        link.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 14.5,
+                          color: mj?.ink ?? colorScheme.onSurface,
+                        ),
+                      ),
+                    ),
+                    if (link.isExternal)
+                      Icon(
+                        Symbols.open_in_new_rounded,
+                        size: 14,
+                        color: mj?.ink3 ?? colorScheme.outline,
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

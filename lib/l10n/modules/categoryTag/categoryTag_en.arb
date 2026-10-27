@@ -50,5 +50,9 @@
   "tag_searchWithMin": "Search tags ({selected} selected, min {min})...",
   "tag_topicCount": "{count} topics",
   "category_sheetHint": "Tap ☆ to pin a category to the top row",
-  "category_otherCategories": "Other categories"
+  "category_otherCategories": "Other categories",
+  "category_moveToTop": "Move to top",
+  "category_moveUp": "Move up",
+  "category_moveDown": "Move down",
+  "category_reorderMenu": "Reorder"
 }
