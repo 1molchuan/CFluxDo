@@ -612,8 +612,16 @@ class _LinkEditDialogState extends State<_LinkEditDialog> {
                 children: [
                   for (final name in icons)
                     ChoiceChip(
-                      label: SidebarLinkIcon(name, size: 16),
+                      label: SidebarLinkIcon(
+                        name,
+                        size: 16,
+                        color: name == _icon
+                            ? colorScheme.onPrimaryContainer
+                            : colorScheme.onSurfaceVariant,
+                      ),
                       selected: name == _icon,
+                      // 主题里选中态可能是深色实底（墨笺），图标会看不见
+                      selectedColor: colorScheme.primaryContainer,
                       showCheckmark: false,
                       tooltip: name,
                       onSelected: (_) => setState(() => _icon = name),

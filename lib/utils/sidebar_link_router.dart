@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/sidebar_section.dart';
 import '../pages/category_topics_page.dart';
 import '../pages/tag_topics_page.dart';
+import '../pages/topic_detail_page/topic_detail_page.dart';
 import '../providers/category_provider.dart';
 import 'discourse_url_parser.dart';
 import 'link_launcher.dart';
@@ -41,5 +42,14 @@ Future<void> openSidebarLink(
     }
   }
   if (!context.mounted) return;
-  await launchContentLink(context, url);
+  await launchContentLink(
+    context,
+    url,
+    onInternalLinkTap: (topicId, _, postNumber) => Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) =>
+            TopicDetailPage(topicId: topicId, scrollToPostNumber: postNumber),
+      ),
+    ),
+  );
 }
