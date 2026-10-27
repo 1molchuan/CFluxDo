@@ -5,6 +5,7 @@ import 'package:video_player/video_player.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
 import '../../../services/media/playback_position_store.dart';
+import '../../../services/network/gateway_media_source.dart';
 
 /// 视频控制器的唯一 owner。inline 播放器与全屏页都只是「租户」:
 /// retain()/release() 引用计数,归零才 dispose。
@@ -134,9 +135,12 @@ class VideoSessionRegistry {
   static VideoPlayerSession obtain(String url, {String? mimeType}) {
     final existing = _sessions[url];
     if (existing != null) return existing;
+    // 播放器自己联网，不经过 Dart 网关：改写到本机网关才走得了 ECH
+    final source = GatewayMediaSource.resolve(url);
     final controller = VideoPlayerController.networkUrl(
-      Uri.parse(url),
+      source.uri,
       formatHint: videoFormatHintFromMime(mimeType),
+      httpHeaders: source.headers,
     );
     final session = VideoPlayerSession._(url: url, controller: controller);
     session._start();
