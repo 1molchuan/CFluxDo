@@ -11,6 +11,36 @@
     }
   },
   "github_viewFullCode": "点击查看完整代码",
+  "ldStore_accountMismatch": "授权的商城账号与当前论坛账号不一致",
+  "ldStore_authExpired": "LD士多授权已过期，请重新授权",
+  "ldStore_authSuccess": "LD士多授权成功",
+  "ldStore_authorize": "授权登录",
+  "ldStore_awaitingDelivery": "待收货",
+  "ldStore_confirmMessage": "LD士多是社区成员开发的第三方积分商城。授权后它会通过 LINUX DO Connect 获得你的用户名、头像和信任等级；App 会在本机安全存储里保存商城登录凭据，用来显示订单和消息，并让内置浏览器里的商城保持登录。付款仍需你在 LINUX DO Credit 页面确认。",
+  "ldStore_confirmTitle": "授权 LD士多",
+  "ldStore_coupons": "可用券",
+  "ldStore_desc": "社区成员开发的积分商城（第三方）",
+  "ldStore_open": "进入商城",
+  "ldStore_pendingPayment": "待付款",
+  "ldStore_signOut": "退出授权",
+  "ldStore_signOutMessage": "退出后 App 不再显示 LD士多的订单和消息，内置浏览器里的商城登录也会一并退出。",
+  "ldStore_stats": "在售 {online} · 今日成交 {today} · 小店 {stores}",
+  "@ldStore_stats": {
+    "placeholders": {
+      "online": {
+        "type": "int"
+      },
+      "today": {
+        "type": "int"
+      },
+      "stores": {
+        "type": "int"
+      }
+    }
+  },
+  "ldStore_title": "LD士多",
+  "ldStore_unread": "未读消息",
+  "ldStore_verifyFailed": "商城登录校验失败，请稍后重试",
   "metaverse_authFailed": "授权失败: {error}",
   "@metaverse_authFailed": {
     "placeholders": {

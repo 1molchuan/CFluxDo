@@ -15,6 +15,7 @@ import 'package:fluxdo/models/cdk_user_info.dart';
 import 'package:fluxdo/models/ldc_user_info.dart';
 import 'package:fluxdo/providers/cdk_providers.dart';
 import 'package:fluxdo/providers/ldc_providers.dart';
+import 'package:fluxdo/providers/ld_store_providers.dart';
 import 'package:fluxdo/services/local_notification_service.dart';
 import 'package:fluxdo/services/network/exceptions/oauth_exception.dart';
 import 'package:fluxdo/theme/mojian_theme.dart';
@@ -77,6 +78,11 @@ class _PendingCdkNotifier extends CdkUserInfoNotifier {
   @override
   Future<void> refresh({bool afterVerification = false}) async =>
       refreshCalls++;
+}
+
+class _NoLdStoreSession extends LdStoreSessionNotifier {
+  @override
+  Future<LdStoreSession?> build() async => null;
 }
 
 Widget _app(ProviderContainer container, Widget child, {bool mojian = false}) {
@@ -271,6 +277,9 @@ void main() {
           sharedPreferencesProvider.overrideWithValue(prefs),
           ldcUserInfoProvider.overrideWith(() => ldc),
           cdkUserInfoProvider.overrideWith(() => cdk),
+          // 元宇宙页的 LD士多 卡片不发真实请求
+          ldStoreSessionProvider.overrideWith(_NoLdStoreSession.new),
+          ldStoreStatsProvider.overrideWith((ref) async => null),
         ],
       );
       addTearDown(container.dispose);

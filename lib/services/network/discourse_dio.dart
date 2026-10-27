@@ -80,6 +80,16 @@ enum DiscourseDioKind {
     recovery: false,
     cfRecovery: false,
     networkLog: true,
+  ),
+
+  /// 第三方站接口（LD士多等）：不占论坛的并发/速率配额，不过盾（验证页
+  /// 只服务论坛本站，第三方站撞盾弹它没有意义），保留瞬态重试与日志。
+  external(
+    scheduled: false,
+    freezeDuringCfVerification: false,
+    recovery: true,
+    cfRecovery: false,
+    networkLog: true,
   );
 
   const DiscourseDioKind({

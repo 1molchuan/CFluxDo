@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:collection';
 import 'dart:io' as io;
 
 import 'package:flutter/material.dart';
@@ -31,7 +32,26 @@ class WebViewPage extends ConsumerStatefulWidget {
   final String? title;
   final String? injectCss;
 
-  const WebViewPage({super.key, required this.url, this.title, this.injectCss});
+  /// 追加在兼容脚本之后的页面脚本（调用方自己限定 origin）。
+  final List<UserScript> extraUserScripts;
+
+  /// 允许网页用 `window.open` / `target=_blank` 开新窗口：新窗口作为一页
+  /// 浏览器叠在上面，网页 `window.close()` 时关掉（第三方站的支付弹窗要靠它
+  /// 回传结果）。默认关，与以前一样在当前页打开或忽略。
+  final bool allowPopups;
+
+  /// 由 [allowPopups] 开出的新窗口：WebView 由网页创建，不再自己加载 [url]。
+  final int? windowId;
+
+  const WebViewPage({
+    super.key,
+    required this.url,
+    this.title,
+    this.injectCss,
+    this.extraUserScripts = const [],
+    this.allowPopups = false,
+    this.windowId,
+  });
 
   /// 打开浏览器，url 为空字符串时显示空白页
   static Future<T?> open<T extends Object?>(
@@ -39,12 +59,19 @@ class WebViewPage extends ConsumerStatefulWidget {
     String url, {
     String? title,
     String? injectCss,
+    List<UserScript> extraUserScripts = const [],
+    bool allowPopups = false,
   }) {
     return Navigator.push<T>(
       context,
       MaterialPageRoute(
-        builder: (_) =>
-            WebViewPage(url: url, title: title, injectCss: injectCss),
+        builder: (_) => WebViewPage(
+          url: url,
+          title: title,
+          injectCss: injectCss,
+          extraUserScripts: extraUserScripts,
+          allowPopups: allowPopups,
+        ),
       ),
     );
   }
@@ -84,7 +111,8 @@ class _WebViewPageState extends ConsumerState<WebViewPage> {
     _currentTitle = widget.title ?? '';
     _webViewUse = WebViewUses.instance.start(
       WebViewUsePurpose.browsing,
-      url: widget.url.isEmpty ? null : widget.url,
+      // 新窗口的地址由网页随后决定（支付弹窗会去站内子域），按主站准备
+      url: widget.url.isEmpty || widget.windowId != null ? null : widget.url,
       reason: 'in_app_browser',
     );
     // 可见 WebView(hybrid composition)在位期间会参与每帧合成,
@@ -310,12 +338,26 @@ class _WebViewPageState extends ConsumerState<WebViewPage> {
                         child: WebViewSettings.wrapWithScrollFix(
                       InAppWebView(
                             webViewEnvironment: windowsWebViewEnvironment,
+                            windowId: widget.windowId,
                             initialSettings: WebViewSettings.visible
-                              ..useShouldOverrideUrlLoading = true,
-                            initialUserScripts:
-                                WebViewSettings.compatPolyfillScripts,
+                              ..useShouldOverrideUrlLoading = true
+                              ..supportMultipleWindows = widget.allowPopups
+                              ..javaScriptCanOpenWindowsAutomatically =
+                                  widget.allowPopups,
+                            initialUserScripts: widget.extraUserScripts.isEmpty
+                                ? WebViewSettings.compatPolyfillScripts
+                                : UnmodifiableListView([
+                                    ...WebViewSettings.compatPolyfillScripts,
+                                    ...widget.extraUserScripts,
+                                  ]),
                             shouldOverrideUrlLoading:
                                 _shouldOverrideUrlLoading,
+                            onCreateWindow: widget.allowPopups
+                                ? _openPopupWindow
+                                : null,
+                            onCloseWindow: widget.windowId != null
+                                ? (_) => _closePopupWindow()
+                                : null,
                             onReceivedServerTrustAuthRequest: (_, challenge) =>
                                 WebViewSettings.handleServerTrustAuthRequest(
                                   challenge,
@@ -324,7 +366,8 @@ class _WebViewPageState extends ConsumerState<WebViewPage> {
                               _controller = controller;
                               // 老 WKWebView 的 JS 运行时错误回传到 LogWriter。
                               WebViewSettings.registerJsErrorReporter(controller);
-                              if (widget.url.isNotEmpty) {
+                              if (widget.url.isNotEmpty &&
+                                  widget.windowId == null) {
                                 // 等使用期的准备（重灌）完成再加载；准备失败
                                 // 也照常加载（取代 RawSetCookieQueue.flush）
                                 await _webViewUse.ready;
@@ -505,6 +548,40 @@ class _WebViewPageState extends ConsumerState<WebViewPage> {
 
     // 无论用户选择如何，都不让 WebView 加载此 URL
     return NavigationActionPolicy.CANCEL;
+  }
+
+  /// 网页要开新窗口（[WebViewPage.allowPopups]）：叠一页浏览器承载它。
+  /// 必须同步答应，网页拿到的窗口对象才是这一页（支付弹窗先开空窗口再改地址）。
+  Future<bool?> _openPopupWindow(
+    InAppWebViewController controller,
+    CreateWindowAction action,
+  ) async {
+    if (!mounted) return false;
+    unawaited(
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => WebViewPage(
+            url: action.request.url?.toString() ?? '',
+            extraUserScripts: widget.extraUserScripts,
+            allowPopups: true,
+            windowId: action.windowId,
+          ),
+        ),
+      ),
+    );
+    return true;
+  }
+
+  /// 网页 `window.close()` 关掉自己开的窗口。
+  void _closePopupWindow() {
+    if (!mounted) return;
+    final route = ModalRoute.of(context);
+    if (route == null || !route.isActive) return;
+    if (route.isCurrent) {
+      Navigator.of(context).pop();
+    } else {
+      Navigator.of(context).removeRoute(route);
+    }
   }
 
   void _handleMenuAction(String action) {

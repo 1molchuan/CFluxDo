@@ -16,6 +16,8 @@ import 'message_bus/session_channel_providers.dart';
 import 'message_bus/topic_tracking_providers.dart';
 import 'ldc_providers.dart';
 import 'cdk_providers.dart';
+import 'ld_store_providers.dart';
+import '../services/site_context.dart';
 
 class AppStateRefresher {
   AppStateRefresher._();
@@ -71,6 +73,13 @@ class AppStateRefresher {
     container.read(activeCategorySlugsProvider.notifier).reset();
     await container.read(ldcUserInfoProvider.notifier).disable();
     await container.read(cdkUserInfoProvider.notifier).disable();
+    if (SiteContext.isLinuxDo) {
+      // 第三方商城的凭据跟论坛账号走：登出即作废（内置浏览器里那枚一并清）
+      try {
+        await container.read(ldStoreServiceProvider).signOut();
+      } catch (_) {}
+      container.invalidate(ldStoreSessionProvider);
+    }
   }
 
   /// 刷新话题列表各 tab

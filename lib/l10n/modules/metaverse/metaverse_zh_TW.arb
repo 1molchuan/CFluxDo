@@ -11,6 +11,23 @@
     }
   },
   "github_viewFullCode": "點選檢視完整程式碼",
+  "ldStore_accountMismatch": "授權的商城帳號與目前論壇帳號不一致",
+  "ldStore_authExpired": "LD士多授權已過期，請重新授權",
+  "ldStore_authSuccess": "LD士多授權成功",
+  "ldStore_authorize": "授權登入",
+  "ldStore_awaitingDelivery": "待收貨",
+  "ldStore_confirmMessage": "LD士多是社群成員開發的第三方積分商城。授權後它會透過 LINUX DO Connect 取得你的使用者名稱、頭像和信任等級；App 會在本機安全儲存空間保存商城登入憑證，用來顯示訂單和訊息，並讓內建瀏覽器裡的商城保持登入。付款仍需你在 LINUX DO Credit 頁面確認。",
+  "ldStore_confirmTitle": "授權 LD士多",
+  "ldStore_coupons": "可用券",
+  "ldStore_desc": "社群成員開發的積分商城（第三方）",
+  "ldStore_open": "進入商城",
+  "ldStore_pendingPayment": "待付款",
+  "ldStore_signOut": "解除授權",
+  "ldStore_signOutMessage": "解除後 App 不再顯示 LD士多的訂單和訊息，內建瀏覽器裡的商城登入也會一併登出。",
+  "ldStore_stats": "在售 {online} · 今日成交 {today} · 小店 {stores}",
+  "ldStore_title": "LD士多",
+  "ldStore_unread": "未讀訊息",
+  "ldStore_verifyFailed": "商城登入驗證失敗，請稍後再試",
   "metaverse_authFailed": "授權失敗: {error}",
   "@metaverse_authFailed": {
     "placeholders": {

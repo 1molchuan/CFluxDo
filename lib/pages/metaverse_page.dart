@@ -13,6 +13,8 @@ import '../providers/ldc_providers.dart';
 import '../providers/cdk_providers.dart';
 import '../widgets/ldc_balance_card.dart';
 import '../widgets/cdk_balance_card.dart';
+import '../widgets/ld_store_card.dart';
+import '../services/site_context.dart';
 import '../modules/ldc_reward/ldc_reward.dart';
 import '../theme/mojian_theme.dart';
 import '../widgets/common/mojian_ledger_card.dart';
@@ -199,6 +201,11 @@ class _MetaversePageState extends ConsumerState<MetaversePage> {
                         // LDC 打赏配置（仅在 LDC 已开启时显示）
                         if (_ldcEnabled) ...[
                           const LdcRewardConfigTile(),
+                          const SizedBox(height: 16),
+                        ],
+                        // LD士多（第三方积分商城，只接 LINUX DO）
+                        if (SiteContext.isLinuxDo) ...[
+                          const LdStoreCard(),
                           const SizedBox(height: 16),
                         ],
                         // 更多服务占位符
