@@ -81,12 +81,16 @@ void main() {
   });
 
   test('服务端认的是另一个人：不对', () async {
-    final probe = _Probe([const SessionTokenProbeResult.valid({'id': 9})]);
+    final probe = _Probe([
+      const SessionTokenProbeResult.valid({'id': 9}),
+    ]);
     expect((await _verify(probe)).check, AccountCheck.wrongAccount);
   });
 
   test('预加载是别人、探测确认是目标账号：以服务端为准', () async {
-    final probe = _Probe([const SessionTokenProbeResult.valid({'id': 7})]);
+    final probe = _Probe([
+      const SessionTokenProbeResult.valid({'id': 7}),
+    ]);
     final result = await _verify(probe, preloaded: {'id': 9});
     expect(result.check, AccountCheck.confirmed);
   });
