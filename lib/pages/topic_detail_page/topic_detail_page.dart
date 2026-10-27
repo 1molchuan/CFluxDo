@@ -104,6 +104,8 @@ class TopicDetailPage extends ConsumerStatefulWidget {
   final int topicId;
   final String? initialTitle;
   final int? scrollToPostNumber; // 外部控制的跳转位置（如从通知跳转到指定楼层）
+  /// 打开时列表上的最高楼层：没有新回复就直接复用刚看过的那份详情
+  final int? expectedHighestPostNumber;
   final bool embeddedMode; // 嵌入模式（双栏布局中使用，不显示返回按钮）
   final bool parentActive; // 父容器是否可见（IndexedStack/双栏切 tab 时用）
   final bool autoSwitchToMasterDetail; // 仅在从首页进入时允许自动切换
@@ -152,6 +154,7 @@ class TopicDetailPage extends ConsumerStatefulWidget {
     required this.topicId,
     this.initialTitle,
     this.scrollToPostNumber,
+    this.expectedHighestPostNumber,
     this.embeddedMode = false,
     this.truncateOnPush = false,
     this.parentActive = true,
@@ -197,6 +200,7 @@ class _TopicDetailPageState extends ConsumerState<TopicDetailPage>
     widget.topicId,
     postNumber: _providerPostNumber,
     instanceId: _instanceId,
+    expectedHighestPostNumber: widget.expectedHighestPostNumber,
   );
 
   // Controller

@@ -3,6 +3,7 @@ import 'core_providers.dart';
 import 'bookmark_name_suggestions_provider.dart';
 import 'bookmark_sync_controller.dart';
 import 'notification_list_provider.dart';
+import 'topic_detail/detail_memory_cache.dart';
 import 'topic_list/topic_list_provider.dart';
 import 'topic_list/filter_provider.dart';
 import 'topic_list/sort_provider.dart';
@@ -53,6 +54,8 @@ class AppStateRefresher {
     container.read(userSummaryProvider.notifier).clearCache();
     container.read(bookmarkNameSuggestionsProvider.notifier).clearCache();
     container.read(bookmarkSyncControllerProvider.notifier).reset();
+    // 刚看过的话题详情里有这个账号的已读 / 点赞状态
+    TopicDetailMemoryCache.clear();
     // 登出时 invalidate 所有（不会发请求，因为数据被清空了）
     for (final refresh in _coreRefreshers) {
       refresh(container);

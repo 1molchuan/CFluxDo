@@ -3291,6 +3291,7 @@ class _TopicListState extends ConsumerState<_TopicList>
             topicId: topic.id,
             initialTitle: topic.title,
             scrollToPostNumber: scrollToPostNumber,
+            expectedHighestPostNumber: topic.highestPostNumber,
           );
       return;
     }
@@ -3301,6 +3302,7 @@ class _TopicListState extends ConsumerState<_TopicList>
           topicId: topic.id,
           initialTitle: topic.title,
           scrollToPostNumber: scrollToPostNumber,
+          expectedHighestPostNumber: topic.highestPostNumber,
           autoSwitchToMasterDetail: true,
         ),
       ),

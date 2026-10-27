@@ -18,6 +18,7 @@ class PaneEntry {
     required this.topicId,
     this.initialTitle,
     this.scrollToPostNumber,
+    this.expectedHighestPostNumber,
     this.instanceId,
     this.highlightBoostUsername,
     this.initialRevisionPostNumber,
@@ -32,6 +33,7 @@ class PaneEntry {
       topicId = null,
       initialTitle = null,
       scrollToPostNumber = null,
+      expectedHighestPostNumber = null,
       instanceId = null,
       highlightBoostUsername = null,
       initialRevisionPostNumber = null,
@@ -45,6 +47,7 @@ class PaneEntry {
       username = null,
       initialTitle = null,
       scrollToPostNumber = null,
+      expectedHighestPostNumber = null,
       instanceId = null,
       highlightBoostUsername = null,
       initialRevisionPostNumber = null,
@@ -57,6 +60,9 @@ class PaneEntry {
   final String? username;
   final String? initialTitle;
   final int? scrollToPostNumber;
+
+  /// 打开时列表上的最高楼层（见 [TopicDetailPage.expectedHighestPostNumber]）
+  final int? expectedHighestPostNumber;
 
   /// provider 实例 ID，用于布局切换时复用同一个 provider
   final String? instanceId;
@@ -116,6 +122,7 @@ class SelectedTopicNotifier extends StateNotifier<SelectedTopicState> {
     required int topicId,
     String? initialTitle,
     int? scrollToPostNumber,
+    int? expectedHighestPostNumber,
     String? instanceId,
     String? highlightBoostUsername,
     int? initialRevisionPostNumber,
@@ -131,6 +138,7 @@ class SelectedTopicNotifier extends StateNotifier<SelectedTopicState> {
           topicId: topicId,
           initialTitle: initialTitle,
           scrollToPostNumber: scrollToPostNumber,
+          expectedHighestPostNumber: expectedHighestPostNumber,
           // 最初从列表进入的这一层也必须持有稳定实例 ID。否则它在
           // 平行视界里从 detail 搬到 master 时会生成新的 provider key，
           // 已加载的分页数据会全部失配并重新请求。

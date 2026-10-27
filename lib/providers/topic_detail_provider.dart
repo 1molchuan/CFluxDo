@@ -12,9 +12,11 @@ import '../widgets/common/anchor_guard_sliver.dart';
 import 'bookmark_sync_controller.dart';
 import 'core_providers.dart';
 import 'message_bus/models.dart';
+import 'topic_detail/detail_memory_cache.dart';
 import 'topic_detail/post_stream_window.dart';
 import 'topic_detail/topic_view_mode.dart';
 
+export 'topic_detail/detail_memory_cache.dart';
 export 'topic_detail/post_stream_window.dart';
 export 'topic_detail/topic_view_mode.dart';
 
@@ -33,7 +35,16 @@ class TopicDetailParams {
   /// 默认为空字符串，用于 MessageBus 等不需要精确匹配的场景
   final String instanceId;
 
-  const TopicDetailParams(this.topicId, {this.postNumber, this.instanceId = ''});
+  /// 打开时列表上的最高楼层（不参与相等判断）。有它才可能直接复用最近看过
+  /// 的那份详情，见 [TopicDetailMemoryCache]。
+  final int? expectedHighestPostNumber;
+
+  const TopicDetailParams(
+    this.topicId, {
+    this.postNumber,
+    this.instanceId = '',
+    this.expectedHighestPostNumber,
+  });
 
   @override
   bool operator ==(Object other) =>
@@ -442,6 +453,17 @@ class TopicDetailNotifier extends AsyncNotifier<TopicDetail> {
     ref.onCancel(() {
       // 最后一个 watcher 移除后，延迟 30 秒再允许 dispose
       disposeTimer = Timer(const Duration(seconds: 30), link.close);
+      // 离开页面：留一份给马上又点进来的情况（生命周期回调里不能读
+      // state，挪到回调之后）
+      scheduleMicrotask(() {
+        if (!ref.mounted) return;
+        final current = state.value;
+        if (current != null &&
+            !state.hasError &&
+            _viewMode == TopicViewMode.all) {
+          TopicDetailMemoryCache.put(current);
+        }
+      });
     });
     ref.onResume(() {
       // 新的 watcher 出现，取消清理定时器
@@ -454,6 +476,25 @@ class TopicDetailNotifier extends AsyncNotifier<TopicDetail> {
     // build 重跑(invalidate / 出错重试)沿用当前视图模式:此前固定拉未过滤
     // 数据,过滤标记却还亮着,翻页又按过滤视图的 stream id 走
     final mode = _viewMode;
+
+    // 首次构建（不是刷新重建）：刚离开又点进来、期间没有新回复，直接用
+    // 离开时那份
+    if (!state.hasValue && mode == TopicViewMode.all) {
+      final cached = TopicDetailMemoryCache.take(
+        arg.topicId,
+        expectedHighestPostNumber: arg.expectedHighestPostNumber,
+        targetPostNumber: arg.postNumber,
+      );
+      if (cached != null) {
+        debugPrint('[TopicDetailNotifier] 复用最近看过的详情 topicId=${arg.topicId}');
+        TopicPluginData.put(arg.topicId, cached.pluginExtras);
+        _beginEpoch();
+        return _withSuggestedCache(cached);
+      }
+    } else {
+      TopicDetailMemoryCache.forget(arg.topicId);
+    }
+
     final epoch = _beginEpoch();
     final detail = await _fetchDetail(
       mode,
