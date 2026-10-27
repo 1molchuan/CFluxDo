@@ -55,7 +55,7 @@ class LdStoreSessionNotifier extends AsyncNotifier<LdStoreSession?> {
       return LdStoreSession(token: token, account: account);
     } on LdStoreAuthExpiredException {
       _lastAccount = null;
-      await service.discardToken();
+      await service.discardToken(username);
       rethrow;
     } catch (e) {
       final last = _lastAccount;
@@ -78,7 +78,8 @@ class LdStoreSessionNotifier extends AsyncNotifier<LdStoreSession?> {
   Future<void> adopt() => refresh();
 
   Future<void> signOut() async {
-    await ref.read(ldStoreServiceProvider).signOut();
+    final username = ref.read(currentUserProvider).value?.username;
+    await ref.read(ldStoreServiceProvider).signOut(username: username);
     await refresh();
   }
 }

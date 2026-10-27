@@ -1,0 +1,53 @@
+{
+  "@@locale": "zh",
+  "accounts_switchAccount": "切换账号",
+  "accounts_hint": "切换时不用重新登录。各账号的登录状态只存在本机的系统安全存储里，不会上传，也不进数据备份。",
+  "accounts_current": "当前",
+  "accounts_needsLogin": "需要重新登录",
+  "accounts_addAccount": "添加账号",
+  "accounts_remove": "从本机移除",
+  "accounts_relogin": "重新登录",
+  "accounts_savedAccounts": "已保存的账号",
+  "accounts_loggedOut": "切换没有成功，现在是未登录状态，请重新登录。",
+  "accounts_unavailable": "系统安全存储不可用，没法保存账号。",
+  "accounts_removeConfirm": "从本机移除「{name}」？不会在网站上退出它，之后要用需重新登录。",
+  "@accounts_removeConfirm": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "accounts_switching": "正在切换到 {name}…",
+  "@accounts_switching": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "accounts_switched": "已切换到 {name}",
+  "@accounts_switched": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "accounts_targetInvalid": "{name} 的登录已失效，已切回原来的账号。要用它请重新登录。",
+  "@accounts_targetInvalid": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "accounts_limit": "最多保存 {max} 个账号，请先移除一个。",
+  "@accounts_limit": {
+    "placeholders": {
+      "max": {
+        "type": "int"
+      }
+    }
+  }
+}

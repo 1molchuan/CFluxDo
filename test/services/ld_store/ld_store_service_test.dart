@@ -9,6 +9,7 @@ import 'package:fluxdo/services/ld_store/ld_store_models.dart';
 import 'package:fluxdo/services/ld_store/ld_store_service.dart';
 import 'package:fluxdo/services/local_notification_service.dart';
 import 'package:fluxdo/services/network/flux_request_spec.dart';
+import 'package:fluxdo/services/storage/secret_store.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'ld_store_test_support.dart';
@@ -387,20 +388,60 @@ setTimeout(() => { window.location.replace(redirectUrl); }, 500); })();</script>
       });
     });
 
-    testWidgets('换了论坛账号：旧凭据作废并记下，内置浏览器里那枚随后清掉', (tester) async {
+    testWidgets('凭据按论坛账号分开存：切到别的账号读不到，切回来还在', (tester) async {
       await _pumpApp(tester);
       await tester.runAsync(() async {
         build();
         await service.saveToken('alice', LdStoreToken.parse(jwt)!);
         expect(await service.loadToken('bob'), isNull);
-        expect(secrets.values, isEmpty);
+        expect((await service.loadToken('alice'))?.value, jwt);
+        expect(await service.loadRevocation(), isNull);
+      });
+    });
+
+    testWidgets('切走账号：凭据留着，只让内置浏览器里那枚失效', (tester) async {
+      await _pumpApp(tester);
+      await tester.runAsync(() async {
+        build();
+        await service.saveToken('alice', LdStoreToken.parse(jwt)!);
+        await service.revokeWebSessionFor('alice');
         final revocation = (await service.loadRevocation())!;
         expect(revocation.userId, '12345');
         expect(revocation.site, 'linux.do');
+        expect((await service.loadToken('alice'))?.value, jwt);
 
         // 重新授权后不再清网页里的凭据
         await service.saveToken('bob', LdStoreToken.parse(jwt)!);
         expect(await service.loadRevocation(), isNull);
+      });
+    });
+
+    testWidgets('论坛退出登录：删掉最近用过的那个账号的凭据并记下', (tester) async {
+      await _pumpApp(tester);
+      await tester.runAsync(() async {
+        build();
+        await service.saveToken('alice', LdStoreToken.parse(jwt)!);
+        await service.signOut();
+        expect(secrets.values, isEmpty);
+        expect((await service.loadRevocation())?.userId, '12345');
+      });
+    });
+
+    testWidgets('旧版只存一份的凭据搬进它自己账号的槽', (tester) async {
+      await _pumpApp(tester);
+      await tester.runAsync(() async {
+        build();
+        await secrets.write(
+          const SecretKey(
+            namespace: 'ld_store',
+            name: 'session',
+            fallbackPolicy: SecretFallbackPolicy.memoryOnly,
+          ),
+          jsonEncode({'username': 'alice', 'token': jwt}),
+        );
+        expect(await service.loadToken('bob'), isNull);
+        expect((await service.loadToken('alice'))?.value, jwt);
+        expect(secrets.values, hasLength(1));
       });
     });
 

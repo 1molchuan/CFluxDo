@@ -1,0 +1,18 @@
+{
+  "@@locale": "zh_TW",
+  "accounts_switchAccount": "切換帳號",
+  "accounts_hint": "切換時不用重新登入。各帳號的登入狀態只存在本機的系統安全儲存裡，不會上傳，也不進資料備份。",
+  "accounts_current": "目前",
+  "accounts_needsLogin": "需要重新登入",
+  "accounts_addAccount": "新增帳號",
+  "accounts_remove": "從本機移除",
+  "accounts_relogin": "重新登入",
+  "accounts_savedAccounts": "已儲存的帳號",
+  "accounts_loggedOut": "切換沒有成功，現在是未登入狀態，請重新登入。",
+  "accounts_unavailable": "系統安全儲存無法使用，無法儲存帳號。",
+  "accounts_removeConfirm": "從本機移除「{name}」？不會在網站上登出它，之後要用需重新登入。",
+  "accounts_switching": "正在切換到 {name}…",
+  "accounts_switched": "已切換到 {name}",
+  "accounts_targetInvalid": "{name} 的登入已失效，已切回原來的帳號。要使用請重新登入。",
+  "accounts_limit": "最多儲存 {max} 個帳號，請先移除一個。"
+}

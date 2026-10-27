@@ -1,0 +1,18 @@
+{
+  "@@locale": "en",
+  "accounts_switchAccount": "Switch account",
+  "accounts_hint": "Switch without signing in again. Each account's session is kept only in this device's secure storage — never uploaded or included in backups.",
+  "accounts_current": "Current",
+  "accounts_needsLogin": "Sign-in required",
+  "accounts_addAccount": "Add account",
+  "accounts_remove": "Remove from this device",
+  "accounts_relogin": "Sign in again",
+  "accounts_savedAccounts": "Saved accounts",
+  "accounts_loggedOut": "Switching failed and you are now signed out. Please sign in again.",
+  "accounts_unavailable": "Secure storage is unavailable, so accounts can't be saved.",
+  "accounts_removeConfirm": "Remove \"{name}\" from this device? It stays signed in on the website; you'll need to sign in again to use it here.",
+  "accounts_switching": "Switching to {name}…",
+  "accounts_switched": "Switched to {name}",
+  "accounts_targetInvalid": "{name}'s session has expired; switched back. Sign in again to use it.",
+  "accounts_limit": "You can save up to {max} accounts. Remove one first."
+}

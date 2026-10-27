@@ -11,6 +11,7 @@ import '../network/cf/cf_challenge_classifier.dart';
 import '../network/discourse_dio.dart';
 import '../network/flux_request_spec.dart';
 import '../oauth_flow_helper.dart';
+import '../site_context.dart';
 import '../storage/secret_store.dart';
 import '../storage/system_secret_store.dart';
 import 'ld_store_models.dart';
@@ -141,15 +142,28 @@ class LdStoreService {
   // 凭据
   // ---------------------------------------------------------------------------
 
-  /// 一台设备只存一份：`{username, token}`，换论坛账号或登出时整份作废。
-  static const _sessionKey = SecretKey(
+  /// 每个论坛账号一份 `{username, token}`（多账号切换后再切回来还在）；
+  /// 论坛退出登录时删掉当前账号那份。
+  static SecretKey _sessionKeyFor(String username) => SecretKey(
+    namespace: 'ld_store',
+    name: 'session',
+    accountId: SiteContext.accountKey(username.toLowerCase()),
+    fallbackPolicy: SecretFallbackPolicy.memoryOnly,
+  );
+
+  /// 旧版（单账号）只存一份的位置，读到就搬进它自己账号的槽
+  static const _legacySessionKey = SecretKey(
     namespace: 'ld_store',
     name: 'session',
     fallbackPolicy: SecretFallbackPolicy.memoryOnly,
   );
 
-  Future<({String username, LdStoreToken token})?> _readSession() async {
-    final raw = await _secretStore.read(_sessionKey);
+  /// 最近读写过凭据的论坛账号（退出登录时论坛那边已经清掉用户名了）
+  String? _lastUsername;
+
+  Future<({String username, LdStoreToken token})?> _decodeSession(
+    String? raw,
+  ) async {
     if (raw == null || raw.isEmpty) return null;
     try {
       final json = jsonDecode(raw) as Map<String, dynamic>;
@@ -159,56 +173,93 @@ class LdStoreService {
         return (username: username, token: token);
       }
     } catch (_) {}
-    await _secretStore.delete(_sessionKey);
     return null;
   }
 
-  /// 读论坛账号 [username] 的商城凭据。没有（或存的是别的账号）返回 null；
-  /// 存的值已到期抛 [LdStoreAuthExpiredException]（并清掉）。
-  Future<LdStoreToken?> loadToken(String username) async {
-    final session = await _readSession();
-    if (session == null) return null;
-    if (session.username.toLowerCase() != username.toLowerCase()) {
-      await signOut();
-      return null;
+  Future<void> _migrateLegacySession() async {
+    final raw = await _secretStore.read(_legacySessionKey);
+    if (raw == null) return;
+    final legacy = await _decodeSession(raw);
+    if (legacy != null) {
+      await _secretStore.write(_sessionKeyFor(legacy.username), raw);
     }
-    if (session.token.isExpired(_clock())) {
-      await _secretStore.delete(_sessionKey);
-      throw const LdStoreAuthExpiredException();
+    await _secretStore.delete(_legacySessionKey);
+  }
+
+  Future<LdStoreToken?> _readToken(String username) async {
+    await _migrateLegacySession();
+    final key = _sessionKeyFor(username);
+    final raw = await _secretStore.read(key);
+    final session = await _decodeSession(raw);
+    if (session == null) {
+      if (raw != null) await _secretStore.delete(key);
+      return null;
     }
     return session.token;
   }
 
+  /// 读论坛账号 [username] 的商城凭据。没有返回 null；存的值已到期抛
+  /// [LdStoreAuthExpiredException]（并清掉）。
+  Future<LdStoreToken?> loadToken(String username) async {
+    _lastUsername = username;
+    final token = await _readToken(username);
+    if (token == null) return null;
+    if (token.isExpired(_clock())) {
+      await _secretStore.delete(_sessionKeyFor(username));
+      throw const LdStoreAuthExpiredException();
+    }
+    return token;
+  }
+
   Future<void> saveToken(String username, LdStoreToken token) async {
+    _lastUsername = username;
     await _secretStore.write(
-      _sessionKey,
+      _sessionKeyFor(username),
       jsonEncode({'username': username, 'token': token.value}),
     );
     await _clearRevocation();
   }
 
   /// 凭据被商城拒绝：直接丢掉（网页里那枚同样无效，不必记下）。
-  Future<void> discardToken() => _secretStore.delete(_sessionKey);
+  Future<void> discardToken(String username) =>
+      _secretStore.delete(_sessionKeyFor(username));
 
-  /// 退出授权 / 论坛登出：删掉凭据，并记下它的身份，让内置浏览器里的
-  /// 同一枚也失效。
-  Future<void> signOut() async {
-    LdStoreToken? token;
+  /// 退出授权 / 论坛登出：删掉 [username]（默认最近用过的账号）的凭据，
+  /// 并记下它的身份，让内置浏览器里的同一枚也失效。
+  Future<void> signOut({String? username}) async {
+    final target = username ?? _lastUsername;
+    await _migrateLegacySession();
+    if (target == null) return;
+    final token = await _tokenOrNull(target);
+    await _secretStore.delete(_sessionKeyFor(target));
+    if (token != null) await _recordRevocation(token);
+  }
+
+  /// 切到别的论坛账号：[username] 的凭据留着（切回来还能用），只让内置
+  /// 浏览器里那枚失效，免得新账号打开商城看到的还是上一个人。
+  Future<void> revokeWebSessionFor(String username) async {
+    final token = await _tokenOrNull(username);
+    if (token != null) await _recordRevocation(token);
+  }
+
+  Future<LdStoreToken?> _tokenOrNull(String username) async {
     try {
-      token = (await _readSession())?.token;
-    } catch (_) {}
-    await _secretStore.delete(_sessionKey);
-    if (token != null) {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(
-        _revocationKey,
-        jsonEncode({
-          'sub': token.userId,
-          'site': token.site,
-          'exp': token.expiresAt.millisecondsSinceEpoch ~/ 1000,
-        }),
-      );
+      return await _readToken(username);
+    } catch (_) {
+      return null;
     }
+  }
+
+  Future<void> _recordRevocation(LdStoreToken token) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+      _revocationKey,
+      jsonEncode({
+        'sub': token.userId,
+        'site': token.site,
+        'exp': token.expiresAt.millisecondsSinceEpoch ~/ 1000,
+      }),
+    );
   }
 
   Future<LdStoreRevocation?> loadRevocation() async {

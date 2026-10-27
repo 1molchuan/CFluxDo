@@ -528,6 +528,17 @@ function __fluxdoCapturePreloaded() {
     await _loadPreloadedData();
   }
 
+  /// 等在途的那次加载结束，再重新加载一次。
+  ///
+  /// [refresh] 碰上在途加载会直接返回（拿不到新数据）；登录身份刚换过时
+  /// 在途那次可能还是按旧身份发的，必须等它落地后用新 cookie 再取一遍。
+  Future<void> reloadAfterPending() async {
+    while (_loading) {
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+    }
+    await refresh();
+  }
+
   /// 直接从已有 HTML 快照恢复预加载数据。
   ///
   /// 适用于登录 WebView 已经拿到完整页面的场景，避免重复请求首页。

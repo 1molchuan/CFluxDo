@@ -70,6 +70,23 @@ class CookieJarService {
     'linux_do_cdk_session_id',
   };
 
+  /// 跟着论坛账号走的 cookie（多账号切换时整组换掉）：
+  /// - `_t` / `_forum_session`：论坛登录会话
+  /// - `_rt`：登录会话的 fingerprint 产物
+  /// - `linux_do_credit_session_id` / `linux_do_cdk_session_id`：LDC / CDK
+  ///   应用的登录会话
+  /// - `auth.session-token`：connect.linux.do 的登录会话
+  ///
+  /// cf_clearance 等 CF cookie 绑的是设备 / 出口，不在其中，切号时保留。
+  static const Set<String> accountCookieNames = {
+    '_t',
+    '_forum_session',
+    '_rt',
+    'linux_do_credit_session_id',
+    'linux_do_cdk_session_id',
+    'auth.session-token',
+  };
+
   CookieManager get webViewCookieManager =>
       WindowsWebViewEnvironmentService.instance.cookieManager;
 
@@ -462,6 +479,55 @@ class CookieJarService {
       uri ?? Uri.parse(AppConstants.baseUrl),
       names: authCookieNames,
     );
+  }
+
+  /// 多账号：当前账号在 jar 里的账号 cookie（本站及其子域，见
+  /// [accountCookieNames]），已过期的不要。
+  Future<List<CanonicalCookie>> exportAccountCookies() async {
+    final baseHost = Uri.parse(AppConstants.baseUrl).host.toLowerCase();
+    return [
+      for (final cookie in await loadAllCanonicalCookies())
+        if (accountCookieNames.contains(cookie.name) &&
+            cookie.value.isNotEmpty &&
+            !cookie.isExpired &&
+            _belongsToSite(cookie, baseHost))
+          cookie,
+    ];
+  }
+
+  /// 多账号：把 jar 里本站及其子域的账号 cookie 整组换成 [cookies]（传空
+  /// 即清掉），每个名字在 jar 的同一把锁里原子替换；CF 等其他 cookie 不动。
+  /// WebView 一侧由调用方逐个推送 / 删除。
+  Future<void> replaceAccountCookies(List<CanonicalCookie> cookies) async {
+    if (!_initialized) await initialize();
+    final jar = _cookieJar;
+    if (jar is! EnhancedPersistCookieJar) return;
+    final baseUri = Uri.parse(AppConstants.baseUrl);
+    for (final name in accountCookieNames) {
+      await jar.replaceByNameForSite(baseUri, name, [
+        for (final cookie in cookies)
+          if (cookie.name == name) cookie,
+      ]);
+    }
+    CookieLogger.delete(name: 'account_cookies', source: 'replaceAccountCookies');
+  }
+
+  /// 从 WebView 删掉 [name] 在这些主机上的所有变体（host-only / host / .host）
+  Future<void> deleteWebViewCookieOnHosts(String name, Set<String> hosts) async {
+    if (!_initialized) await initialize();
+    await _deleteWebViewCookieVariants(name, hosts);
+  }
+
+  @visibleForTesting
+  static bool belongsToSiteForTest(CanonicalCookie cookie, String baseHost) =>
+      _belongsToSite(cookie, baseHost);
+
+  static bool _belongsToSite(CanonicalCookie cookie, String baseHost) {
+    final domain = (cookie.domain ?? Uri.tryParse(cookie.originUrl ?? '')?.host)
+        ?.toLowerCase();
+    if (domain == null || domain.isEmpty) return false;
+    final bare = domain.startsWith('.') ? domain.substring(1) : domain;
+    return bare == baseHost || bare.endsWith('.$baseHost');
   }
 
   /// 加载所有 CanonicalCookie。

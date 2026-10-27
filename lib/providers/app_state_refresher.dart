@@ -19,6 +19,16 @@ import 'message_bus/topic_tracking_providers.dart';
 import 'ldc_providers.dart';
 import 'cdk_providers.dart';
 import 'ld_store_providers.dart';
+import 'chat/chat_channels_provider.dart';
+import 'chat/chat_messages_provider.dart';
+import 'chat/chat_notification_alert_provider.dart';
+import 'directory_providers.dart';
+import 'export_history_provider.dart';
+import 'notion_config_provider.dart';
+import 'selected_topic_provider.dart';
+import 'topic_search_provider.dart';
+import 'topic_session_provider.dart';
+import 'user_content_search_provider.dart';
 import '../services/site_context.dart';
 
 class AppStateRefresher {
@@ -51,6 +61,41 @@ class AppStateRefresher {
   }
 
   static Future<void> resetForLogout(ProviderContainer container) async {
+    _resetAccountState(container);
+    await container.read(ldcUserInfoProvider.notifier).disable();
+    await container.read(cdkUserInfoProvider.notifier).disable();
+    if (SiteContext.isLinuxDo) {
+      // 第三方商城的凭据跟论坛账号走：登出即作废（内置浏览器里那枚一并清）
+      try {
+        await container.read(ldStoreServiceProvider).signOut();
+      } catch (_) {}
+      container.invalidate(ldStoreSessionProvider);
+    }
+  }
+
+  /// 切换账号：和退出登录一样清掉上一个账号的界面状态，但 LDC / CDK 的开关
+  /// 是设备级偏好、LD士多 凭据按账号存，都不动（切回来还在）。
+  static void resetForAccountSwitch(ProviderContainer container) {
+    _resetAccountState(container);
+    container.read(selectedTopicProvider.notifier).clear();
+    container
+      ..invalidate(currentUsernameProvider)
+      ..invalidate(recentNotificationsProvider)
+      ..invalidate(chatChannelsProvider)
+      ..invalidate(chatMessagesProvider)
+      ..invalidate(chatNotificationAlertProvider)
+      ..invalidate(categoryNotificationOverridesProvider)
+      ..invalidate(siteTagGroupsProvider)
+      ..invalidate(topicSessionProvider)
+      ..invalidate(topicSearchProvider)
+      ..invalidate(userContentSearchProvider)
+      ..invalidate(connectStatsProvider)
+      ..invalidate(exportHistoryProvider)
+      ..invalidate(notionConfigProvider)
+      ..invalidate(ldStoreSessionProvider);
+  }
+
+  static void _resetAccountState(ProviderContainer container) {
     container.read(currentUserProvider.notifier).clearCache();
     container.read(userSummaryProvider.notifier).clearCache();
     container.read(bookmarkNameSuggestionsProvider.notifier).clearCache();
@@ -76,15 +121,6 @@ class AppStateRefresher {
       container.read(tabTagsProvider(id).notifier).state = [];
     }
     container.read(activeCategorySlugsProvider.notifier).reset();
-    await container.read(ldcUserInfoProvider.notifier).disable();
-    await container.read(cdkUserInfoProvider.notifier).disable();
-    if (SiteContext.isLinuxDo) {
-      // 第三方商城的凭据跟论坛账号走：登出即作废（内置浏览器里那枚一并清）
-      try {
-        await container.read(ldStoreServiceProvider).signOut();
-      } catch (_) {}
-      container.invalidate(ldStoreSessionProvider);
-    }
   }
 
   /// 刷新话题列表各 tab
