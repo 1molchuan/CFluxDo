@@ -81,6 +81,70 @@ void main() {
       expect(ports.storedSessionChecks, 0, reason: '预加载带用户时不再查本地会话');
     });
 
+    test('标准站点：WebView 有用户但原生会话不可用时，不能发布假登录态', () async {
+      ports = FakeStartupPorts(
+        preloadedUser: aliceJson,
+        storedSession: false,
+        path: StartupPreloadPath.webView,
+      )..validatePreloadedSession = true;
+      startup = build(ports);
+      startup.registerPostLogin(FakePostLoginStart(ports.log));
+      startup.storesReady();
+      startup.launch();
+      await startup.ensurePreloaded();
+      await settle();
+      expect(ports.storedSessionChecks, 1);
+      expect(startup.isLoggedIn, isFalse);
+      expect(ports.log, isNot(contains('publishUser:alice')));
+      expect(ports.log, isNot(contains('message_bus:start')));
+      expect(ports.log.where((e) => e.startsWith('startClearanceRefresh:')), isEmpty);
+    });
+
+    test('标准站点：jar 丢失登录 Cookie 时，先经会话权威从 WebView 恢复再发布用户', () async {
+      final rig = SessionTokenRig(webView: 'test-session', forumSession: 'test-forum');
+      rig.server.valid.add('test-session');
+      ports = FakeStartupPorts(
+        preloadedUser: aliceJson,
+        path: StartupPreloadPath.webView,
+      )
+        ..validatePreloadedSession = true
+        ..storedSessionBody = () async {
+          final verdict = await rig.authority.recoverMissingJarToken();
+          return verdict.kind == SessionTokenVerdictKind.valid;
+        };
+      startup = build(ports);
+      startup.storesReady();
+      startup.launch();
+      await startup.ensurePreloaded();
+      await settle();
+      expect(rig.jarStore.value, 'test-session');
+      expect(rig.jarStore.forumSessionAdoptions, ['test-forum']);
+      expect(startup.verdictNow?.user?.username, 'alice');
+      expect(ports.storedSessionChecks, 1);
+    });
+
+    test('标准站点：原生会话恢复确认前不提前发布用户或启动登录后任务', () async {
+      ports = FakeStartupPorts(
+        preloadedUser: aliceJson,
+        path: StartupPreloadPath.webView,
+      )
+        ..validatePreloadedSession = true
+        ..storedSessionGate = Completer<bool>();
+      startup = build(ports);
+      startup.registerPostLogin(FakePostLoginStart(ports.log));
+      startup.storesReady();
+      startup.launch();
+      await startup.ensurePreloaded();
+      expect(startup.verdictNow, isNull);
+      expect(ports.log, isNot(contains('publishUser:alice')));
+      ports.storedSessionGate!.complete(true);
+      await settle();
+      expect(startup.isLoggedIn, isTrue);
+      expect(startup.verdictNow!.user?.username, 'alice');
+      expect(ports.log, contains('publishUser:alice'));
+      expect(ports.log, contains('message_bus:start'));
+    });
+
     test('priming 不等预加载，预加载不等会话判定（不加串行等待）', () async {
       ports = FakeStartupPorts(storedSession: true)
         ..storedSessionGate = Completer<bool>();

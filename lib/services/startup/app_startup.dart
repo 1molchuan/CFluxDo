@@ -118,6 +118,10 @@ abstract interface class AppStartupPorts {
   /// 预加载数据里的当前用户 JSON；匿名或未加载时为 null。
   Map<String, dynamic>? get preloadedUserJson;
 
+  /// 标准 Discourse 站点没有专属 bootstrap 兜底。预加载来自 WebView 时，
+  /// 它的 current_user 不能证明原生 jar 也有登录 Cookie，须先走恢复链。
+  bool get validatePreloadedSession;
+
   /// 本地会话检查：用户名 → jar `_t`（缺失时走 jar 丢值恢复）→
   /// `/session/current.json`（被拒时走恢复链）。网络不通时保守判定为已登录。
   Future<bool> checkStoredSession();
@@ -337,15 +341,15 @@ class AppStartup {
     );
   }
 
-  /// 判定是否已登录：预加载带当前用户 → 已登录（同步得出）；否则走本地
-  /// 会话检查（含恢复链）。
+  /// 判定是否已登录：标准站点须同时确认原生会话，缺失时走现有恢复链；
+  /// LINUX DO 的预加载快路径保持不变。
   Future<SessionVerdict> _resolve({
     required String reason,
     bool startup = false,
   }) {
     final epoch = _epoch;
     final json = _ports.preloadedUserJson;
-    if (json != null) {
+    if (json != null && !_ports.validatePreloadedSession) {
       // 同步得出：启动页放行时 CurrentUserNotifier 能直接拿到用户，不闪未登录
       final verdict = SessionVerdict.loggedIn(
         user: User.fromJson(json),
@@ -365,8 +369,11 @@ class AppStartup {
       try {
         final ok = await _ports.checkStoredSession();
         final verdict = ok
-            ? const SessionVerdict.loggedIn(
-                source: SessionVerdictSource.storedSession,
+            ? SessionVerdict.loggedIn(
+                user: json == null ? null : User.fromJson(json),
+                source: json == null
+                    ? SessionVerdictSource.storedSession
+                    : SessionVerdictSource.preload,
               )
             : const SessionVerdict.loggedOut();
         resolution.settled = verdict;

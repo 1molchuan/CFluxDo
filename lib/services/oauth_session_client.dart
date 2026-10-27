@@ -2,6 +2,7 @@ import 'package:dio/dio.dart';
 
 import 'auth_session.dart';
 import 'network/exceptions/oauth_exception.dart';
+import 'network/flux_request_spec.dart';
 
 /// 读取 LDC/CDK 的现有业务会话。
 ///
@@ -25,7 +26,12 @@ class OAuthSessionClient {
   /// 手动授权、停用或退出时取消旧请求。
   void cancel() => state.cancel();
 
-  Future<Map<String, dynamic>> getUserInfo({String? expectedUsername}) async {
+  /// [afterVerification]：用户刚在卡片上手动完成验证、紧接着的这次读取。
+  /// 仍被拦就如实交回，不再自动起一轮验证（否则验证页会一层叠一层）。
+  Future<Map<String, dynamic>> getUserInfo({
+    String? expectedUsername,
+    bool afterVerification = false,
+  }) async {
     final revision = state.revision;
     final generation = AuthSession().generation;
     final token = state.token;
@@ -51,6 +57,7 @@ class OAuthSessionClient {
             'skipCsrf': true,
             'showErrorToast': false,
             'skipRedirect': true,
+            if (afterVerification) FluxRequestKeys.skipCfChallenge: true,
           },
         ),
       );

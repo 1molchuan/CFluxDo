@@ -4,12 +4,14 @@ import 'dart:io' as io;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../constants.dart';
 import '../utils/frame_jank_monitor.dart';
 import '../utils/scroll_busy_signal.dart';
 import 'cf_challenge_logger.dart';
 import 'cf_clearance_authority.dart';
+import 'network/cf/turnstile_configuration.dart';
 import 'session/webview_use.dart';
 import 'webview_settings.dart';
 import 'windows_webview_environment_service.dart';
@@ -19,7 +21,8 @@ import 'windows_webview_environment_service.dart';
 /// 只维护一个轻量 Headless WebView，加载同源 Turnstile widget，让
 /// Cloudflare 的 challenge-platform / rc 请求继续由 WebView 浏览器栈自己发送。
 /// Dart 侧不代理、不重放 CF 请求，只在边界时机把 WebView 中新的
-/// `.linux.do` cf_clearance 同步回 CookieJar。
+/// 当前站点的 cf_clearance 同步回独立 CookieJar。没有发现本站可复用的
+/// Turnstile 配置时保留标准按需验证，不重放 Managed Challenge 的内部配置。
 class CfClearanceRefreshService {
   static final CfClearanceRefreshService _instance =
       CfClearanceRefreshService._internal();
@@ -45,8 +48,11 @@ class CfClearanceRefreshService {
   static const Duration _restartDelay = Duration(seconds: 5);
   static const Duration _disposeGracePeriod = Duration(milliseconds: 150);
 
-  /// 缓存的 sitekey（来自预热 HTML、登录 HTML 或 CF 403 响应体）。
-  String? _sitekey;
+  TurnstileConfiguration? _configuration;
+  Future<void>? _configurationLoad;
+  bool _reportedManagedPage = false;
+
+  Uri get _origin => Uri.parse(AppConstants.baseUrl);
 
   /// 持久 HeadlessWebView（保持 Turnstile widget 存活）。
   HeadlessInAppWebView? _headlessWebView;
@@ -88,36 +94,92 @@ class CfClearanceRefreshService {
   Timer? _scrollPauseTicker;
   bool _webViewPausedForScroll = false;
 
-  /// 获取当前缓存的 sitekey。
-  String? get sitekey => _sitekey;
+  /// 仅暴露当前站点的公开配置，不允许跨站复用。
+  String? get sitekey => _configuration?.origin == _origin.origin
+      ? _configuration?.sitekey
+      : null;
 
   void setForeground(bool foreground) {
     _isForeground = foreground;
   }
 
-  /// 更新 sitekey（由 PreloadedDataService 或 CfChallengeInterceptor 调用）。
-  void updateSitekey(String sitekey) {
-    if (sitekey.isEmpty) return;
-    final changed = _sitekey != sitekey;
-    _sitekey = sitekey;
-    if (changed) {
-      CfChallengeLogger.log(
-        '[CfRefresh] sitekey 已更新: ${sitekey.substring(0, 8)}...',
+  /// 配置不含会话信息，可以缓存到下次启动；缓存过期或来源不对则忽略。
+  Future<void> ensureConfigurationLoaded() =>
+      _configurationLoad ??= _loadConfiguration();
+
+  Future<void> _loadConfiguration() async {
+    final origin = _origin;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (_configuration != null || _origin.origin != origin.origin) return;
+      final configuration = TurnstileConfiguration.decode(
+        prefs.getString(TurnstileConfiguration.cacheKey(origin)),
+        expected: origin,
+        now: DateTime.now(),
       );
-      if (_shouldBeRunning && !_isRunning && !_isDisposing) {
-        _startWebView();
+      if (configuration != null) {
+        _configuration = configuration;
+        CfChallengeLogger.log('[CfRefresh] 恢复本站 Turnstile 配置: ${origin.host}');
       }
+    } catch (e) {
+      CfChallengeLogger.log('[CfRefresh] 配置缓存读取失败，等待页面重新发现: $e');
     }
   }
 
-  /// 从 HTML 中提取并更新 sitekey。
-  void extractAndUpdateSitekey(String html) {
-    final match = RegExp(r'data-sitekey="([0-9a-zA-Zx_-]+)"').firstMatch(html);
-    if (match == null) return;
-    final sitekey = match.group(1);
-    if (sitekey != null && sitekey.isNotEmpty) {
-      updateSitekey(sitekey);
+  void _adoptConfiguration(TurnstileConfiguration configuration) {
+    if (configuration.origin != _origin.origin) return;
+    final changed = _configuration?.origin != configuration.origin ||
+        _configuration?.sitekey != configuration.sitekey;
+    if (!changed) return;
+    _configuration = configuration;
+    CfChallengeLogger.log('[CfRefresh] 发现本站 Turnstile 配置: ${_origin.host}');
+    unawaited(_saveConfiguration(configuration));
+    if (_shouldBeRunning && !_isRunning && !_isDisposing) _startWebView();
+  }
+
+  Future<void> _saveConfiguration(TurnstileConfiguration configuration) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      // 排队期间若配置已经更新，不让旧异步回写盖住新配置。
+      if (!identical(_configuration, configuration)) return;
+      await prefs.setString(
+        TurnstileConfiguration.cacheKey(Uri.parse(configuration.origin)),
+        configuration.encode(DateTime.now()),
+      );
+    } catch (e) {
+      CfChallengeLogger.log('[CfRefresh] 配置缓存写入失败: $e');
     }
+  }
+
+  void extractAndUpdateSitekey(String html, {required Uri source}) {
+    final configuration = TurnstileConfiguration.fromHtml(
+      html,
+      source: source,
+      expected: _origin,
+    );
+    if (configuration != null) _adoptConfiguration(configuration);
+  }
+
+  void observeConfigurationSnapshot(Object? snapshot) {
+    final configuration = TurnstileConfiguration.fromSnapshot(
+      snapshot,
+      expected: _origin,
+    );
+    if (configuration != null) {
+      _adoptConfiguration(configuration);
+    } else if (!_reportedManagedPage && snapshot is Map && snapshot['managed'] == true) {
+      _reportedManagedPage = true;
+      CfChallengeLogger.log(
+        '[CfRefresh] Managed Challenge 不作为可复用 Turnstile 配置: ${_origin.host}',
+      );
+    }
+  }
+
+  @visibleForTesting
+  void debugResetConfiguration() {
+    _configuration = null;
+    _configurationLoad = null;
+    _reportedManagedPage = false;
   }
 
   // ---------------------------------------------------------------------------
@@ -238,9 +300,15 @@ class CfClearanceRefreshService {
       return;
     }
 
-    final sitekey = _sitekey;
-    if (sitekey == null || sitekey.isEmpty) {
-      CfChallengeLogger.log('[CfRefresh] 无 sitekey，跳过启动');
+    final key = sitekey;
+    if (key == null) {
+      unawaited(ensureConfigurationLoaded().then((_) {
+        // stop / 切后台期间完成的缓存读取不应再拉起 WebView。
+        if (_shouldBeRunning && _isForeground && sitekey != null) _startWebView();
+      }));
+      CfChallengeLogger.log(
+        '[CfRefresh] 本站暂无可复用的 Turnstile 配置，保留按需验证: ${_origin.host}',
+      );
       return;
     }
 
@@ -262,7 +330,7 @@ class CfClearanceRefreshService {
       _rememberCookieSnapshot(baseline, markAdvanced: false);
       _runningStartedAt = DateTime.now();
       _lastCookieAdvanceAt = _runningStartedAt;
-      await _createAndRunWebView(sitekey, gen);
+      await _createAndRunWebView(key, gen);
     }());
   }
 
@@ -472,7 +540,7 @@ document.close();
   Future<void> _reloadTurnstile(String reason, {required int gen}) async {
     if (!_canHandleGeneration(gen)) return;
     final controller = _webViewController;
-    final sitekey = _sitekey;
+    final sitekey = this.sitekey;
     if (controller == null || sitekey == null || sitekey.isEmpty) {
       _scheduleRestart(reason, gen: gen);
       return;

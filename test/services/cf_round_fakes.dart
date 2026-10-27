@@ -167,9 +167,17 @@ class FakeRoundEnvironment implements CfRoundEnvironment {
     return jar;
   }
 
+  /// 落值确认后的收尾回调（模拟验证页回首页期间站点又签了新值）
+  Future<void> Function(String value)? onAfterLanded;
+
   @override
-  void onPassed(CfVerificationRound round, String value) =>
-      calls.add('passed');
+  Future<void> afterLanded(CfVerificationRound round, String value) async {
+    calls.add('afterLanded');
+    await onAfterLanded?.call(value);
+  }
+
+  @override
+  void onPassed(CfVerificationRound round, String value) => calls.add('passed');
 
   @override
   bool isCoolingDown() => cooling;

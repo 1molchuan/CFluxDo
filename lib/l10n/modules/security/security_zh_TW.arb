@@ -45,6 +45,8 @@
   "cf_noChallengeMessage": "如果剛才的請求仍失敗，請重新載入驗證頁或稍後再試。",
   "cf_noChallengeTitle": "目前沒有需要完成的安全驗證",
   "cf_operationBlockedByChallenge": "操作被安全驗證攔截，請先完成驗證",
+  "cf_openInBrowserAction": "在瀏覽器中開啟",
+  "cf_serviceStillBlocked": "驗證已完成，但該服務仍攔截了應用程式的請求，可以在內建瀏覽器中查看",
   "cf_retryVerify": "重新載入",
   "cf_retryVerificationAction": "重新嘗試驗證",
   "cf_verifyCompletingMessage": "驗證結果已返回，正在同步狀態…",

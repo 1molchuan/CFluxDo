@@ -1,7 +1,9 @@
 import 'site_context.dart';
+
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:html/parser.dart' as html_parser;
+
 import 'network/cf/cf_challenge_classifier.dart';
 import 'network/discourse_dio.dart';
 import 'oauth_session_client.dart';
@@ -63,9 +65,15 @@ class CdkOAuthService {
   /// 重新签发业务会话，不预先登出；取消授权时仍保留原会话。
   Future<bool> reauthorize(BuildContext context) => authorize(context);
 
-  Future<CdkUserInfo?> getUserInfo({String? expectedUsername}) async {
+  Future<CdkUserInfo?> getUserInfo({
+    String? expectedUsername,
+    bool afterVerification = false,
+  }) async {
     if (!SiteContext.isLinuxDo) return null;
-    final data = await _session.getUserInfo(expectedUsername: expectedUsername);
+    final data = await _session.getUserInfo(
+      expectedUsername: expectedUsername,
+      afterVerification: afterVerification,
+    );
     return CdkUserInfo.fromJson(data);
   }
 

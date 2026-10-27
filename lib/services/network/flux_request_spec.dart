@@ -94,6 +94,11 @@ class FluxRequestKeys {
   /// OAuth 授权跳转链的会话 cookie 依赖此语义;重定向子请求会继承本键。
   static const String allowRedirectSetCookie = 'allowRedirectSetCookie';
 
+  /// `bool Function()`:调用方要的结果是否已经由别的途径拿到(启动预加载:
+  /// 验证页把它停留的首页交了过来)。验证通过后重放仍被拦时,撞盾恢复先
+  /// 问它,已拿到就把原错误交回,不再为这次请求重验、询问兼容或冷却。
+  static const String satisfiedProbe = 'satisfiedProbe';
+
   // --- 防环/内部 ---
 
   /// CF 验证成功后的重放不得再次触发验证(防验证死循环)。
@@ -167,8 +172,7 @@ extension type const FluxRequestSpec(Map<String, dynamic> _extra) {
   bool get skipWebViewAdapter =>
       _extra[FluxRequestKeys.skipWebViewAdapter] == true;
 
-  bool get skipRhttpAdapter =>
-      _extra[FluxRequestKeys.skipRhttpAdapter] == true;
+  bool get skipRhttpAdapter => _extra[FluxRequestKeys.skipRhttpAdapter] == true;
 
   bool get skipScheduler => _extra[FluxRequestKeys.skipScheduler] == true;
 
@@ -184,6 +188,18 @@ extension type const FluxRequestSpec(Map<String, dynamic> _extra) {
 
   bool get allowRedirectSetCookie =>
       _extra[FluxRequestKeys.allowRedirectSetCookie] == true;
+
+  /// 结果是否已由别的途径拿到(见 [FluxRequestKeys.satisfiedProbe]);
+  /// 没挂探针或探针抛错都按没拿到。
+  bool get isSatisfiedElsewhere {
+    final probe = _extra[FluxRequestKeys.satisfiedProbe];
+    if (probe is! bool Function()) return false;
+    try {
+      return probe();
+    } catch (_) {
+      return false;
+    }
+  }
 
   bool get skipCfChallenge => _extra[FluxRequestKeys.skipCfChallenge] == true;
 

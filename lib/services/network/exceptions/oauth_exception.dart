@@ -23,6 +23,13 @@ class OAuthErrorPolicy {
   static bool isCfChallenge(Object? error) =>
       CfChallengeClassifier.isChallengeFailure(error);
 
+  /// 撞盾时本次会话已确认原生链路不被信任、没有再起验证（见
+  /// [CfChallengeException.nativeUntrusted]）：卡片直接给浏览器入口。
+  static bool isNativeUntrusted(Object? error) {
+    final cause = error is DioException ? error.error : error;
+    return cause is CfChallengeException && cause.nativeUntrusted;
+  }
+
   static Object classify(DioException error, {required String serviceName}) {
     if (isCfChallenge(error)) {
       return error.error is CfChallengeException

@@ -12,6 +12,7 @@ import '../network/cookie/cookie_jar_service.dart';
 import '../network/doh/network_settings_service.dart';
 import '../preloaded_data_service.dart';
 import '../session/webview_use.dart';
+import '../site_context.dart';
 import '../startup_progress.dart';
 import 'app_startup.dart';
 
@@ -57,6 +58,10 @@ class ProductionStartupPorts implements AppStartupPorts {
   @override
   Map<String, dynamic>? get preloadedUserJson =>
       PreloadedDataService().currentUserSync;
+
+  @override
+  bool get validatePreloadedSession =>
+      !SiteContext.current.supportsFingerprintBootstrap;
 
   @override
   Future<bool> checkStoredSession() => DiscourseService().isLoggedIn();

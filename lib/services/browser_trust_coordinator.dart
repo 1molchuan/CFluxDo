@@ -647,7 +647,7 @@ class BrowserTrustCoordinator {
       final hydrated =
           html != null &&
           html.isNotEmpty &&
-          await _preload.hydrateFromHtml(html);
+          await _preload.hydrateFromHtml(html, allowAnonymous: true);
       if (cancellation.isCancelled) return false;
       _log(
         'startup WebView snapshot html=${html != null && html.isNotEmpty} hydrated=$hydrated reason=$reason',
@@ -694,7 +694,9 @@ class BrowserTrustCoordinator {
         }
         _log('startup WebView session bootstrap end reason=$reason');
       } else {
-        _log('startup WebView session bootstrap skipped: no _t or unsupported site');
+        _log(
+          'startup WebView session bootstrap skipped: no _t or unsupported site',
+        );
       }
 
       return hydrated;
@@ -761,7 +763,26 @@ class BrowserTrustCoordinator {
         cancellation.whenCancelled,
       ]);
     }
+    await _logStartupSnapshotFailure(controller);
     return null;
+  }
+
+  /// 快照超时时记录页面到底看到了什么：挑战页 / 空页 / 带预加载但未捕获。
+  /// 只在启动失败路径调用一次，不影响正常链路。
+  Future<void> _logStartupSnapshotFailure(
+    InAppWebViewController controller,
+  ) async {
+    try {
+      final state = await controller.evaluateJavascript(
+        source: PreloadedDataService.snapshotStateScript,
+      );
+      _log('startup WebView snapshot timeout state: $state', level: 'warning');
+    } catch (e) {
+      _log(
+        'startup WebView snapshot timeout state unavailable: $e',
+        level: 'warning',
+      );
+    }
   }
 
   /// 冷启动能否直接走原生链路预加载首页（剩余有效期门槛见
@@ -848,21 +869,17 @@ document.close();
       '<!DOCTYPE html><html><head><meta charset="utf-8"></head>'
       '<body></body></html>';
 
-  String get _preloadedSnapshotScript => '''
+  String get _preloadedSnapshotScript =>
+      '''
 (function() {
   if (window.__fluxdoPreloadedSnapshotInstalled) return;
   window.__fluxdoPreloadedSnapshotInstalled = true;
-
+${PreloadedDataService.snapshotCaptureFunction}
+  // DOM 流式解析可能先插入 script 空壳，不能拿到半截 JSON 就断开观察
   function capture() {
-    var el = document.querySelector('#data-preloaded, [data-preloaded]');
-    if (!el) return false;
-    var parts = [el.outerHTML];
-    document.querySelectorAll('meta[name]').forEach(function(m) {
-      parts.push(m.outerHTML);
-    });
-    var setup = document.getElementById('data-discourse-setup');
-    if (setup) parts.push(setup.outerHTML);
-    window.__rawPreloaded = parts.join('\\n');
+    var snapshot = __fluxdoCapturePreloaded();
+    if (!snapshot) return false;
+    window.__rawPreloaded = snapshot;
     return true;
   }
 

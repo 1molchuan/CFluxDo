@@ -47,7 +47,7 @@ class _LdcNotifier extends LdcUserInfoNotifier
   Future<LdcUserInfo?> build() async => null;
 
   @override
-  Future<void> refresh() => retry();
+  Future<void> refresh({bool afterVerification = false}) => retry();
 }
 
 class _CdkNotifier extends CdkUserInfoNotifier
@@ -56,7 +56,7 @@ class _CdkNotifier extends CdkUserInfoNotifier
   Future<CdkUserInfo?> build() async => null;
 
   @override
-  Future<void> refresh() => retry();
+  Future<void> refresh({bool afterVerification = false}) => retry();
 }
 
 class _PendingLdcNotifier extends LdcUserInfoNotifier {
@@ -65,7 +65,8 @@ class _PendingLdcNotifier extends LdcUserInfoNotifier {
   @override
   Future<LdcUserInfo?> build() => loaded.future;
   @override
-  Future<void> refresh() async => refreshCalls++;
+  Future<void> refresh({bool afterVerification = false}) async =>
+      refreshCalls++;
 }
 
 class _PendingCdkNotifier extends CdkUserInfoNotifier {
@@ -74,7 +75,8 @@ class _PendingCdkNotifier extends CdkUserInfoNotifier {
   @override
   Future<CdkUserInfo?> build() => loaded.future;
   @override
-  Future<void> refresh() async => refreshCalls++;
+  Future<void> refresh({bool afterVerification = false}) async =>
+      refreshCalls++;
 }
 
 Widget _app(ProviderContainer container, Widget child, {bool mojian = false}) {
@@ -85,7 +87,8 @@ Widget _app(ProviderContainer container, Widget child, {bool mojian = false}) {
         navigatorKey: navigatorKey,
         theme: ThemeData(
           extensions: [
-            if (mojian) MojianTokens.of(Brightness.light, MojianAccent.cinnabar),
+            if (mojian)
+              MojianTokens.of(Brightness.light, MojianAccent.cinnabar),
           ],
         ),
         locale: const Locale('zh'),
@@ -321,5 +324,92 @@ void main() {
     await tester.pump();
     expect(find.byType(LoadingSpinner), findsNothing);
     expect(_action(tester).onPressed, isNotNull);
+  });
+
+  testWidgets('验证通过但刷新仍被拦 → 改为在浏览器中打开，回来后再刷新一次', (tester) async {
+    final container = ProviderContainer();
+    addTearDown(container.dispose);
+    var verifications = 0;
+    var retries = 0;
+    var browserOpens = 0;
+    await tester.pumpWidget(
+      _app(
+        container,
+        BalanceCardCfAction(
+          isLoading: false,
+          verify: (_) async {
+            verifications++;
+            return true;
+          },
+          onRetry: () async => retries++,
+          stillBlocked: () => true,
+          openInBrowser: (_) async => browserOpens++,
+        ),
+      ),
+    );
+
+    await tester.tap(find.text(S.current.cf_manualVerifyAction));
+    await tester.pump();
+    await tester.pump();
+    expect(verifications, 1);
+    expect(retries, 1);
+    expect(find.text(S.current.cf_openInBrowserAction), findsOneWidget);
+
+    await tester.tap(find.text(S.current.cf_openInBrowserAction));
+    await tester.pump();
+    await tester.pump();
+    expect(browserOpens, 1);
+    expect(retries, 2, reason: '从浏览器回来刷新一次');
+    expect(verifications, 1, reason: '不再弹第二次验证页');
+    await tester.pump(const Duration(seconds: 5));
+  });
+
+  testWidgets('刷新成功（不再被拦）→ 仍是手动验证', (tester) async {
+    final container = ProviderContainer();
+    addTearDown(container.dispose);
+    await tester.pumpWidget(
+      _app(
+        container,
+        BalanceCardCfAction(
+          isLoading: false,
+          verify: (_) async => true,
+          onRetry: () async {},
+          stillBlocked: () => false,
+          openInBrowser: (_) async {},
+        ),
+      ),
+    );
+
+    await tester.tap(find.text(S.current.cf_manualVerifyAction));
+    await tester.pump();
+    await tester.pump();
+    expect(find.text(S.current.cf_manualVerifyAction), findsOneWidget);
+    expect(find.text(S.current.cf_openInBrowserAction), findsNothing);
+  });
+
+  testWidgets('原生链路已确认不被信任 → 直接给浏览器入口', (tester) async {
+    final container = ProviderContainer();
+    addTearDown(container.dispose);
+    var verifications = 0;
+    await tester.pumpWidget(
+      _app(
+        container,
+        BalanceCardCfAction(
+          isLoading: false,
+          preferBrowser: true,
+          verify: (_) async {
+            verifications++;
+            return true;
+          },
+          onRetry: () async {},
+          openInBrowser: (_) async {},
+        ),
+      ),
+    );
+
+    expect(find.text(S.current.cf_openInBrowserAction), findsOneWidget);
+    await tester.tap(find.text(S.current.cf_openInBrowserAction));
+    await tester.pump();
+    expect(verifications, 0);
   });
 }

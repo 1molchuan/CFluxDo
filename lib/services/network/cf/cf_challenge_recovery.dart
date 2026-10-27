@@ -56,6 +56,10 @@ abstract interface class CfCompatPort {
 
   /// 兼容重放失败：撤销会话兼容（用户持久开启的不动）。
   void rollback();
+
+  /// 本次会话是否已确认原生链路不被信任（验证通过后重放仍被拦、已改用
+  /// 浏览器网络栈）。用户在设置里常开的兼容模式不算。
+  bool get nativeUntrusted;
 }
 
 /// 恢复过程中需要告诉用户的事（文案与 toast 节流由实现方负责）。
@@ -108,7 +112,8 @@ final class CfRecoveryFailed extends CfRecoveryResult {
 ///    「在位值健康」为由挡掉新值）；
 /// 3. 换值重放：WebView 持有另一枚未被撞过的值 → 换进 jar 重放一次
 ///    （验证进行中不做，避免与验证页抢写）；
-/// 4. 发起/加入一轮验证，通过后重放；用户可见请求仍被撞时再验证一轮；
+/// 4. 发起/加入一轮验证，通过后重放；用户可见请求仍被撞时再验证一轮
+///    （结果已由验证页交来的请求直接交回，见 [FluxRequestKeys.satisfiedProbe]）；
 /// 5. 仍被撞：可走 WebView 的用户可见请求询问切兼容模式并重放，失败回滚；
 ///    否则记该 host 确定性无效（冷却）。
 ///
@@ -247,6 +252,20 @@ class CfChallengeRecovery {
       return _fail(original, CfChallengeException(inCooldown: true));
     }
 
+    // 本次会话已确认原生链路不被信任（主站已改走浏览器网络栈），而这个子域
+    // 请求（LDC/CDK 等）走不了浏览器网络栈：再验证一轮，重放照样被拦，只会
+    // 反复弹验证页。直接交回，由业务卡片给出「在浏览器中打开」。
+    if (host != CfClearanceAuthority.mainHost &&
+        compat.nativeUntrusted &&
+        !compat.canUse(original)) {
+      CfChallengeLogger.log(
+        '[INTERCEPTOR] Native stack untrusted this session and the request '
+        'cannot use the browser stack, not verifying: $label mode=$mode',
+      );
+      if (actionPrompt) _notify?.call(CfRecoveryNotice.blockedByChallenge);
+      return _fail(original, CfChallengeException(nativeUntrusted: true));
+    }
+
     // 4. 静默请求只在后台尝试验证；页面数据/操作请求先后台静默尝试一个
     //    宽限期，多数非交互式挑战会在这段时间内自动通过，过不了再转前台。
     var outcome = await round.acquire(
@@ -257,6 +276,9 @@ class CfChallengeRecovery {
     // 实测（2026-10-13，元宇宙「我的服务」开启失败）这类值多是挑战流程
     // 被提前收口的半成品，下一轮就能铸出有效值；以前直接熔断 60s 冷却。
     var reverified = false;
+    // 本次恢复里是否已经试过兼容模式：试过（含用户拒绝）就不再问第二次，
+    // 让用户在做完第二轮验证后不会再被打断一遍。
+    var triedCompat = false;
 
     while (true) {
       if (outcome case CfRoundFailed(:final reason)) {
@@ -283,6 +305,54 @@ class CfChallengeRecovery {
           stillChallenged = attempt;
       }
 
+      // 调用方要的结果已由验证页交来（启动预加载拿到了验证页停留的首页）：
+      // 原错误交回，由调用方按已拿到处理；不再重验、询问兼容或冷却。
+      if (original.spec.isSatisfiedElsewhere) {
+        CfChallengeLogger.log(
+          '[INTERCEPTOR] Replay still challenged, but the result was supplied '
+          'by the verification page: $label',
+        );
+        return CfRecoveryFailed(stillChallenged.error);
+      }
+
+      // 刚由用户亲手过的挑战，原生重放仍被拦：同样的挑战大概率还要用户
+      // 再点一次，而浏览器网络栈刚刚正是"能过"的那条链路。先问兼容模式；
+      // 用户拒绝、或兼容重放也没过，再回到原有的一次重验。
+      final interactivePass =
+          outcome is CfRoundPassed && outcome.interactionRequired;
+      if (!isSilent &&
+          !reverified &&
+          !triedCompat &&
+          interactivePass &&
+          compat.canUse(retryOptions)) {
+        triedCompat = true;
+        // 这枚值原生确定用不了：登记为已撞，续期服务随后在 WebView 里铸出的
+        // Turnstile 值才能顶替它（2026-10-26 实测勾选框签的值原生 403、
+        // 续期铸的值原生 200），否则走兼容后 jar 里一直是这枚死值。
+        ledger.noteIncumbentChallenged(stillChallenged.carried, host: host);
+        if (await compat.enable()) {
+          retryOptions.extra.remove(FluxRequestKeys.skipWebViewAdapter);
+          final fallback = await _attempt(retryOptions);
+          if (fallback case _Succeeded(:final response)) {
+            _notify?.call(CfRecoveryNotice.compatEnabled);
+            CfChallengeLogger.log(
+              '[INTERCEPTOR] Interactive-pass clearance rejected by native '
+              'stack; session WebView fallback succeeded',
+            );
+            return CfRecovered(response);
+          }
+          compat.rollback();
+          if (fallback case _Failed(:final error)) {
+            CfChallengeLogger.log(
+              '[INTERCEPTOR] Session WebView fallback after interactive '
+              'pass failed: $error',
+              level: 'warning',
+            );
+            return CfRecoveryFailed(error);
+          }
+        }
+      }
+
       if (!isSilent && !reverified && !round.isCoolingDown(host)) {
         reverified = true;
         // 刚定稿的值已确认对 Dio 无效：登记为已撞，放开换届，下一轮
@@ -301,7 +371,10 @@ class CfChallengeRecovery {
       //    身份未被信任。仅对用户可见请求询问一次，同意后本次会话改用
       //    浏览器网络栈并立即重放；首次真实请求失败立即回滚，避免后续请求
       //    全被锁在坏掉的传输状态里。
-      if (!isSilent && compat.canUse(retryOptions) && await compat.enable()) {
+      if (!isSilent &&
+          !triedCompat &&
+          compat.canUse(retryOptions) &&
+          await compat.enable()) {
         // 撤销"禁走 WebView 适配器"标记：这一行才是让重放真正改走浏览器
         // 网络栈的开关。
         retryOptions.extra.remove(FluxRequestKeys.skipWebViewAdapter);

@@ -31,6 +31,8 @@
   "cf_noChallengeMessage": "If the previous request still fails, reload the verification page or try again later.",
   "cf_noChallengeTitle": "No security verification is needed right now",
   "cf_operationBlockedByChallenge": "This action was blocked by security verification. Please verify first.",
+  "cf_openInBrowserAction": "Open in browser",
+  "cf_serviceStillBlocked": "Verification passed, but this service still blocks the app's requests. You can view it in the built-in browser.",
   "cf_retryVerify": "Reload",
   "cf_retryVerificationAction": "Try verification again",
   "cf_verifyCompletingMessage": "The verification result returned. Syncing status...",

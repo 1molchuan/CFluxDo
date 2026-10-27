@@ -122,6 +122,203 @@ void main() {
     expect(ledger.isKnownChallenged('stale'), isFalse);
   });
 
+  test('用户亲手过的挑战被原生拒绝 → 先问兼容模式，不再要求第二次验证', () async {
+    round.outcomes.add(_passed('v1', interactive: true));
+    replay.script
+      ..add(_challengeOf) // 定稿值在原生链路上仍被撞
+      ..add(_ok); // 兼容模式（浏览器网络栈）重放成功
+    compat.enableResult = true;
+
+    final result = await recovery().recover(_challenge(_request('old')));
+
+    expect(result, isA<CfRecovered>());
+    expect(round.acquired, 1, reason: '不再让用户第二次过同一个挑战');
+    expect(compat.enabled, 1);
+    expect(compat.rollbacks, 0);
+    expect(notices, contains(CfRecoveryNotice.compatEnabled));
+    expect(
+      ledger.isKnownChallenged('v1', host: 'linux.do'),
+      isTrue,
+      reason: '原生用不了的定稿值登记为已撞，续期铸的值才能顶替',
+    );
+    expect(
+      replay.calls.last.extra.containsKey(FluxRequestKeys.skipWebViewAdapter),
+      isFalse,
+      reason: '兼容重放要真正改走浏览器网络栈',
+    );
+  });
+
+  test('交互式通过后用户拒绝兼容模式 → 仍走原有的一次重验', () async {
+    round.outcomes
+      ..add(_passed('v1', interactive: true))
+      ..add(_passed('v2'));
+    replay.script
+      ..add(_challengeOf)
+      ..add(_challengeOf);
+    compat.enableResult = false;
+
+    final result = await recovery().recover(_challenge(_request('old')));
+
+    expect(result, isA<CfRecoveryFailed>());
+    expect(round.acquired, 2);
+    expect(compat.enabled, 0);
+    expect(round.ineffectiveHosts, [
+      'linux.do',
+    ], reason: '第二次仍无效（且已问过兼容）→ 记确定性无效');
+  });
+
+  test('交互式通过后的兼容重放网络失败 → 回滚并如实上抛', () async {
+    round.outcomes.add(_passed('v1', interactive: true));
+    replay.script
+      ..add(_challengeOf)
+      ..add(_networkError);
+    compat.enableResult = true;
+
+    final result = await recovery().recover(_challenge(_request('old')));
+
+    expect(result, isA<CfRecoveryFailed>());
+    expect(
+      (result as CfRecoveryFailed).error.type,
+      DioExceptionType.connectionError,
+    );
+    expect(compat.rollbacks, 1);
+    expect(round.acquired, 1);
+  });
+
+  test('结果已由验证页交来（启动预加载拿到首页快照）→ 交回原错误，不重验、不问兼容、不冷却', () async {
+    var supplied = false;
+    round.outcomes.add(_passed('v1', interactive: true));
+    round.onAcquire = () async => supplied = true; // 验证页落值收尾时交来快照
+    replay.script.add(_challengeOf);
+    compat.enableResult = true;
+
+    final result = await recovery().recover(
+      _challenge(
+        _request(
+          'old',
+          path: '/',
+          extra: {FluxRequestKeys.satisfiedProbe: () => supplied},
+        ),
+      ),
+    );
+
+    expect(result, isA<CfRecoveryFailed>());
+    expect(
+      (result as CfRecoveryFailed).error.response?.statusCode,
+      403,
+      reason: '交回的是重放仍被撞的原错误',
+    );
+    expect(round.acquired, 1);
+    expect(compat.enabled, 0);
+    expect(round.ineffectiveHosts, isEmpty, reason: '没有冷却，之后的请求照常过盾');
+  });
+
+  test('探针说还没拿到 → 照常走交互式通过后的兼容询问', () async {
+    round.outcomes.add(_passed('v1', interactive: true));
+    replay.script
+      ..add(_challengeOf)
+      ..add(_ok);
+    compat.enableResult = true;
+
+    final result = await recovery().recover(
+      _challenge(
+        _request('old', extra: {FluxRequestKeys.satisfiedProbe: () => false}),
+      ),
+    );
+
+    expect(result, isA<CfRecovered>());
+    expect(compat.enabled, 1);
+  });
+
+  group('原生链路已确认不被信任（本次会话已改走浏览器网络栈）', () {
+    setUp(() {
+      compat.nativeUntrusted = true;
+      compat.usable = (options) => options.uri.host == 'linux.do';
+    });
+
+    test('LDC 子域撞盾不再起验证，交回 nativeUntrusted', () async {
+      final result = await recovery().recover(
+        _challenge(
+          _request(
+            'old',
+            host: 'credit.linux.do',
+            path: '/api/v1/oauth/user-info',
+          ),
+        ),
+      );
+
+      expect(result, isA<CfRecoveryFailed>());
+      final error = (result as CfRecoveryFailed).error.error;
+      expect(error, isA<CfChallengeException>());
+      expect((error as CfChallengeException).nativeUntrusted, isTrue);
+      expect(round.acquired, 0, reason: '验证了重放也会被拦，不再反复弹验证页');
+      expect(replay.calls, isEmpty);
+    });
+
+    test('写操作仍给即时提示', () async {
+      await recovery().recover(
+        _challenge(
+          _request(
+            'old',
+            method: 'POST',
+            host: 'credit.linux.do',
+            path: '/epay/pay/distribute',
+          ),
+        ),
+      );
+
+      expect(notices, [CfRecoveryNotice.blockedByChallenge]);
+    });
+
+    test('主站请求照常过盾（首页可由验证页快照接手）', () async {
+      round.outcomes.add(_passed('new'));
+      replay.script.add(_ok);
+
+      final result = await recovery().recover(
+        _challenge(_request('old', path: '/')),
+      );
+
+      expect(result, isA<CfRecovered>());
+      expect(round.acquired, 1);
+    });
+
+    test('没确认不被信任时子域照常过盾', () async {
+      compat.nativeUntrusted = false;
+      round.outcomes.add(_passed('new'));
+      replay.script.add(_ok);
+
+      final result = await recovery().recover(
+        _challenge(
+          _request(
+            'old',
+            host: 'credit.linux.do',
+            path: '/api/v1/oauth/user-info',
+          ),
+        ),
+      );
+
+      expect(result, isA<CfRecovered>());
+      expect(round.acquired, 1);
+    });
+  });
+
+  test('自动通过（没有露出挑战）不提前问兼容，保持原有的一次重验', () async {
+    round.outcomes
+      ..add(_passed('v1'))
+      ..add(_passed('v2'));
+    replay.script
+      ..add(_challengeOf)
+      ..add(_challengeOf)
+      ..add(_ok);
+    compat.enableResult = true;
+
+    final result = await recovery().recover(_challenge(_request('old')));
+
+    expect(result, isA<CfRecovered>());
+    expect(round.acquired, 2, reason: '自动通过的值仍先给一轮重验');
+    expect(compat.enabled, 1, reason: '重验仍失败后才问兼容');
+  });
+
   test('兼容模式重放失败时回滚', () async {
     round.outcomes
       ..add(_passed('v1'))
@@ -255,16 +452,15 @@ void main() {
 
     env.webView = 'new';
     env.presented!.clearanceSeen('new', source: 'polling');
+    env.presented!.completionHint('js navigation: beforeunload');
     await clock.advance(const Duration(seconds: 2));
 
     final all = await results;
     expect(all.whereType<CfRecovered>(), hasLength(5));
     expect(env.landed, ['new'], reason: '只落一次值');
-    expect(
-      replayFromEnv.calls.map((o) => o.headers['Cookie']).toSet(),
-      {'_t=token; cf_clearance=new'},
-      reason: '每个请求都用定稿值重放自己的原请求',
-    );
+    expect(replayFromEnv.calls.map((o) => o.headers['Cookie']).toSet(), {
+      '_t=token; cf_clearance=new',
+    }, reason: '每个请求都用定稿值重放自己的原请求');
     expect(replayFromEnv.calls.map((o) => o.uri.path).toSet(), hasLength(5));
   });
 
@@ -400,8 +596,8 @@ Object _networkError(RequestOptions options) => DioException(
   error: 'connection reset',
 );
 
-CfRoundOutcome _passed(String value) =>
-    CfRoundPassed(round: 1, clearance: value);
+CfRoundOutcome _passed(String value, {bool interactive = false}) =>
+    CfRoundPassed(round: 1, clearance: value, interactionRequired: interactive);
 
 ResponseBody get _challengeBody => ResponseBody.fromString(
   '<html><title>Just a moment...</title><script>window._cf_chl_opt={}</script></html>',
@@ -562,8 +758,14 @@ class _FakeCompat implements CfCompatPort {
   int enabled = 0;
   int rollbacks = 0;
 
+  /// 像真实适配器一样：只有主站请求能走浏览器网络栈时设为 false 的子域。
+  bool Function(RequestOptions options) usable = (_) => true;
+
   @override
-  bool canUse(RequestOptions options) => true;
+  bool nativeUntrusted = false;
+
+  @override
+  bool canUse(RequestOptions options) => usable(options);
 
   @override
   Future<bool> enable() async {

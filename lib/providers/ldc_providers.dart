@@ -86,16 +86,19 @@ class LdcUserInfoNotifier extends AsyncNotifier<LdcUserInfo?> {
     }
   }
 
-  Future<LdcUserInfo?> _fetchUserInfo() {
+  Future<LdcUserInfo?> _fetchUserInfo({bool afterVerification = false}) {
     if (_inFlightFetch != null) return _inFlightFetch!;
     late final Future<LdcUserInfo?> future;
-    future = _doFetchUserInfo().whenComplete(() {
-      if (identical(_inFlightFetch, future)) _inFlightFetch = null;
-    });
+    future = _doFetchUserInfo(afterVerification: afterVerification)
+        .whenComplete(() {
+          if (identical(_inFlightFetch, future)) _inFlightFetch = null;
+        });
     return _inFlightFetch = future;
   }
 
-  Future<LdcUserInfo?> _doFetchUserInfo() async {
+  Future<LdcUserInfo?> _doFetchUserInfo({
+    bool afterVerification = false,
+  }) async {
     if (!SiteContext.isLinuxDo) return null;
     final generation = _requestGeneration;
     final prefs = await SharedPreferences.getInstance();
@@ -113,6 +116,7 @@ class LdcUserInfoNotifier extends AsyncNotifier<LdcUserInfo?> {
     final service = ref.read(ldcOAuthServiceProvider);
     final userInfo = await service.getUserInfo(
       expectedUsername: currentUser.username,
+      afterVerification: afterVerification,
     );
     if (!ref.mounted ||
         generation != _requestGeneration ||
@@ -128,13 +132,13 @@ class LdcUserInfoNotifier extends AsyncNotifier<LdcUserInfo?> {
     return userInfo;
   }
 
-  Future<void> refresh() async {
+  Future<void> refresh({bool afterVerification = false}) async {
     final generation = _requestGeneration;
     final previousData = state.value;
     // ignore: invalid_use_of_internal_member
     state = const AsyncLoading<LdcUserInfo?>().copyWithPrevious(state);
     try {
-      final result = await _fetchUserInfo();
+      final result = await _fetchUserInfo(afterVerification: afterVerification);
       if (!ref.mounted || generation != _requestGeneration) return;
       state = AsyncValue.data(result);
     } catch (e, st) {
@@ -158,13 +162,14 @@ class LdcUserInfoNotifier extends AsyncNotifier<LdcUserInfo?> {
     }
   }
 
-  /// 用户已手动通过 CF，取消旧请求并立即重新读取业务会话。
+  /// 用户已手动通过 CF（或从内置浏览器回来），取消旧请求并立即重新读取
+  /// 业务会话。仍被拦就如实显示，不再自动起一轮验证。
   Future<void> refreshAfterCfVerification() {
     if (!SiteContext.isLinuxDo) return Future.value();
     _requestGeneration++;
     _inFlightFetch = null;
     ref.read(ldcOAuthServiceProvider).cancelPendingRequests();
-    return refresh();
+    return refresh(afterVerification: true);
   }
 
   Future<void> clear() async {

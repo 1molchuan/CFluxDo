@@ -54,6 +54,10 @@ class CfChallengeException implements Exception {
   /// CF 验证进行中，业务请求被 RequestScheduler 主动 reject
   /// （上层应静默处理，不要再叠加 toast，避免和 CF 验证弹窗冲突）
   final bool silentBlockedDuringChallenge;
+  /// 本次会话已确认原生链路不被 CF 信任（主站已改走浏览器网络栈），而这个
+  /// 请求走不了浏览器网络栈（LDC/CDK 等子域）：没有再起验证。上层可以改为
+  /// 在内置浏览器里打开对应页面。
+  final bool nativeUntrusted;
   /// 原始错误（用于调试，保留验证/重试失败的实际原因）
   final Object? cause;
   CfChallengeException({
@@ -61,12 +65,14 @@ class CfChallengeException implements Exception {
     this.inCooldown = false,
     this.autoVerifyDisabled = false,
     this.silentBlockedDuringChallenge = false,
+    this.nativeUntrusted = false,
     this.cause,
   });
 
   @override
   String toString() {
     if (silentBlockedDuringChallenge) return S.current.cf_operationBlockedByChallenge;
+    if (nativeUntrusted) return S.current.cf_serviceStillBlocked;
     if (inCooldown) return S.current.cf_cooldown;
     if (userCancelled) return S.current.cf_userCancelled;
     if (autoVerifyDisabled) return S.current.cf_autoVerifyDisabled;

@@ -6,6 +6,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fluxdo/services/auth_session.dart';
 import 'package:fluxdo/services/network/exceptions/oauth_exception.dart';
+import 'package:fluxdo/services/network/flux_request_spec.dart';
 import 'package:fluxdo/services/oauth_session_client.dart';
 
 // 取自上游 v0.2.29。业务 Cookie 轮换/有效期的几条用例依赖上游的 CookieJar
@@ -82,6 +83,33 @@ void main() {
         );
         expect(adapter.requests, hasLength(1));
         onlyUserInfoRequests();
+      });
+
+      test('卡片手动验证后的读取不再进过盾恢复，普通读取照常', () async {
+        await client.getUserInfo(expectedUsername: 'alice');
+        await client.getUserInfo(
+          expectedUsername: 'alice',
+          afterVerification: true,
+        );
+        expect(
+          adapter.requests.first.spec.skipCfChallenge,
+          isFalse,
+          reason: '普通读取撞盾仍自动过盾',
+        );
+        expect(
+          adapter.requests.last.spec.skipCfChallenge,
+          isTrue,
+          reason: '刚手动验证过，仍被拦就如实交回，不叠第二层验证页',
+        );
+      });
+
+      test('手动验证后仍被拦 → 归为 CF 挑战（卡片据此给浏览器入口）', () async {
+        adapter.status = 403;
+        adapter.headers['cf-mitigated'] = ['challenge'];
+        await expectLater(
+          client.getUserInfo(afterVerification: true),
+          throwsA(predicate(OAuthErrorPolicy.isCfChallenge)),
+        );
       });
 
       test('业务 401 直接报告过期，不发起自动重新授权', () async {

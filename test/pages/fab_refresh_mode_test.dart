@@ -37,6 +37,20 @@ void main() {
     // 深处往回滑 → 刷新；往下滑 → 创作
     expect(fabRefreshModeFromScroll(user(ScrollDirection.forward)), isTrue);
     expect(fabRefreshModeFromScroll(user(ScrollDirection.reverse)), isFalse);
+    // IndexedStack 里的非活跃页面不得改写首页的全局 FAB 模式。
+    for (final direction in ScrollDirection.values) {
+      expect(
+        fabRefreshModeFromScroll(user(direction), isActive: false),
+        isNull,
+      );
+    }
+    expect(
+      fabRefreshModeFromScroll(
+        ScrollUpdateNotification(metrics: metrics(pixels: 0), context: context),
+        isActive: false,
+      ),
+      isNull,
+    );
     // 松手 idle 不改变
     expect(fabRefreshModeFromScroll(user(ScrollDirection.idle)), isNull);
     // 已在顶部往回拉（下拉刷新区）不进入刷新模式

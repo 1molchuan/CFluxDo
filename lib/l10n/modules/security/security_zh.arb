@@ -45,6 +45,8 @@
   "cf_noChallengeMessage": "如果刚才的请求仍失败，请重新加载验证页或稍后再试。",
   "cf_noChallengeTitle": "当前没有需要完成的安全验证",
   "cf_operationBlockedByChallenge": "操作被安全验证拦截，请先完成验证",
+  "cf_openInBrowserAction": "在浏览器中打开",
+  "cf_serviceStillBlocked": "验证已完成，但该服务仍拦截了应用的请求，可以在内置浏览器中查看",
   "cf_retryVerify": "重新加载",
   "cf_retryVerificationAction": "重新尝试验证",
   "cf_verifyCompletingMessage": "验证结果已返回，正在同步状态…",

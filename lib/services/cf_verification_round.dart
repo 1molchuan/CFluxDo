@@ -78,8 +78,9 @@ abstract interface class CfVerificationSignals {
   /// cf-mitigated）：此后在限期内必须定稿，读不到新值按 notLanded 收口。
   void completionHint(String reason, {bool conclusive = false});
 
-  /// 页面露出了可交互的挑战（说明网络是通的）。
-  void challengeShown();
+  /// 页面露出了可交互的挑战（说明网络是通的）。[visible] 区分挑战是否
+  /// 真正呈现给了用户：后台轮次在隐藏的 WebView 里露出的挑战不算交互。
+  void challengeShown({bool visible = true});
 
   /// 主文档加载失败 / 5xx：之后若以超时或退出收场，按 inconclusive 处理。
   void networkTrouble(String detail);
@@ -113,24 +114,37 @@ abstract interface class CfVerificationSignals {
 /// 1.5 秒的来由：挑战脚本拿到放行响应后还要跳转/补最后一步，这时立刻收口
 /// 会拿到一枚对 Dio 无效的半成品（2026-10-13 实测：放行响应 0.6 秒后
 /// 轮询抢先收口，重试仍 403；2c07fe7b 只修了轮询这一个出口）。
+///
+/// 还没有任何完成迹象时读到的值，要稳定 [unconfirmedSettleWindow] 才落：
+/// 慢网络下挑战提交后页面要过好几秒才跳转，跳转时站点再签最终那枚。
+/// 2026-10-25 HKG 出口三次实测：轮询读到值 1.5 秒就落、页面还没跳转，
+/// 原生重放全部 403；10-26 同一出口等到跳转后落的值，原生直接 200。
 class CfVerificationRound implements CfVerificationSignals {
   CfVerificationRound({
     required this.id,
     required Future<String?> Function(String value) landing,
+    Future<void> Function(String landed)? afterLanded,
     CfRoundClock clock = const SystemCfRoundClock(),
     this.settleWindow = const Duration(milliseconds: 1500),
+    this.unconfirmedSettleWindow = const Duration(seconds: 6),
     this.probeInterval = const Duration(milliseconds: 250),
     this.completionDeadline = const Duration(seconds: 8),
     this.conclusiveGrace = const Duration(seconds: 3),
     this.landingAttempts = 3,
     this.landingRetryDelay = const Duration(milliseconds: 500),
   }) : _landing = landing,
+       _afterLanded = afterLanded,
        _clock = clock;
 
   final int id;
 
   /// 新值需要保持不变的时长。
   final Duration settleWindow;
+
+  /// 还没有完成迹象（页面没跳转、`/challenge` 没落到源站、挑战脚本也没
+  /// 报放行）时，新值需要保持不变的时长。期间出现完成迹象就回到
+  /// [settleWindow]。
+  final Duration unconfirmedSettleWindow;
 
   /// 定稿期间主动读 WebView 的间隔。
   final Duration probeInterval;
@@ -152,6 +166,9 @@ class CfVerificationRound implements CfVerificationSignals {
   final Duration landingRetryDelay;
 
   final Future<String?> Function(String value) _landing;
+
+  /// 落值确认后、宣布通过前的收尾（见 [CfRoundEnvironment.afterLanded]）。
+  final Future<void> Function(String landed)? _afterLanded;
   final CfRoundClock _clock;
   final Completer<CfRoundOutcome> _completer = Completer<CfRoundOutcome>();
 
@@ -166,6 +183,7 @@ class CfVerificationRound implements CfVerificationSignals {
   DateTime? _hintAt;
   DateTime? _conclusiveAt;
   bool _networkTrouble = false;
+  bool _challengeShown = false;
   bool _reading = false;
   bool _landingInProgress = false;
   CfRoundTimer? _ticker;
@@ -208,10 +226,12 @@ class CfVerificationRound implements CfVerificationSignals {
       _pendingValue = normalized;
       _pendingSince = _clock.now();
       _firstSeenAt ??= _pendingSince;
+      final confirmed = _hintAt != null || _conclusiveAt != null;
       CfChallengeLogger.log(
         '[ROUND $id] ${replaced ? 'cf_clearance changed' : 'new cf_clearance'} '
         '(${normalized.length} chars, via $source), waiting '
-        '${settleWindow.inMilliseconds}ms to settle',
+        '${(confirmed ? settleWindow : unconfirmedSettleWindow).inMilliseconds}'
+        'ms to settle${confirmed ? '' : ' (no completion signal yet)'}',
       );
     }
     _ensureTicking();
@@ -233,8 +253,9 @@ class CfVerificationRound implements CfVerificationSignals {
   }
 
   @override
-  void challengeShown() {
+  void challengeShown({bool visible = true}) {
     _networkTrouble = false;
+    if (visible) _challengeShown = true;
   }
 
   @override
@@ -272,7 +293,10 @@ class CfVerificationRound implements CfVerificationSignals {
   /// 宿主侧收口（没有 overlay、验证页被撤下等）。
   void abort(CfRoundFailure reason, {required String detail}) {
     if (isDone) return;
-    _complete(CfRoundFailed(round: id, reason: reason), detail: detail);
+    _complete(
+      CfRoundFailed(round: id, reason: reason),
+      detail: detail,
+    );
   }
 
   /// 测试钩子用：直接以给定结果收口（不经定稿）。
@@ -314,16 +338,28 @@ class CfVerificationRound implements CfVerificationSignals {
     final now = _clock.now();
     final pending = _pendingValue;
     if (pending != null) {
-      if (now.difference(_pendingSince!) >= settleWindow) {
+      // 有完成迹象才按 1.5 秒定稿；没有的话多半还在等挑战提交后的跳转
+      final window = _hintAt != null || _conclusiveAt != null
+          ? settleWindow
+          : unconfirmedSettleWindow;
+      if (now.difference(_pendingSince!) >= window) {
+        if (window != settleWindow) {
+          CfChallengeLogger.log(
+            '[ROUND $id] landing without completion signal after '
+            '${window.inSeconds}s stable',
+            level: 'warning',
+          );
+        }
         await _land(pending);
         return;
       }
       // 值一直在变、始终稳定不下来（定稿期间自动放弃会被忽略）：不能让
       // 一轮卡死，也不能落一枚还在变的值——按超时收口。
-      if (now.difference(_firstSeenAt!) >= settleWindow + completionDeadline) {
+      if (now.difference(_firstSeenAt!) >= window + completionDeadline) {
         _complete(
           CfRoundFailed(round: id, reason: CfRoundFailure.timeout),
-          detail: 'cf_clearance kept changing for '
+          detail:
+              'cf_clearance kept changing for '
               '${now.difference(_firstSeenAt!).inMilliseconds}ms',
         );
         return;
@@ -355,7 +391,8 @@ class CfVerificationRound implements CfVerificationSignals {
       // 网络层已确认通过，却始终读不到新值：值没法交给请求用
       _complete(
         CfRoundFailed(round: id, reason: CfRoundFailure.notLanded),
-        detail: 'no fresh cf_clearance within '
+        detail:
+            'no fresh cf_clearance within '
             '${completionDeadline.inSeconds}s after conclusive pass',
       );
       return;
@@ -381,8 +418,14 @@ class CfVerificationRound implements CfVerificationSignals {
       }
       if (isDone) return;
       if (CfClearanceAuthority.isSameValue(inJar, value)) {
+        value = await _finishAfterLanding(value);
+        if (isDone) return;
         _complete(
-          CfRoundPassed(round: id, clearance: value),
+          CfRoundPassed(
+            round: id,
+            clearance: value,
+            interactionRequired: _challengeShown,
+          ),
           detail: 'settled and landed (attempt $attempt)',
         );
         return;
@@ -398,7 +441,8 @@ class CfVerificationRound implements CfVerificationSignals {
       if (!switched) {
         final latest = await _readLatest();
         if (isDone) return;
-        if (latest != null && !CfClearanceAuthority.isSameValue(latest, value)) {
+        if (latest != null &&
+            !CfClearanceAuthority.isSameValue(latest, value)) {
           switched = true;
           CfChallengeLogger.log(
             '[ROUND $id] cf_clearance changed during landing '
@@ -417,6 +461,39 @@ class CfVerificationRound implements CfVerificationSignals {
       CfRoundFailed(round: id, reason: CfRoundFailure.notLanded),
       detail: 'settled value not confirmed in jar',
     );
+  }
+
+  /// 落值确认后的收尾：交给 [_afterLanded]（验证页可能借这段时间回到首页），
+  /// 之后 WebView 若又签出一枚新值（CF 常在挑战提交与随后的跳转各签一次），
+  /// 改落一次；落不进去仍以已落的值通过。收尾出错不影响结果。
+  Future<String> _finishAfterLanding(String landed) async {
+    final hook = _afterLanded;
+    if (hook == null) return landed;
+    try {
+      await hook(landed);
+    } catch (e) {
+      debugPrint('[CfRound] 落值收尾异常: $e');
+    }
+    if (isDone) return landed;
+    final latest = await _readLatest();
+    if (isDone ||
+        latest == null ||
+        CfClearanceAuthority.isSameValue(latest, landed)) {
+      return landed;
+    }
+    String? inJar;
+    try {
+      inJar = await _landing(latest);
+    } catch (e) {
+      debugPrint('[CfRound] 收尾改落异常: $e');
+    }
+    final adopted = CfClearanceAuthority.isSameValue(inJar, latest);
+    CfChallengeLogger.log(
+      '[ROUND $id] cf_clearance changed after landing (${latest.length} chars), '
+      '${adopted ? 'landed the newer value' : 'newer value not confirmed in jar'}',
+      level: adopted ? 'info' : 'warning',
+    );
+    return adopted ? latest : landed;
   }
 
   /// 读 WebView 当前值，不论新旧（读不到 / 出错返回 null）
@@ -511,6 +588,10 @@ abstract interface class CfRoundEnvironment {
   /// 把定稿值经 BoundarySync（权威闸门）写进 jar，返回写后 jar 里的值。
   Future<String?> land(CfVerificationRound round, String value);
 
+  /// 定稿值已确认进 jar、宣布通过之前（验证页还在）：启动预加载还在等首页
+  /// 时，让验证页回到本站首页并把预加载快照交过去。须自带时限。
+  Future<void> afterLanded(CfVerificationRound round, String value);
+
   /// 通过：广播「CF 已解决」、过盾后 `_t` 对账等。
   void onPassed(CfVerificationRound round, String value);
 
@@ -582,6 +663,7 @@ class CfVerificationRounds {
       id: ++_counter,
       clock: clock,
       landing: (value) => environment.land(round, value),
+      afterLanded: (value) => environment.afterLanded(round, value),
     );
     round.hasForegroundWaiter = mode != CfVerifyMode.background;
     _active = round;

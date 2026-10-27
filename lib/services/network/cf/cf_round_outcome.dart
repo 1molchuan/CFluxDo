@@ -16,12 +16,23 @@ sealed class CfRoundOutcome {
 /// 通过：页面上报的挑战结果已按统一定稿规则收敛，定稿值 [clearance]
 /// 已经过权威闸门写进 jar。拿到它的调用方可以直接重放，不需要再同步。
 final class CfRoundPassed extends CfRoundOutcome {
-  const CfRoundPassed({required super.round, required this.clearance});
+  const CfRoundPassed({
+    required super.round,
+    required this.clearance,
+    this.interactionRequired = false,
+  });
 
   final String clearance;
 
+  /// 这一轮露出过需要用户操作的挑战（勾选框等）。刚由用户亲手过的值若是
+  /// 被原生链路拒绝，再弹一次同样的挑战大概率仍要用户再点一次，恢复流程
+  /// 据此优先尝试浏览器网络栈。
+  final bool interactionRequired;
+
   @override
-  String toString() => 'CfRoundPassed(round=$round, ${clearance.length} chars)';
+  String toString() =>
+      'CfRoundPassed(round=$round, ${clearance.length} chars'
+      '${interactionRequired ? ', interactive' : ''})';
 }
 
 /// 失败原因。

@@ -103,7 +103,9 @@ final fabRefreshModeProvider = StateProvider<bool>((ref) => false);
 bool? fabRefreshModeFromScroll(
   ScrollNotification notification, {
   double topExtent = 0,
+  bool isActive = true,
 }) {
+  if (!isActive) return null;
   final metrics = notification.metrics;
   if (metrics.axis != Axis.vertical) return null;
   final atTop = metrics.pixels <= metrics.minScrollExtent + topExtent + 0.5;
@@ -950,6 +952,8 @@ class _TopicsPageState extends ConsumerState<TopicsPage>
   void _handleTabChange() {
     if (_tabController.indexIsChanging) return;
     if (_currentTabIndex == _tabController.index) return;
+    // liansishen/fluxdo@223f75af：切分类时恢复创作模式，避免继承上一页的刷新态。
+    if (widget.isActive) ref.read(fabRefreshModeProvider.notifier).state = false;
     setState(() {
       _currentTabIndex = _tabController.index;
     });
@@ -1278,6 +1282,7 @@ class _TopicsPageState extends ConsumerState<TopicsPage>
     // 监听滚动到顶部的通知：动画展开头部；列表回顶由 _TopicListState
     // 各自监听同一信号处理（overlay 头部与列表滚动已解耦）
     ref.listen(scrollToTopProvider, (previous, next) {
+      if (widget.isActive) ref.read(fabRefreshModeProvider.notifier).state = false;
       _headerController.expand();
     });
 
@@ -1694,6 +1699,7 @@ class _TopicsPageState extends ConsumerState<TopicsPage>
     // 顶部判定放宽到头部可折叠段：列表贴顶时位置是折叠锚位，不是 0
     final nextFabMode = fabRefreshModeFromScroll(
       notification,
+      isActive: widget.isActive,
       topExtent: _collapsibleExtentFor(
         _visiblePinnedIds,
         ref.read(tabTagsProvider(_currentCategoryId())),

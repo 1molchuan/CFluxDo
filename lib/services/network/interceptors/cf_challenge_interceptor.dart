@@ -131,6 +131,7 @@ class CfChallengeInterceptor extends Interceptor {
     // 备选提取 sitekey（从挑战响应体中）
     CfClearanceRefreshService().extractAndUpdateSitekey(
       err.response?.data?.toString() ?? '',
+      source: err.response?.realUri ?? err.requestOptions.uri,
     );
     // 续期服务的停/启归验证轮次：真正起验证 WebView 前它会 await stop()，
     // 通过后错峰重启。这里不再提前停——换值/过期重放就能恢复时，以前续期
@@ -303,4 +304,7 @@ class _SessionCompatPort implements CfCompatPort {
     // 会话级兼容必须以首次真实请求成功为准；失败时立即回滚
     if (!_settings.persistentEnabled) _settings.disableSessionFallback();
   }
+
+  @override
+  bool get nativeUntrusted => _settings.sessionFallbackEnabled;
 }

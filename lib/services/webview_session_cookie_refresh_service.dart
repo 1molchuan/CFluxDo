@@ -91,10 +91,10 @@ class WebViewSessionCookieRefreshService {
   /// 的失败,不该比成功路径(15min 免打扰)更频繁地烧 WebView。
   static const Duration _maxFailureCooldown = Duration(minutes: 15);
 
-
   /// 轻量 fingerprint bootstrap 仅适配已确认的 LINUX DO 插件协议。
   /// 其他论坛仍走标准完整网页登录与真实 Cookie 同步，不报告插件成功。
-  bool get supportsBootstrap => SiteContext.isLinuxDo;
+  bool get supportsBootstrap =>
+      SiteContext.current.supportsFingerprintBootstrap;
   final CookieJarService _jar = CookieJarService();
 
   Future<SessionBootstrapResult>? _activeRefresh;

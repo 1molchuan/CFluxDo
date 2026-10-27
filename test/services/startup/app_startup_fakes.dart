@@ -19,8 +19,11 @@ class FakeStartupPorts implements AppStartupPorts {
 
   /// [checkStoredSession] 的结果；[storedSessionGate] 不为 null 时等它。
   bool storedSession;
+  @override
+  bool validatePreloadedSession = false;
   Completer<bool>? storedSessionGate;
   int storedSessionChecks = 0;
+  Future<bool> Function()? storedSessionBody;
 
   StartupPreloadPath path;
 
@@ -104,6 +107,8 @@ class FakeStartupPorts implements AppStartupPorts {
   Future<bool> checkStoredSession() async {
     storedSessionChecks++;
     log.add('checkStoredSession');
+    final body = storedSessionBody;
+    if (body != null) return body();
     final gate = storedSessionGate;
     if (gate != null) return gate.future;
     return storedSession;

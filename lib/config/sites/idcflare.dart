@@ -4,6 +4,6 @@ import '../site_customization.dart';
 const idcflareCustomization = SiteCustomization(
   linkSecurityConfig: LinkSecurityConfig(
     internalDomains: ['idcflare.com'],
-    trustedDomains: ['*.linux.do'],
+    trustedDomains: ['*.idcflare.com', '*.linux.do'],
   ),
 );

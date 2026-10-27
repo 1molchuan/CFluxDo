@@ -45,9 +45,14 @@ class _CurrentUser extends CurrentUserNotifier {
 class _LdcService extends LdcOAuthService {
   _LdcService(this.load) : super(dio: Dio());
   final Future<Map<String, dynamic>> Function() load;
+  final List<bool> afterVerificationFlags = [];
   @override
-  Future<LdcUserInfo?> getUserInfo({String? expectedUsername}) async {
+  Future<LdcUserInfo?> getUserInfo({
+    String? expectedUsername,
+    bool afterVerification = false,
+  }) async {
     expect(expectedUsername, 'alice');
+    afterVerificationFlags.add(afterVerification);
     return LdcUserInfo.fromJson(await load());
   }
 
@@ -58,9 +63,14 @@ class _LdcService extends LdcOAuthService {
 class _CdkService extends CdkOAuthService {
   _CdkService(this.load) : super(dio: Dio());
   final Future<Map<String, dynamic>> Function() load;
+  final List<bool> afterVerificationFlags = [];
   @override
-  Future<CdkUserInfo?> getUserInfo({String? expectedUsername}) async {
+  Future<CdkUserInfo?> getUserInfo({
+    String? expectedUsername,
+    bool afterVerification = false,
+  }) async {
     expect(expectedUsername, 'alice');
+    afterVerificationFlags.add(afterVerification);
     return CdkUserInfo.fromJson(await load());
   }
 
@@ -77,6 +87,8 @@ void main() {
       late ProviderContainer container;
       late SharedPreferences prefs;
       late Future<Map<String, dynamic>> Function() load;
+      late _LdcService ldcService;
+      late _CdkService cdkService;
 
       Future<void> initialize() async {
         SharedPreferences.setMockInitialValues({
@@ -86,16 +98,14 @@ void main() {
         });
         prefs = await SharedPreferences.getInstance();
         load = () async => _userInfo;
+        ldcService = _LdcService(() => load());
+        cdkService = _CdkService(() => load());
         container = ProviderContainer(
           retry: (_, _) => null,
           overrides: [
             currentUserProvider.overrideWith(_CurrentUser.new),
-            ldcOAuthServiceProvider.overrideWithValue(
-              _LdcService(() => load()),
-            ),
-            cdkOAuthServiceProvider.overrideWithValue(
-              _CdkService(() => load()),
-            ),
+            ldcOAuthServiceProvider.overrideWithValue(ldcService),
+            cdkOAuthServiceProvider.overrideWithValue(cdkService),
           ],
         );
         addTearDown(container.dispose);
@@ -132,6 +142,25 @@ void main() {
         expect(OAuthErrorPolicy.isCfChallenge(current().error), isTrue);
         expect(current().value, same(previous));
         expect(prefs.getString(cacheKey), isNotNull);
+      });
+
+      test('卡片手动验证后的刷新带上验证后标记（仍被拦不再自动起验证）', () async {
+        await initialize();
+        await read();
+        if (isLdc) {
+          await container
+              .read(ldcUserInfoProvider.notifier)
+              .refreshAfterCfVerification();
+        } else {
+          await container
+              .read(cdkUserInfoProvider.notifier)
+              .refreshAfterCfVerification();
+        }
+        await refresh();
+        final flags = isLdc
+            ? ldcService.afterVerificationFlags
+            : cdkService.afterVerificationFlags;
+        expect(flags, [false, true, false]);
       });
 
       test('确认授权过期才清除余额缓存', () async {
