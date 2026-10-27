@@ -22,7 +22,7 @@
   "login_qrConfirmMessage": "This will create a User API Key for another device and show a login QR code. Anyone who scans it can sign in as you. Regenerating invalidates the previously shared QR code. Confirm this is you, and that no one nearby can see the screen.",
   "login_qrConfirmTitle": "Generate login QR code?",
   "login_qrDecodingImage": "Reading QR code from image…",
-  "login_qrDisplayHint": "On another device that is not signed in, open cfluxdo and scan this code to sign in.",
+  "login_qrDisplayHint": "On another device that is not signed in, open CFluxDo and scan this code to sign in.",
   "login_qrDisplayTitle": "Login QR code",
   "login_qrExpiredTapRegenerate": "Expired. Tap to regenerate",
   "login_qrGalleryOnlyHint": "Live scanning is not supported on this platform. Choose an image that contains the login QR code.",

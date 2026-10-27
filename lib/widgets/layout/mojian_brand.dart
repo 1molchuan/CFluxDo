@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../theme/mojian_theme.dart';
 
-/// 墨笺侧栏顶部的品牌:强调色方印「c」+ 宋体字标 cfluxdo(收起的窄侧栏只留方印)。
+/// 墨笺侧栏顶部的品牌:强调色方印「c」+ 宋体字标 CFluxDo(收起的窄侧栏只留方印)。
 class MojianBrand extends StatelessWidget {
   const MojianBrand({super.key, required this.extended});
 
@@ -46,7 +46,7 @@ class MojianBrand extends StatelessWidget {
           if (extended) ...[
             const SizedBox(width: 9),
             Text(
-              'cfluxdo',
+              'CFluxDo',
               style: TextStyle(
                 fontFamily: MojianTokens.titleFamilyFor(context),
                 fontWeight: FontWeight.w600,

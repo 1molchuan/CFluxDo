@@ -383,7 +383,7 @@ class _DohDetailSettingsPageState extends State<DohDetailSettingsPage> {
     final status = await AccelDohAuthService.instance.authorizeNow();
     switch (status) {
       case AccelDohAuthStatus.ready:
-        ToastService.showSuccess('授权成功，已切换到 cfluxdo 加速');
+        ToastService.showSuccess('授权成功，已切换到 CFluxDo 加速');
       case AccelDohAuthStatus.unavailable:
         ToastService.showError('此账号无法使用 Connect，继续使用公共加速');
       case AccelDohAuthStatus.denied:

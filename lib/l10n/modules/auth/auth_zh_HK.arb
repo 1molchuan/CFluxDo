@@ -29,7 +29,7 @@
   "login_qrConfirmMessage": "將為另一部裝置建立一枚 User API Key 並生成登入二維碼。對方掃碼後可以用你嘅帳號登入。重新生成會令之前分享嘅登入二維碼失效。請確認係你本人操作，並且周圍冇其他人窺視。",
   "login_qrConfirmTitle": "確認生成登錄二維碼？",
   "login_qrDecodingImage": "正在識別圖片中的二維碼…",
-  "login_qrDisplayHint": "請用另一台未登錄的裝置打開 cfluxdo，掃描此二維碼完成登錄。",
+  "login_qrDisplayHint": "請用另一台未登錄的裝置打開 CFluxDo，掃描此二維碼完成登錄。",
   "login_qrDisplayTitle": "登錄二維碼",
   "login_qrExpiredTapRegenerate": "已過期，點擊重新生成",
   "login_qrGalleryOnlyHint": "目前平台不支援即時掃碼，請從相簿選擇包含登錄二維碼的圖片。",

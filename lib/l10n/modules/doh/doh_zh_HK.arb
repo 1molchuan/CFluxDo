@@ -50,7 +50,7 @@
     }
   },
   "cfSelect_noticeTitle": "新版本如何連接 linux.do",
-  "cfSelect_noticeBody": "從這個版本起，cfluxdo 自己尋找能連上 linux.do 的 Cloudflare 節點，不再默認依賴任何中轉服務：\n• 會向騰訊 DNSPod、阿里 AliDNS、360、Cloudflare、Google、Quad9 等公共 DNS 服務 發送少量域名查詢（Visa、OpenAI、Shopify 等 Cloudflare 大廠站點，以及節點表 atlas.1molchuan.top），用來獲取候選節點和加密密鑰。查詢只含域名，不帶你的任何帳號資料。\n• 會與若干 Cloudflare 節點做加密握手（ECH）並請求 /cdn-cgi/trace 測速，擇優記住；只在切換網絡或連不上時重測。\n• 單次測速約 50–200 KB 流量。\n可以在「設定 → 網絡 → 連接方式」改為「只用 atlas 池」，或查看當前線路。\n\n幫助優選（默認關閉）：開啟後，App 會把本來就做的測速結果分享給社區節點站 cfhub，幫同網絡商的其他用戶更快找到節點。開啟需要用你的 linux.do 帳號通過 Connect 授權 cfhub（與在 cfhub 網頁上加入相同，需信任等級 1 以上）。我們承諾：\n• 只分享候選 Cloudflare 節點地址、握手耗時和是否成功；分享內容不含 Cookie、令牌、裝置標識或瀏覽記錄。\n• cfhub 會記錄你的 linux.do 用戶名、信任等級，以及這次分享歸屬的網絡商與地區；不保存你的完整 IP 地址。\n• 不會在後台額外測速，不額外耗電耗流量；分享失敗就放棄，不重試。\n• 隨時可在設定裏關閉，關閉立即生效並作廢授權；登出 linux.do 也會作廢。\n• 客戶端代碼與分享格式均開源。",
+  "cfSelect_noticeBody": "從這個版本起，CFluxDo 自己尋找能連上 linux.do 的 Cloudflare 節點，不再默認依賴任何中轉服務：\n• 會向騰訊 DNSPod、阿里 AliDNS、360、Cloudflare、Google、Quad9 等公共 DNS 服務 發送少量域名查詢（Visa、OpenAI、Shopify 等 Cloudflare 大廠站點，以及節點表 atlas.1molchuan.top），用來獲取候選節點和加密密鑰。查詢只含域名，不帶你的任何帳號資料。\n• 會與若干 Cloudflare 節點做加密握手（ECH）並請求 /cdn-cgi/trace 測速，擇優記住；只在切換網絡或連不上時重測。\n• 單次測速約 50–200 KB 流量。\n可以在「設定 → 網絡 → 連接方式」改為「只用 atlas 池」，或查看當前線路。\n\n幫助優選（默認關閉）：開啟後，App 會把本來就做的測速結果分享給社區節點站 cfhub，幫同網絡商的其他用戶更快找到節點。開啟需要用你的 linux.do 帳號通過 Connect 授權 cfhub（與在 cfhub 網頁上加入相同，需信任等級 1 以上）。我們承諾：\n• 只分享候選 Cloudflare 節點地址、握手耗時和是否成功；分享內容不含 Cookie、令牌、裝置標識或瀏覽記錄。\n• cfhub 會記錄你的 linux.do 用戶名、信任等級，以及這次分享歸屬的網絡商與地區；不保存你的完整 IP 地址。\n• 不會在後台額外測速，不額外耗電耗流量；分享失敗就放棄，不重試。\n• 隨時可在設定裏關閉，關閉立即生效並作廢授權；登出 linux.do 也會作廢。\n• 客戶端代碼與分享格式均開源。",
   "cfSelect_noticeKeepOff": "保持關閉",
   "cfSelect_noticeEnable": "開啟並幫助優選",
   "dohDetail_addServer": "添加服務器",

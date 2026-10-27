@@ -86,7 +86,7 @@ class UpdateInfo {
 /// 应用更新检查服务
 class UpdateService {
   // cfluxdo 从 fork 的 Release 检查更新(包名与签名都和官方版不同,不能装官方包)
-  static const String _repository = '1molchuan/fluxdo';
+  static const String _repository = '1molchuan/CFluxDo';
   static const String _apiUrl =
       'https://api.github.com/repos/$_repository/releases/latest';
   static const String _autoCheckUpdateKey = 'auto_check_update';

@@ -89,11 +89,13 @@ BEGIN
     BEGIN
         BLOCK "040904e4"
         BEGIN
+            // CompanyName / ProductName 决定数据目录 %APPDATA%\com.github.molchuan\cfluxdo，
+            // 改名 CFluxDo 只动显示用的 FileDescription，这两项不动
             VALUE "CompanyName", "com.github.molchuan" "\0"
-            VALUE "FileDescription", "cfluxdo" "\0"
+            VALUE "FileDescription", "CFluxDo" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
             VALUE "InternalName", "cfluxdo" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2026 cfluxdo contributors." "\0"
+            VALUE "LegalCopyright", "Copyright (C) 2026 CFluxDo contributors." "\0"
             VALUE "OriginalFilename", "cfluxdo.exe" "\0"
             VALUE "ProductName", "cfluxdo" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"

@@ -25,7 +25,7 @@
   },
   "notification_bookmarkReminder": "Bookmark reminder",
   "notification_channelBackground": "Background",
-  "notification_channelBackgroundDesc": "Keep cfluxdo receiving notifications in background",
+  "notification_channelBackgroundDesc": "Keep CFluxDo receiving notifications in background",
   "notification_channelDiscourse": "Discourse Notifications",
   "notification_channelDiscourseDesc": "Notifications from Discourse forum",
   "notification_chatGroupMention": "Group mentioned in chat",

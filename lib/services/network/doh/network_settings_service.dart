@@ -2064,12 +2064,12 @@ class NetworkSettingsService {
 /// 查询要带账号令牌（见 [AccelDohAuthService]）：用 L 站 Connect 核验过的账号才发令牌。
 /// 没有令牌时（登录佬友、游客/TL0）一律走 [accelDohPublicServer]。
 /// 节点 IP 作为 bootstrap：系统 DNS 解析不出加速域名时直接连这些节点（SNI 不变）。
-const String accelDohServerName = 'cfluxdo 加速';
+const String accelDohServerName = 'CFluxDo 加速';
 
 /// 公共加速：不需要令牌，给没授权 Connect 或用不了 Connect 的佬友（如青春版）
 /// 以及游客/TL0 用。不在服务器列表里显示，只在选中加速且没有令牌时顶上。
 const DohServer accelDohPublicServer = DohServer(
-  name: 'cfluxdo 公共加速',
+  name: 'CFluxDo 公共加速',
   url: 'https://edge.1molchuan.top/linuxdo',
   bootstrapIps: accelDohBootstrapIps,
 );

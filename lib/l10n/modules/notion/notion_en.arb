@@ -35,7 +35,7 @@
   "notion_autoSyncOnBookmark": "Auto sync when bookmarking a topic",
   "notion_autoSyncDesc": "When on, bookmarking a topic (the first post) syncs it to Notion in background. Bookmarking a single reply will not trigger sync.",
   "notion_syncScope": "Sync scope",
-  "notion_tokenSecurityNote": "Token is stored locally only and never uploaded. We recommend creating a dedicated Internal Integration for cfluxdo and sharing only the target Database with it.",
+  "notion_tokenSecurityNote": "Token is stored locally only and never uploaded. We recommend creating a dedicated Internal Integration for CFluxDo and sharing only the target Database with it.",
   "notion_syncSucceed": "Synced to Notion",
   "notion_syncFailed": "Sync failed: {error}",
   "notion_duplicateTitle": "Already in Notion",

@@ -1,15 +1,15 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <component type="desktop-application">
   <id>com.github.molchuan.cfluxdo</id>
-  <name>cfluxdo</name>
+  <name>CFluxDo</name>
   <summary>linux.do 第三方客户端</summary>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>GPL-3.0-only</project_license>
   <description>
-    <p>cfluxdo 是 linux.do 论坛的第三方客户端，内置 ECH 直连与本地节点优选，国内网络下无需额外代理即可访问。</p>
+    <p>CFluxDo 是 linux.do 论坛的第三方客户端，内置 ECH 直连与本地节点优选，国内网络下无需额外代理即可访问。</p>
   </description>
   <launchable type="desktop-id">com.github.molchuan.cfluxdo.desktop</launchable>
-  <url type="homepage">https://github.com/1molchuan/fluxdo</url>
+  <url type="homepage">https://github.com/1molchuan/CFluxDo</url>
   <content_rating type="oars-1.1"/>
   <releases>
     <release version="1.2.2-beta.5" date="2026-10-27" type="development"/>

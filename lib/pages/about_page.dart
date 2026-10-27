@@ -245,7 +245,7 @@ class _AboutPageState extends State<AboutPage> {
             child: Column(
               children: [
                 Text(
-                  'cfluxdo',
+                  'CFluxDo',
                   style: theme.textTheme.headlineMedium?.copyWith(
                     fontWeight: FontWeight.w600,
                     color: theme.colorScheme.onSurface,
@@ -293,7 +293,7 @@ class _AboutPageState extends State<AboutPage> {
                   title: context.l10n.about_openSourceLicense,
                   onTap: () => showLicensePage(
                     context: context,
-                    applicationName: 'cfluxdo',
+                    applicationName: 'CFluxDo',
                     applicationVersion: _version,
                     applicationLegalese: context.l10n.about_legalese,
                   ),
@@ -326,7 +326,7 @@ class _AboutPageState extends State<AboutPage> {
                   title: context.l10n.about_sourceCode,
                   subtitle: 'GitHub',
                   onTap: () => launchUrl(
-                    Uri.parse('https://github.com/1molchuan/fluxdo'),
+                    Uri.parse('https://github.com/1molchuan/CFluxDo'),
                     mode: LaunchMode.externalApplication,
                   ),
                 ),
@@ -356,7 +356,7 @@ class _AboutPageState extends State<AboutPage> {
                   icon: Symbols.bug_report_rounded,
                   title: context.l10n.about_feedback,
                   onTap: () => launchUrl(
-                    Uri.parse('https://github.com/1molchuan/fluxdo/issues'),
+                    Uri.parse('https://github.com/1molchuan/CFluxDo/issues'),
                     mode: LaunchMode.externalApplication,
                   ),
                 ),

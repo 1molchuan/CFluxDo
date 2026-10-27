@@ -1,16 +1,16 @@
-# cfluxdo
+# CFluxDo
 
 > 面向国内网络环境的 [Linux.do](https://linux.do/) 第三方 Android 客户端（另有 Windows / Linux 桌面预览版），基于 [FluxDO](https://github.com/Lingyan000/fluxdo) 独立发行
 
-[![GitHub Release](https://img.shields.io/github/v/release/1molchuan/fluxdo?style=for-the-badge&logo=github&label=GitHub%20Releases)](https://github.com/1molchuan/fluxdo/releases)
-[![Platform](https://img.shields.io/badge/platform-Android%20arm64%20%7C%20armv7%20%7C%20Windows%20%7C%20Linux-3DDC84?style=for-the-badge&logo=android&logoColor=white)](https://github.com/1molchuan/fluxdo/releases)
+[![GitHub Release](https://img.shields.io/github/v/release/1molchuan/CFluxDo?style=for-the-badge&logo=github&label=GitHub%20Releases)](https://github.com/1molchuan/CFluxDo/releases)
+[![Platform](https://img.shields.io/badge/platform-Android%20arm64%20%7C%20armv7%20%7C%20Windows%20%7C%20Linux-3DDC84?style=for-the-badge&logo=android&logoColor=white)](https://github.com/1molchuan/CFluxDo/releases)
 [![License](https://img.shields.io/badge/license-GPL--3.0-blue?style=for-the-badge)](LICENSE)
 
-cfluxdo 源自 FluxDO 0.2.28，已脱离 fork 关系独立维护，并持续同步上游（目前到 v0.2.29）。它保留了 FluxDO 的全部论坛功能，重点解决国内网络下访问 linux.do 时遇到的 DNS 污染、频繁弹 Cloudflare 验证、无征兆掉登录等问题。以 Android 为主，Windows、Linux 桌面端为预览版。
+CFluxDo 源自 FluxDO 0.2.28，已脱离 fork 关系独立维护，并持续同步上游（目前到 v0.2.29）。它保留了 FluxDO 的全部论坛功能，重点解决国内网络下访问 linux.do 时遇到的 DNS 污染、频繁弹 Cloudflare 验证、无征兆掉登录等问题。以 Android 为主，Windows、Linux 桌面端为预览版。
 
 ## 下载安装
 
-- 到 [Releases](https://github.com/1molchuan/fluxdo/releases) 下载对应平台和架构的安装包，旁边有同名的 `.sha256` 校验文件：
+- 到 [Releases](https://github.com/1molchuan/CFluxDo/releases) 下载对应平台和架构的安装包，旁边有同名的 `.sha256` 校验文件：
   - `cfluxdo-<版本>-arm64-v8a.apk`：64 位 ARM，2015 年以后的手机几乎都是，优先选这个。
   - `cfluxdo-<版本>-armeabi-v7a.apk`：32 位 ARM，只给装不上 arm64 包（报 `INSTALL_FAILED_NO_MATCHING_ABIS`）的老机器。
   - `cfluxdo-<版本>-windows-x86_64.zip`：Windows 10/11 64 位桌面预览版，解压后运行 `cfluxdo.exe`，需要 WebView2 运行时（Windows 11 自带）。没有代码签名，第一次运行如果出现「Windows 已保护你的电脑」，点「更多信息 → 仍要运行」。
@@ -20,7 +20,7 @@ cfluxdo 源自 FluxDO 0.2.28，已脱离 fork 关系独立维护，并持续同�
 
 ## 它怎么连接 linux.do
 
-从 1.1.0 起，cfluxdo 默认不依赖任何中转服务，由 App 自己在 Cloudflare 共享池里找能连上 linux.do 的节点：
+从 1.1.0 起，CFluxDo 默认不依赖任何中转服务，由 App 自己在 Cloudflare 共享池里找能连上 linux.do 的节点：
 
 1. **取候选**：向公共 DNS（DNSPod、AliDNS、360、Cloudflare、Google、Quad9 等，直连 IP、并发竞速）查询若干托管在 Cloudflare 上的大厂站点，加上社区维护的节点表 atlas，再从 Cloudflare 公布的网段随机抽样。答案不在 Cloudflare 网段内的一律丢弃，防 DNS 投毒。公共 DNS 从不查询 `linux.do` 本身。
 2. **竞速**：对候选并发做 ECH 加密握手（内层 SNI 为 linux.do，明文 SNI 在国内会被重置）并请求 `/cdn-cgi/trace`，响应里 `h=linux.do` 才算通过，最快的记为赢家并落盘。
@@ -53,8 +53,8 @@ cfluxdo 源自 FluxDO 0.2.28，已脱离 fork 关系独立维护，并持续同�
 - `just`（可选，仅作为本地命令入口）
 
 ```bash
-git clone --recurse-submodules https://github.com/1molchuan/fluxdo.git
-cd fluxdo
+git clone --recurse-submodules https://github.com/1molchuan/CFluxDo.git
+cd CFluxDo
 dart run melos bootstrap                 # 初始化 workspace
 dart run tool/project_prep.dart app      # pub get、l10n 生成、代理证书同步，等价于 just sync
 dart tool/flutterw.dart build apk --release --target-platform android-arm64 \
@@ -79,7 +79,7 @@ dart tool/flutterw.dart build apk --release --target-platform android-arm \
 ## 项目结构
 
 ```
-fluxdo/
+CFluxDo/
 ├── android/                 # Android 工程
 ├── lib/
 │   ├── pages/               # 页面
@@ -96,14 +96,14 @@ fluxdo/
 
 ## 问题反馈
 
-- 提交 [Issue](https://github.com/1molchuan/fluxdo/issues)
+- 提交 [Issue](https://github.com/1molchuan/CFluxDo/issues)
 - 在 [Linux.do](https://linux.do/) 论坛发帖讨论
 
 反馈掉登录、弹盾类问题时，请附上「应用设置 → 日志」导出的日志，里面不含密码和 Cookie 原文。反复弹人机验证多半是出口 IP 在变：手机上开着多节点或自动切换的 VPN、ROM 的「双通道网络加速」都会造成这种情况，先关掉再试。
 
 ## 致谢与协议
 
-cfluxdo 基于 [Lingyan000/fluxdo](https://github.com/Lingyan000/fluxdo)，感谢 FluxDO 的作者与所有贡献者，也感谢 [Linux.do](https://linux.do/) 社区。
+CFluxDo 基于 [Lingyan000/fluxdo](https://github.com/Lingyan000/fluxdo)，感谢 FluxDO 的作者与所有贡献者，也感谢 [Linux.do](https://linux.do/) 社区。
 
 本项目为非官方客户端，与 Linux.do 官方无直接关联。
 

@@ -1,5 +1,5 @@
 [Desktop Entry]
-Name=cfluxdo
+Name=CFluxDo
 Comment=linux.do 客户端
 Exec=cfluxdo %u
 Icon=com.github.molchuan.cfluxdo

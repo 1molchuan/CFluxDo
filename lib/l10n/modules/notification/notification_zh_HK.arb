@@ -35,7 +35,7 @@
   },
   "notification_bookmarkReminder": "書籤提醒",
   "notification_channelBackground": "後台運行",
-  "notification_channelBackgroundDesc": "保持 cfluxdo 在後台接收通知",
+  "notification_channelBackgroundDesc": "保持 CFluxDo 在後台接收通知",
   "notification_channelDiscourse": "Discourse 通知",
   "notification_channelDiscourseDesc": "來自 Discourse 論壇的通知",
   "notification_chatGroupMention": "羣組在聊天中被提及",

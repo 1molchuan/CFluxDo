@@ -3295,7 +3295,7 @@ class _MojianMiniPreview extends StatelessWidget {
               ),
               const SizedBox(width: 4),
               Text(
-                'cfluxdo',
+                'CFluxDo',
                 style: serif(9).copyWith(fontWeight: FontWeight.w700),
               ),
             ],

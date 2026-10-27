@@ -22,7 +22,7 @@
     -->
     <uses-permission android:name="android.permission.CREDENTIAL_MANAGER_SET_ORIGIN"/>
     <application
-        android:label="cfluxdo"
+        android:label="CFluxDo"
         android:name=".FluxdoApplication"
         android:icon="@mipmap/ic_launcher"
         android:enableOnBackInvokedCallback="true"

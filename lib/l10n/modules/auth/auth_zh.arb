@@ -36,7 +36,7 @@
   "login_qrConfirmMessage": "将为另一台设备创建一枚 User API Key 并生成登录二维码。对方扫码后可使用你的账号登录。重新生成会使之前分享的登录二维码失效。请确认这是你本人操作，且周围没有他人窥视。",
   "login_qrConfirmTitle": "确认生成登录二维码？",
   "login_qrDecodingImage": "正在识别图片中的二维码…",
-  "login_qrDisplayHint": "请用另一台未登录的设备打开 cfluxdo，扫描此二维码完成登录。",
+  "login_qrDisplayHint": "请用另一台未登录的设备打开 CFluxDo，扫描此二维码完成登录。",
   "login_qrDisplayTitle": "登录二维码",
   "login_qrExpiredTapRegenerate": "已过期，点击重新生成",
   "login_qrGalleryOnlyHint": "当前平台不支持实时扫码，请从相册选择包含登录二维码的图片。",

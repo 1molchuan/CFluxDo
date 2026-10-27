@@ -142,7 +142,7 @@ class _OnboardingPageState extends State<OnboardingPage> with TickerProviderStat
               fadeAnimation: _fadeAnimations[1],
               slideAnimation: _slideAnimations[1],
               child: Text(
-                'cfluxdo',
+                'CFluxDo',
                 style: theme.textTheme.displayMedium?.copyWith(
                   fontWeight: FontWeight.w900,
                   letterSpacing: -1.5,

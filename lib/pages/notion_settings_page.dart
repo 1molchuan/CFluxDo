@@ -145,7 +145,7 @@ class _NotionSettingsPageState extends ConsumerState<NotionSettingsPage> {
       final client = NotionClient(token);
       final created = await client.createDatabaseForExport(
         parentPageId: parentId,
-        title: 'cfluxdo 导出',
+        title: 'CFluxDo 导出',
       );
       final dbId = created['id'] as String?;
       if (dbId == null) throw NotionApiException('No id in response');

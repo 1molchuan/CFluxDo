@@ -77,7 +77,7 @@ class BackgroundNotificationService {
 
     await FlutterForegroundTask.startService(
       serviceId: 200,
-      notificationTitle: 'cfluxdo',
+      notificationTitle: 'CFluxDo',
       notificationText: S.current.notification_backgroundRunning,
       callback: startNotificationTaskHandler,
     );

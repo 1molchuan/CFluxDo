@@ -25,9 +25,9 @@ class _ConsentDialog extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('开启 cfluxdo 加速'),
+      title: const Text('开启 CFluxDo 加速'),
       content: const Text(
-        'cfluxdo 加速需要用 L 站 Connect 确认一次你的账号。\n\n'
+        'CFluxDo 加速需要用 L 站 Connect 确认一次你的账号。\n\n'
         '加速服务端只会拿到你的 L 站 id、用户名、信任等级这类基本资料，'
         '拿不到你的登录凭据。\n\n'
         '每个账号最多 3 台设备，第 4 台授权时最早授权的那台会被挤掉。\n\n'

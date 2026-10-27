@@ -20,7 +20,7 @@
   "about_info": "資訊",
   "about_latestVersion": "已是最新版本",
   "about_legalese": "非官方 Linux.do 客戶端\n基於 Flutter & Material 3",
-  "about_noUpdateContent": "當前版本: {version}\n您正在使用最新版本的 cfluxdo，無需更新。",
+  "about_noUpdateContent": "當前版本: {version}\n您正在使用最新版本的 CFluxDo，無需更新。",
   "@about_noUpdateContent": {
     "placeholders": {
       "version": {

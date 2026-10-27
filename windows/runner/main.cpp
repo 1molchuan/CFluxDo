@@ -12,7 +12,7 @@
 // 深链启动(discourse:// / fluxdo://)时把 URL 转发给已运行实例并退出,
 // 避免为一次授权回调开出第二个窗口(app_links 官方集成方式)。
 // 仅对携带 scheme 链接的启动生效,普通启动的多开行为不变。
-// 窗口标题固定为下方 Create 的 L"cfluxdo",Dart 侧无 setTitle 调用。
+// 窗口标题固定为下方 Create 的 L"CFluxDo",Dart 侧无 setTitle 调用。
 static bool SendAppLinkToInstance(const wchar_t* command_line) {
   if (command_line == nullptr ||
       (::wcsstr(command_line, L"discourse://") == nullptr &&
@@ -20,7 +20,7 @@ static bool SendAppLinkToInstance(const wchar_t* command_line) {
     return false;
   }
 
-  HWND hwnd = ::FindWindow(L"FLUTTER_RUNNER_WIN32_WINDOW", L"cfluxdo");
+  HWND hwnd = ::FindWindow(L"FLUTTER_RUNNER_WIN32_WINDOW", L"CFluxDo");
   if (hwnd == nullptr) {
     return false;
   }
@@ -63,7 +63,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
     HANDLE parent = reinterpret_cast<HANDLE>(static_cast<uintptr_t>(handle_value));
     if (handle_value == 0 || end == value || *end != '\0' ||
         WaitForSingleObject(parent, INFINITE) != WAIT_OBJECT_0) {
-      MessageBoxW(nullptr, L"站点切换失败：无法等待旧进程退出。", L"cfluxdo", MB_OK | MB_ICONERROR);
+      MessageBoxW(nullptr, L"站点切换失败：无法等待旧进程退出。", L"CFluxDo", MB_OK | MB_ICONERROR);
       return EXIT_FAILURE;
     }
     CloseHandle(parent);
@@ -92,9 +92,9 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   FlutterWindow window(project);
   Win32Window::Point origin(10, 10);
   Win32Window::Size size(1280, 720);
-  if (!window.Create(L"cfluxdo", origin, size)) {
+  if (!window.Create(L"CFluxDo", origin, size)) {
     MessageBoxW(nullptr, L"应用初始化失败，无法创建 Flutter 窗口。请重新启动应用。",
-                L"cfluxdo", MB_OK | MB_ICONERROR);
+                L"CFluxDo", MB_OK | MB_ICONERROR);
     return EXIT_FAILURE;
   }
   window.SetQuitOnClose(true);
