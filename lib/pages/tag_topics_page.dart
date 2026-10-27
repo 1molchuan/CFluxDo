@@ -71,22 +71,11 @@ class _TagTopicsPageState extends ConsumerState<TagTopicsPage>
   );
 
   Future<void> _showTopicUpdates() async {
-    final inserted = await loadTopicUpdates((ids) async {
+    final inserted = await loadTopicUpdates((ids, prefetched) async {
       if (_isLoading || _isLoadingMore) return null;
       final generation = topicUpdates.generation;
       final query = _topicUpdatesQuery;
-      final response = await ref
-          .read(discourseServiceProvider)
-          .getFilteredTopics(
-            filter: query.filter.filterName,
-            tags: query.tags,
-            order: query.order,
-            ascending: query.order == null ? null : query.ascending,
-            subset: query.filter == TopicListFilter.newTopics
-                ? query.subset.apiValue
-                : null,
-            topicIds: ids,
-          );
+      final response = prefetched ?? await requestTopicUpdates(ids);
       if (!isCurrentTopicUpdatesRefresh(generation) ||
           !query.sameRequest(_topicUpdatesQuery) ||
           _isLoading ||
@@ -135,6 +124,27 @@ class _TagTopicsPageState extends ConsumerState<TagTopicsPage>
 
   @override
   Future<void> applyTopicUpdates() => _showTopicUpdates();
+
+  @override
+  Future<TopicListResponse> requestTopicUpdates(
+    List<int> ids, {
+    bool background = false,
+  }) {
+    final query = _topicUpdatesQuery;
+    return ref
+        .read(discourseServiceProvider)
+        .getFilteredTopics(
+          filter: query.filter.filterName,
+          tags: query.tags,
+          order: query.order,
+          ascending: query.order == null ? null : query.ascending,
+          subset: query.filter == TopicListFilter.newTopics
+              ? query.subset.apiValue
+              : null,
+          topicIds: ids,
+          background: background,
+        );
+  }
 
   void _onScroll() {
     // 回到顶部时把攒着的新话题自动载入（开关打开时）

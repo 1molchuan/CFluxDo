@@ -74,6 +74,7 @@ class _NotificationService extends Fake implements DiscourseService {
     bool? ascending,
     String? subset,
     List<int>? topicIds,
+    bool background = false,
   }) async {
     if (topicIds != null && loadUpdates != null) return loadUpdates!(topicIds);
     return TopicListResponse(

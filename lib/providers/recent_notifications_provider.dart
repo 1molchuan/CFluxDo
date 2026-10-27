@@ -1,15 +1,94 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/notification.dart';
+import '../services/discourse/discourse_service.dart';
 import 'core_providers.dart';
 import 'message_bus_providers.dart';
 
 /// 最近通知 Notifier（非分页，供快捷面板和 messageBus 使用）
 class RecentNotificationsNotifier extends AsyncNotifier<List<DiscourseNotification>> {
+  /// 未读数涨了、面板还没打开过时后台先取的一份（silent，不更新"已看到"
+  /// 位置）。面板打开时先显示它，再正常拉一次。
+  static ({List<DiscourseNotification> list, DateTime at})? _prefetched;
+  static DateTime? _lastPrefetchAt;
+  static Future<void>? _prefetching;
+  static const _prefetchMaxAge = Duration(minutes: 2);
+  static const _prefetchMinInterval = Duration(seconds: 30);
+
+  /// 退出登录 / 换账号时清掉（预取的是当前账号的通知）
+  static void clearPrefetched() {
+    _prefetched = null;
+    _lastPrefetchAt = null;
+    _prefetching = null;
+  }
+
+  /// 后台预取（同时只一个、两次至少隔 30 秒）。失败不打扰。
+  static Future<void> prefetch(DiscourseService service) {
+    final running = _prefetching;
+    if (running != null) return running;
+    final last = _lastPrefetchAt;
+    if (last != null && DateTime.now().difference(last) < _prefetchMinInterval) {
+      return Future.value();
+    }
+    _lastPrefetchAt = DateTime.now();
+    return _prefetching = () async {
+      try {
+        final response = await service.getRecentNotifications(silent: true);
+        _prefetched = (list: response.notifications, at: DateTime.now());
+      } catch (_) {
+      } finally {
+        _prefetching = null;
+      }
+    }();
+  }
+
+  static List<DiscourseNotification>? _takePrefetched() {
+    final prefetched = _prefetched;
+    _prefetched = null;
+    if (prefetched == null ||
+        DateTime.now().difference(prefetched.at) > _prefetchMaxAge) {
+      return null;
+    }
+    return prefetched.list;
+  }
+
+  /// 上次正常拉取（会更新"已看到"位置）的时间
+  DateTime? _fetchedAt;
+
   @override
   Future<List<DiscourseNotification>> build() async {
+    final prefetched = _takePrefetched();
+    if (prefetched != null) return prefetched;
     final service = ref.read(discourseServiceProvider);
     final response = await service.getRecentNotifications();
+    _fetchedAt = DateTime.now();
     return response.notifications;
+  }
+
+  /// 打开通知面板时调用：先显示手上的（预取的或上次的），再正常拉一次——
+  /// 服务端据此更新"已看到"位置。刚正常拉过（provider 刚建好）就不重复拉。
+  Future<void> refreshOnOpen() async {
+    try {
+      await future;
+    } catch (_) {
+      if (ref.mounted) ref.invalidateSelf();
+      return;
+    }
+    if (!ref.mounted) return;
+    final fetchedAt = _fetchedAt;
+    if (fetchedAt != null &&
+        DateTime.now().difference(fetchedAt) < const Duration(seconds: 2)) {
+      return;
+    }
+    try {
+      final response = await ref
+          .read(discourseServiceProvider)
+          .getRecentNotifications();
+      if (!ref.mounted) return;
+      _fetchedAt = DateTime.now();
+      state = AsyncValue.data(response.notifications);
+    } catch (_) {
+      // 手上已经有一份在显示（预取的或上次的），拉新失败就先留着它
+    }
   }
 
   /// 添加新通知（由 messageBus 调用）

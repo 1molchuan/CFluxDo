@@ -3,13 +3,22 @@ part of 'discourse_service.dart';
 /// 通知相关
 mixin _NotificationsMixin on _DiscourseServiceBase {
   /// 获取最近通知（recent 模式，非分页，用于快捷面板）
-  /// 会触发服务端 bump_last_seen_notification，重置未读计数
-  Future<NotificationListResponse> getRecentNotifications() async {
-    final response = await _dio.get('/notifications', queryParameters: {
-      'recent': true,
-      'limit': 30,
-      'bump_last_seen_reviewable': true,
-    });
+  /// 会触发服务端 bump_last_seen_notification，重置未读计数。
+  ///
+  /// [silent]：后台预取用——带 silent 参数服务端不更新"已看到"位置（对齐
+  /// 网页版 silent 拉取），请求本身也是低优先级、不触发过盾
+  Future<NotificationListResponse> getRecentNotifications({
+    bool silent = false,
+  }) async {
+    final response = await _dio.get(
+      '/notifications',
+      queryParameters: {
+        'recent': true,
+        'limit': 30,
+        if (silent) 'silent': true else 'bump_last_seen_reviewable': true,
+      },
+      options: silent ? Options(extra: const {'isSilent': true}) : null,
+    );
     return NotificationListResponse.fromJson(response.data);
   }
 

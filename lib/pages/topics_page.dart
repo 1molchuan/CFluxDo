@@ -3793,8 +3793,9 @@ class _TopicListState extends ConsumerState<_TopicList>
   /// 把攒着的新话题插到列表顶部、短暂高亮并回到顶部（点提示条与自动载入共用）
   Future<void> _loadTopicUpdatesInto(int? providerKey) async {
     final insertedIds = await loadTopicUpdates(
-      (ids) =>
-          ref.read(topicListProvider(providerKey).notifier).loadBefore(ids),
+      (ids, prefetched) => ref
+          .read(topicListProvider(providerKey).notifier)
+          .loadBefore(ids, prefetched: prefetched),
     );
     if (!mounted || insertedIds.isEmpty) return;
     setState(() => _highlightedTopicIds.addAll(insertedIds));
@@ -3816,4 +3817,12 @@ class _TopicListState extends ConsumerState<_TopicList>
 
   @override
   Future<void> applyTopicUpdates() => _loadTopicUpdatesInto(widget.categoryId);
+
+  @override
+  Future<TopicListResponse> requestTopicUpdates(
+    List<int> ids, {
+    bool background = false,
+  }) => ref
+      .read(topicListProvider(widget.categoryId).notifier)
+      .fetchTopicUpdates(ids, background: background);
 }

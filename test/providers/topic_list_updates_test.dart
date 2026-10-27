@@ -52,6 +52,7 @@ class _Service extends Fake implements DiscourseService {
     bool? ascending,
     String? subset,
     List<int>? topicIds,
+    bool background = false,
   }) async {
     lastRequest = {
       'filter': filter,

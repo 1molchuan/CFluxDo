@@ -656,8 +656,9 @@ class _NotificationBodyState extends ConsumerState<_NotificationBody> {
   @override
   void initState() {
     super.initState();
+    // 先显示手上的（后台预取的 / 上次的），再正常拉一次
     Future.microtask(() {
-      ref.invalidate(recentNotificationsProvider);
+      ref.read(recentNotificationsProvider.notifier).refreshOnOpen();
     });
   }
 

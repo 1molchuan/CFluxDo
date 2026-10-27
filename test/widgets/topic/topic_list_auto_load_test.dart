@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fluxdo/models/category.dart';
+import 'package:fluxdo/models/topic.dart';
 import 'package:fluxdo/providers/category_provider.dart';
 import 'package:fluxdo/providers/message_bus/topic_list_events.dart';
 import 'package:fluxdo/providers/message_bus/topic_tracking_providers.dart';
@@ -17,10 +18,17 @@ class _QuietMessageBus extends MessageBusInitNotifier {
 
 /// 用最小的列表页验证 mixin：列表停在顶部才自动载入，载入走 loadTopicUpdates
 class _Host extends ConsumerStatefulWidget {
-  const _Host({required this.controller, required this.applied});
+  const _Host({
+    required this.controller,
+    required this.applied,
+    required this.requests,
+    required this.usedPrefetch,
+  });
 
   final ScrollController controller;
   final List<List<int>> applied;
+  final List<({List<int> ids, bool background})> requests;
+  final List<bool> usedPrefetch;
 
   @override
   ConsumerState<_Host> createState() => _HostState();
@@ -44,8 +52,21 @@ class _HostState extends ConsumerState<_Host>
 
   @override
   Future<void> applyTopicUpdates() async {
-    final ids = await loadTopicUpdates((ids) async => ids);
+    final ids = await loadTopicUpdates((ids, prefetched) async {
+      widget.usedPrefetch.add(prefetched != null);
+      if (prefetched == null) await requestTopicUpdates(ids);
+      return ids;
+    });
     widget.applied.add(ids);
+  }
+
+  @override
+  Future<TopicListResponse> requestTopicUpdates(
+    List<int> ids, {
+    bool background = false,
+  }) async {
+    widget.requests.add((ids: ids, background: background));
+    return TopicListResponse(topics: const []);
   }
 
   @override
@@ -65,6 +86,8 @@ class _HostState extends ConsumerState<_Host>
 void main() {
   late ScrollController controller;
   late List<List<int>> applied;
+  late List<({List<int> ids, bool background})> requests;
+  late List<bool> usedPrefetch;
   late ProviderContainer container;
 
   Future<void> pumpHost(WidgetTester tester, {required bool enabled}) async {
@@ -75,6 +98,8 @@ void main() {
     controller = ScrollController();
     addTearDown(controller.dispose);
     applied = [];
+    requests = [];
+    usedPrefetch = [];
     container = ProviderContainer(
       overrides: [
         sharedPreferencesProvider.overrideWithValue(prefs),
@@ -90,7 +115,12 @@ void main() {
         container: container,
         child: MaterialApp(
           home: Scaffold(
-            body: _Host(controller: controller, applied: applied),
+            body: _Host(
+              controller: controller,
+              applied: applied,
+              requests: requests,
+              usedPrefetch: usedPrefetch,
+            ),
           ),
         ),
       ),
@@ -184,5 +214,48 @@ void main() {
     expect(applied, [
       [1],
     ]);
+  });
+
+  testWidgets('提示条点开前后台先取好这一批，点开时直接用', (tester) async {
+    await pumpHost(tester, enabled: false);
+    publish(1);
+    await tester.pump();
+    publish(2);
+    await tester.pump();
+    expect(requests, isEmpty, reason: '先攒一会儿再取');
+    await tester.pump(const Duration(seconds: 3));
+    await tester.pump();
+    expect(requests, hasLength(1));
+    expect(requests.single.ids, [1, 2]);
+    expect(requests.single.background, isTrue);
+
+    final state = tester.state<_HostState>(find.byType(_Host));
+    await state.applyTopicUpdates();
+    await tester.pump();
+    expect(usedPrefetch, [true]);
+    expect(requests, hasLength(1), reason: '点开不再请求');
+    expect(applied, [
+      [1, 2],
+    ]);
+  });
+
+  testWidgets('取好之后又来了新话题：点开时照常请求', (tester) async {
+    await pumpHost(tester, enabled: false);
+    publish(1);
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 3));
+    await tester.pump();
+    expect(requests, hasLength(1));
+    publish(2);
+    await tester.pump();
+
+    final state = tester.state<_HostState>(find.byType(_Host));
+    await state.applyTopicUpdates();
+    await tester.pump();
+    expect(usedPrefetch, [false]);
+    expect(requests.last.ids, [1, 2]);
+    expect(requests.last.background, isFalse);
+    // 收尾：清掉排着的预取计时器
+    await tester.pump(const Duration(seconds: 30));
   });
 }

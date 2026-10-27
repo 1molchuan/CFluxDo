@@ -55,6 +55,7 @@ mixin _TopicsMixin on _DiscourseServiceBase {
     bool? ascending,
     String? subset,
     List<int>? topicIds,
+    bool background = false,
   }) async {
     String path;
     final queryParams = <String, dynamic>{
@@ -102,7 +103,14 @@ mixin _TopicsMixin on _DiscourseServiceBase {
       path = '/$filter.json';
     }
 
-    final response = await _dio.get(path, queryParameters: queryParams.isNotEmpty ? queryParams : null);
+    final response = await _dio.get(
+      path,
+      queryParameters: queryParams.isNotEmpty ? queryParams : null,
+      // 后台预取（新话题提示条点开前先取好）：低优先级、不触发过盾
+      options: background
+          ? Options(extra: const {'isSilent': true})
+          : null,
+    );
     // isolate 内构造(jsonDecode 已由 BackgroundTransformer 移出主线程,
     // 几十个 Topic 对象的 fromJson 构造同样不便宜):返回值经
     // Isolate.exit 转移,回传零拷贝
