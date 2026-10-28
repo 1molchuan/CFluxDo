@@ -49,6 +49,14 @@ enum AccountSwitchOutcome {
 /// 写入一个账号凭据后的核对结论（见 [AccountSwitcher._attach]）
 enum _Attach { confirmed, unverified, invalid }
 
+/// 切换各段的累计耗时（毫秒），记日志排查「切换卡住」
+class _SwitchTiming {
+  final _watch = Stopwatch()..start();
+  final Map<String, int> stages = {};
+
+  void mark(String stage) => stages['${stage}Ms'] = _watch.elapsedMilliseconds;
+}
+
 /// 多账号切换。
 ///
 /// 切换 = 本地退出当前账号（不调服务端登出，它的会话照样有效）+ 用目标账号
@@ -58,11 +66,13 @@ enum _Attach { confirmed, unverified, invalid }
 /// 2. 走本地登出（会话代推进、在途请求作废、MessageBus 停、jar / WebView 的
 ///    登录 cookie 清掉，cf_clearance 保留并推回 WebView），清掉上一个账号的
 ///    界面状态；
-/// 3. 把目标账号的 cookie 写进 jar（以它为准）再推给 WebView，重新拉首页
-///    预加载数据，**核对服务端认的是不是目标账号**（见
-///    [verifySwitchedAccount]）：是就广播登录成功；服务端明确不认（登录
-///    过期 / 在别处退出）才标记要重新登录、按同样步骤切回原账号；网络不稳
-///    问不到结论时留在目标账号，交给正常的登录态检查。
+/// 3. 把目标账号的 cookie 写进 jar（以它为准）再推给 WebView，首页预加载
+///    放后台重拉，先问 `/session/current.json` **核对服务端认的是不是目标
+///    账号**（见 [verifySwitchedAccount]）：是就广播登录成功；服务端明确
+///    不认（登录过期 / 在别处退出）才标记要重新登录、按同样步骤切回原账号；
+///    网络不稳问不到结论时留在目标账号，交给正常的登录态检查。
+///
+/// 每一步都有上限，整个切换的各段耗时记在 `account_switch_timing` 日志里。
 ///
 /// 全程不碰 cf_clearance（设备 / 出口级），也不调任何登出 API。
 class AccountSwitcher {
@@ -75,21 +85,46 @@ class AccountSwitcher {
 
   bool get isBusy => _busy;
 
-  static const _preloadTimeout = Duration(seconds: 15);
+  /// 核对时探测没结论、要靠首页预加载判断时最多等这么久
+  static const _preloadTimeout = Duration(seconds: 12);
+
+  /// 核对通过后给首页预加载留的落地时间：等到了界面直接按新账号的数据画，
+  /// 等不到就先进首页，预加载在后台接着跑
+  static const _preloadGrace = Duration(seconds: 3);
+
+  /// 快照前对账的上限：对账可能要探测服务端，切换不能被它拖住
+  static const _snapshotReconcileTimeout = Duration(seconds: 4);
+
+  Future<SavedAccount?>? _saving;
 
   DiscourseService get _service => DiscourseService();
   CookieJarService get _jar => CookieJarService();
 
   /// 把当前登录的账号（及其最新凭据）存进本机账号列表；没登录返回 null。
   /// 列表已满且当前账号不在其中时抛 [AccountLimitException]。
-  Future<SavedAccount?> saveCurrent() async {
+  ///
+  /// 面板一打开就会存一次，紧接着点切换又存一次：在途的那次直接复用。
+  Future<SavedAccount?> saveCurrent() {
+    final pending = _saving;
+    if (pending != null) return pending;
+    final future = _saveCurrent();
+    _saving = future;
+    return future.whenComplete(() {
+      if (identical(_saving, future)) _saving = null;
+    });
+  }
+
+  Future<SavedAccount?> _saveCurrent() async {
     final user = _service.currentUserNotifier.value;
     if (user == null) return null;
     final generation = AuthSession().generation;
     try {
-      await SessionTokenAuthority.instance.reconcile(
-        reason: 'account_snapshot',
-      );
+      await SessionTokenAuthority.instance
+          .reconcile(
+            reason: 'account_snapshot',
+            lockTimeout: const Duration(seconds: 2),
+          )
+          .timeout(_snapshotReconcileTimeout);
     } catch (e) {
       debugPrint('[AccountSwitcher] 快照前对账失败（继续用 jar 里的值）: $e');
     }
@@ -122,26 +157,32 @@ class AccountSwitcher {
       return AccountSwitchOutcome.busy;
     }
     _busy = true;
+    final timing = _SwitchTiming();
+    SavedAccount? previous;
+    var outcome = AccountSwitchOutcome.loggedOut;
     try {
       final targetCookies = await store.cookiesOf(target);
       if (targetCookies == null ||
           !targetCookies.any((cookie) => cookie.name == '_t')) {
         await store.markNeedsLogin(target.userId, needsLogin: true);
-        return AccountSwitchOutcome.targetNeedsLogin;
+        return outcome = AccountSwitchOutcome.targetNeedsLogin;
       }
       await SiteDataLifecycle.flushBeforeSwitch();
-      final previous = await saveCurrent();
+      timing.mark('flush');
+      previous = await saveCurrent();
       final previousCookies = previous == null
           ? null
           : await store.cookiesOf(previous);
+      timing.mark('snapshot');
       _log('account_switch_begin', target: target, previous: previous);
 
       await _detach(container, previous: previous);
-      final attached = await _attach(target, targetCookies);
+      timing.mark('detach');
+      final attached = await _attach(target, targetCookies, timing: timing);
       if (attached != _Attach.invalid) {
         await store.markNeedsLogin(target.userId, needsLogin: false);
         _log('account_switch_done', target: target, previous: previous);
-        return attached == _Attach.confirmed
+        return outcome = attached == _Attach.confirmed
             ? AccountSwitchOutcome.switched
             : AccountSwitchOutcome.switchedUnverified;
       }
@@ -152,12 +193,20 @@ class AccountSwitcher {
       if (previous != null &&
           previousCookies != null &&
           await _attach(previous, previousCookies) != _Attach.invalid) {
-        return AccountSwitchOutcome.targetInvalidRestored;
+        timing.mark('restore');
+        return outcome = AccountSwitchOutcome.targetInvalidRestored;
       }
+      timing.mark('restore');
       _log('account_switch_restore_failed', target: target, previous: previous);
-      return AccountSwitchOutcome.loggedOut;
+      return outcome = AccountSwitchOutcome.loggedOut;
     } finally {
       _busy = false;
+      _log(
+        'account_switch_timing',
+        target: target,
+        previous: previous,
+        extra: {'outcome': outcome.name, ...timing.stages},
+      );
     }
   }
 
@@ -206,7 +255,17 @@ class AccountSwitcher {
     try {
       // 登录页里可能留下了半截会话：先按切换的方式清一遍
       await _detach(container);
-      return await _attach(previous, cookies) != _Attach.invalid;
+      final timing = _SwitchTiming();
+      final attached = await _attach(previous, cookies, timing: timing);
+      _log(
+        'account_switch_timing',
+        target: previous,
+        extra: {
+          'outcome': 'add_account_restore_${attached.name}',
+          ...timing.stages,
+        },
+      );
+      return attached != _Attach.invalid;
     } finally {
       _busy = false;
     }
@@ -274,24 +333,17 @@ class AccountSwitcher {
   /// [_Attach.invalid]。
   Future<_Attach> _attach(
     SavedAccount account,
-    List<CanonicalCookie> cookies,
-  ) async {
+    List<CanonicalCookie> cookies, {
+    _SwitchTiming? timing,
+  }) async {
     // 先推进会话代再写 cookie：本地登出后按游客身份发出的请求就此作废，
     // 它们的响应不会落在目标账号的 cookie 之后
     AuthSession().advance();
     await _jar.replaceAccountCookies(cookies);
     final token = await _jar.getTToken() ?? '';
     if (token.isEmpty) return _Attach.invalid;
-    for (final cookie in cookies) {
-      await WebViewCookiePush.instance.push(
-        name: cookie.name,
-        reason: 'account_switch',
-        url: _urlFor(cookie),
-        rawSetCookie: cookie.toSetCookieHeader(),
-        expectedValue: cookie.value,
-        clearVariantsFirst: true,
-      );
-    }
+    await _pushToWebView(cookies);
+    timing?.mark('cookies');
     // 存下的凭据是唯一来源：WebView 只跟着写，不反过来采纳它的值（它若
     // 残留了别的值，采纳进 jar 就把存好的凭据冲掉了）。没推进去的由对账
     // 再推一次。
@@ -302,44 +354,76 @@ class AccountSwitcher {
     await _service.saveUsername(account.username);
     _service.setToken(token);
     PreloadedDataService().reset();
-    try {
-      // 本地登出的广播会让启动流程按游客身份拉一次首页：等它落地再按新身份拉
-      await PreloadedDataService().reloadAfterPending().timeout(
-        _preloadTimeout,
-      );
-    } catch (e) {
-      debugPrint('[AccountSwitcher] 预加载失败: $e');
-    }
-    final preloaded = PreloadedDataService().currentUserSync;
+    // 首页预加载放后台（本地登出的广播会让启动流程按游客身份拉一次首页，
+    // reloadAfterPending 等它落地再按新身份拉）；核对先问 /session/current.json，
+    // 不再干等整页首页——首页 HTML 慢、也最容易撞盾
+    final preload = PreloadedDataService().reloadAfterPending().then<bool>(
+      (_) => true,
+      onError: (Object e) {
+        debugPrint('[AccountSwitcher] 预加载失败: $e');
+        return false;
+      },
+    );
     final result = await verifySwitchedAccount(
       userId: account.userId,
-      preloadedUser: preloaded,
       probe: () => _service.probeCurrentSession(source: 'account_switch'),
+      preloadedUser: () async {
+        await preload.timeout(_preloadTimeout, onTimeout: () => false);
+        return PreloadedDataService().currentUserSync;
+      },
     );
+    timing?.mark('verify');
+    if (result.check == AccountCheck.wrongAccount ||
+        result.check == AccountCheck.rejected) {
+      _log(
+        'account_switch_verify_failed',
+        target: account,
+        extra: {
+          'check': result.check.name,
+          'preloadedUser': PreloadedDataService().currentUserSync == null
+              ? 'none'
+              : 'other',
+        },
+      );
+      return _Attach.invalid;
+    }
+    await preload.timeout(_preloadGrace, onTimeout: () => false);
+    timing?.mark('preload');
     // 核对请求可能刚轮换过 `_t`：广播用 jar 里最新的
     final liveToken = await _jar.getTToken();
     final current = liveToken == null || liveToken.isEmpty ? token : liveToken;
-    switch (result.check) {
-      case AccountCheck.confirmed:
-        _service.currentUserNotifier.value = User.fromJson(result.user!);
-        _service.onLoginSuccess(current, forceBrowserSessionSync: true);
-        return _Attach.confirmed;
-      case AccountCheck.unknown:
-        _log('account_switch_unverified', target: account);
-        _service.onLoginSuccess(current, forceBrowserSessionSync: true);
-        return _Attach.unverified;
-      case AccountCheck.wrongAccount:
-      case AccountCheck.rejected:
-        _log(
-          'account_switch_verify_failed',
-          target: account,
-          extra: {
-            'check': result.check.name,
-            'preloadedUser': preloaded == null ? 'none' : 'other',
-          },
-        );
-        return _Attach.invalid;
+    if (result.check == AccountCheck.confirmed) {
+      _service.currentUserNotifier.value = User.fromJson(result.user!);
+      _service.onLoginSuccess(current, forceBrowserSessionSync: true);
+      return _Attach.confirmed;
     }
+    _log('account_switch_unverified', target: account);
+    _service.onLoginSuccess(current, forceBrowserSessionSync: true);
+    return _Attach.unverified;
+  }
+
+  /// 把账号 cookie 推进 WebView。不同名字互不相干（各自的变体清理有自己
+  /// 的锁），并行推；同名的（多个子域）按顺序推。
+  Future<void> _pushToWebView(List<CanonicalCookie> cookies) async {
+    final byName = <String, List<CanonicalCookie>>{};
+    for (final cookie in cookies) {
+      (byName[cookie.name] ??= []).add(cookie);
+    }
+    await Future.wait([
+      for (final group in byName.values)
+        () async {
+          for (final cookie in group) {
+            await WebViewCookiePush.instance.push(
+              name: cookie.name,
+              reason: 'account_switch',
+              url: _urlFor(cookie),
+              rawSetCookie: cookie.toSetCookieHeader(),
+              expectedValue: cookie.value,
+              clearVariantsFirst: true,
+            );
+          }
+        }(),
+    ]);
   }
 
   Future<void> _clearWebViewAccountCookies() async {
@@ -348,9 +432,10 @@ class AccountSwitcher {
       baseHost,
       for (final sub in const ['connect', 'credit', 'cdk']) '$sub.$baseHost',
     };
-    for (final name in CookieJarService.accountCookieNames) {
-      await _jar.deleteWebViewCookieOnHosts(name, hosts);
-    }
+    await Future.wait([
+      for (final name in CookieJarService.accountCookieNames)
+        _jar.deleteWebViewCookieOnHosts(name, hosts),
+    ]);
   }
 
   static String _urlFor(CanonicalCookie cookie) {

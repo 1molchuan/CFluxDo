@@ -377,6 +377,7 @@ mixin _AuthMixin on _DiscourseServiceBase {
     required String source,
     String? triggerInfo,
     int? requestGeneration,
+    bool foreground = false,
   }) async {
     // probe 前同步 cf_clearance，避免 CF 验证态落后导致 probe 不确定。
     try {
@@ -411,7 +412,16 @@ mixin _AuthMixin on _DiscourseServiceBase {
         '/session/current.json',
         queryParameters: {'_': DateTime.now().millisecondsSinceEpoch},
         options: Options(
-          extra: const {'skipAuthCheck': true, 'skipCsrf': true},
+          extra: {
+            'skipAuthCheck': true,
+            'skipCsrf': true,
+            // 用户正等着（切换账号的转圈）：插到排队的列表请求前面；撞盾
+            // 只在后台静默过，弹验证页交给首页请求
+            if (foreground) ...{
+              FluxRequestKeys.priority: FluxRequestPriority.high,
+              FluxRequestKeys.isSilent: true,
+            },
+          },
         ),
       );
 
@@ -482,7 +492,7 @@ mixin _AuthMixin on _DiscourseServiceBase {
   /// 不走恢复链、不计 strike；结论口径同 [_probeJarSession]。
   Future<SessionTokenProbeResult> probeCurrentSession({
     required String source,
-  }) => _probeJarSession(source: source);
+  }) => _probeJarSession(source: source, foreground: true);
 
   /// 2xx 响应里服务端静默删 `_t` 的指令被拦下（jar 不动），由
   /// [SessionTokenAuthority] 转来：当强信号交给 probe。恢复链会依次试

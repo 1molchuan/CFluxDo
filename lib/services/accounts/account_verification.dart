@@ -13,7 +13,7 @@ enum AccountCheck {
   /// 服务端明确说这份会话已失效（登录过期 / 在别处退出）
   rejected,
 
-  /// 没拿到结论：超时、撞 CF 盾、网络断了、游客首页先落地……
+  /// 没拿到结论：超时、撞 CF 盾、网络断了……
   /// 不能当成失效——以前就是把这种情况当失效，标了「要重新登录」又切回
   /// 原账号，切换中途网络一抖就掉登录。
   unknown,
@@ -30,39 +30,53 @@ class AccountCheckResult {
 
 /// 核对 [userId] 是否就是当前会话的用户。
 ///
-/// 预加载里已经是目标账号就直接确认；否则（没有用户 / 是别人）用 jar 的
-/// 会话问 `/session/current.json`，无结论时隔 [retryDelay] 再问一次。只有
-/// 服务端明确答复（是别人 / 会话失效）才算确定不对；问不到时预加载里是
-/// 别人也算不对，什么都没有就是 [AccountCheck.unknown]。
+/// 先用 jar 的会话问 `/session/current.json`（一个小 JSON，比整页首页轻，
+/// 也少撞盾）；没结论再看首页预加载 [preloadedUser]（调用方让它在后台
+/// 并行加载，这里才去等），仍不行隔 [retryDelay] 再问一次。只有服务端明确
+/// 答复（是别人 / 会话失效）才算确定不对；问不到时预加载里是别人也算不对，
+/// 什么都没有就是 [AccountCheck.unknown]。
 Future<AccountCheckResult> verifySwitchedAccount({
   required int userId,
-  required Map<String, dynamic>? preloadedUser,
   required Future<SessionTokenProbeResult> Function() probe,
+  required Future<Map<String, dynamic>?> Function() preloadedUser,
   int attempts = 2,
   Duration probeTimeout = const Duration(seconds: 8),
   Duration retryDelay = const Duration(milliseconds: 1500),
 }) async {
-  final preloadedId = _idOf(preloadedUser);
-  if (preloadedId == userId) {
-    return AccountCheckResult(AccountCheck.confirmed, preloadedUser);
-  }
+  int? preloadedId;
+  var preloadChecked = false;
   for (var attempt = 0; attempt < attempts; attempt++) {
     if (attempt > 0) await Future<void>.delayed(retryDelay);
-    SessionTokenProbeResult result;
+    SessionTokenProbeResult? result;
     try {
       result = await probe().timeout(probeTimeout);
     } catch (_) {
-      continue;
+      result = null;
     }
-    if (result.isRejected) {
-      return const AccountCheckResult(AccountCheck.rejected);
+    if (result != null) {
+      if (result.isRejected) {
+        return const AccountCheckResult(AccountCheck.rejected);
+      }
+      final liveId = result.isValid ? _idOf(result.currentUser) : null;
+      if (liveId != null) {
+        return liveId == userId
+            ? AccountCheckResult(AccountCheck.confirmed, result.currentUser)
+            : const AccountCheckResult(AccountCheck.wrongAccount);
+      }
     }
-    if (!result.isValid) continue;
-    final liveId = _idOf(result.currentUser);
-    if (liveId == null) continue;
-    return liveId == userId
-        ? AccountCheckResult(AccountCheck.confirmed, result.currentUser)
-        : const AccountCheckResult(AccountCheck.wrongAccount);
+    if (!preloadChecked) {
+      preloadChecked = true;
+      Map<String, dynamic>? preloaded;
+      try {
+        preloaded = await preloadedUser();
+      } catch (_) {
+        preloaded = null;
+      }
+      preloadedId = _idOf(preloaded);
+      if (preloadedId == userId) {
+        return AccountCheckResult(AccountCheck.confirmed, preloaded);
+      }
+    }
   }
   return AccountCheckResult(
     preloadedId != null ? AccountCheck.wrongAccount : AccountCheck.unknown,
