@@ -22,12 +22,16 @@ class VideoPlayerSession {
   VideoPlayerSession._({
     required this.url,
     required this.controller,
+    required this.viaGateway,
   });
 
   /// 已解析好的真实播放 URL(session 身份键)。
   final String url;
 
   final VideoPlayerController controller;
+
+  /// 播放器是否经本机网关取视频（见 [GatewayMediaSource]）
+  final bool viaGateway;
 
   int _refCount = 0;
   bool _disposed = false;
@@ -113,7 +117,7 @@ class VideoPlayerSession {
     controller.removeListener(_onControllerTick);
     fullscreenNotifier.dispose();
     unawaited(controller.dispose());
-    VideoSessionRegistry._sessions.remove(url);
+    VideoSessionRegistry.evict(this);
   }
 }
 
@@ -132,20 +136,40 @@ class VideoSessionRegistry {
   static final Map<String, double> knownAspectRatios = {};
 
   /// 取得(或创建)[url] 的 session。调用方必须配对 retain()/release()。
-  static VideoPlayerSession obtain(String url, {String? mimeType}) {
+  ///
+  /// [direct] 为 true 时不改写到本机网关（网关那条路初始化失败后的重试）。
+  static VideoPlayerSession obtain(
+    String url, {
+    String? mimeType,
+    bool direct = false,
+  }) {
     final existing = _sessions[url];
     if (existing != null) return existing;
     // 播放器自己联网，不经过 Dart 网关：改写到本机网关才走得了 ECH
-    final source = GatewayMediaSource.resolve(url);
+    final source = direct
+        ? GatewayMediaSource.direct(url)
+        : GatewayMediaSource.resolve(url);
     final controller = VideoPlayerController.networkUrl(
       source.uri,
       formatHint: videoFormatHintFromMime(mimeType),
       httpHeaders: source.headers,
     );
-    final session = VideoPlayerSession._(url: url, controller: controller);
+    final session = VideoPlayerSession._(
+      url: url,
+      controller: controller,
+      viaGateway: source.viaGateway,
+    );
     session._start();
     _sessions[url] = session;
     return session;
+  }
+
+  /// 把 [session] 从表里摘掉（初始化失败要换路重试、或已销毁），之后同一
+  /// url 会新建 session；表里已经是别的 session 时不动。
+  static void evict(VideoPlayerSession session) {
+    if (identical(_sessions[session.url], session)) {
+      _sessions.remove(session.url);
+    }
   }
 }
 

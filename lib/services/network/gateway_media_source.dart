@@ -15,6 +15,24 @@ class GatewayMediaSource {
   /// 要随请求带上的头（改写时是 `Host`）
   final Map<String, String> headers;
 
+  /// 是否改写成了走本机网关
+  bool get viaGateway => headers.isNotEmpty;
+
+  /// 不改写，原样直连
+  static GatewayMediaSource direct(String url) =>
+      GatewayMediaSource(Uri.parse(url), const {});
+
+  /// 排查「视频放不出来」用：当前网络设置里决定改不改写的几项
+  static Map<String, Object?> diagnostics() {
+    final settings = NetworkSettingsService.instance;
+    return {
+      'gatewayMode': settings.isGatewayMode,
+      'dohEnabled': settings.current.dohEnabled,
+      'gatewayEnabled': settings.current.gatewayEnabled,
+      'hasProxyPort': settings.current.proxyPort != null,
+    };
+  }
+
   /// 按当前网络设置改写 [url]；不在网关模式或地址不适合改写时原样返回。
   static GatewayMediaSource resolve(String url) {
     final settings = NetworkSettingsService.instance;

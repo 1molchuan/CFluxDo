@@ -5,7 +5,9 @@ import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 
 import '../../../services/dynamic_content_suspension_service.dart';
+import '../../../services/log/log_writer.dart';
 import '../../../services/media/playback_position_store.dart';
+import '../../../services/network/gateway_media_source.dart';
 import '../../../services/navigation/app_route_observer.dart';
 import '../../common/anchor_guard_sliver.dart';
 import '../controls/media_controls_overlay.dart';
@@ -45,11 +47,11 @@ class DiscourseVideoPlayer extends StatefulWidget {
 
   /// 错误回调
   final Widget Function(BuildContext context, String url, dynamic error)?
-      errorBuilder;
+  errorBuilder;
 
   /// 加载中回调
   final Widget Function(BuildContext context, String url, Widget child)?
-      loadingBuilder;
+  loadingBuilder;
 
   /// 是否循环播放
   final bool loop;
@@ -94,7 +96,7 @@ class _DiscourseVideoPlayerState extends State<DiscourseVideoPlayer>
     );
     _displayAspectRatio = widget.autoResize
         ? (VideoSessionRegistry.knownAspectRatios[widget.url] ??
-            widget.aspectRatio)
+              widget.aspectRatio)
         : widget.aspectRatio;
     unawaited(_initSession());
   }
@@ -152,17 +154,22 @@ class _DiscourseVideoPlayerState extends State<DiscourseVideoPlayer>
       _scrollIdleListener = null;
       _scrollIdleNotifier = null;
     }
+    _releaseSession();
+    super.dispose();
+  }
+
+  void _releaseSession() {
     _session?.controller.removeListener(_onSessionTick);
     _session?.fullscreenNotifier.removeListener(_onFullscreenChanged);
     _session?.release();
     _session = null;
-    super.dispose();
   }
 
-  Future<void> _initSession() async {
+  Future<void> _initSession({bool direct = false}) async {
     final session = VideoSessionRegistry.obtain(
       widget.url,
       mimeType: widget.mimeType,
+      direct: direct,
     );
     session.retain();
     _session = session;
@@ -176,15 +183,15 @@ class _DiscourseVideoPlayerState extends State<DiscourseVideoPlayer>
       return;
     }
 
+    final watch = Stopwatch()..start();
     try {
-      await session.controller
-          .initialize()
-          .timeout(const Duration(seconds: 15));
+      await session.controller.initialize().timeout(
+        const Duration(seconds: 15),
+      );
       await session.controller.setLooping(widget.loop);
       // 位置记忆:初始化完成即静默 seek,封面帧直接停在续播点;
       // 「已从 xx:xx 继续播放」提示留给用户首次点播放时(控制层)
-      final resumed =
-          await PlaybackPositionStore.instance.restore(widget.url);
+      final resumed = await PlaybackPositionStore.instance.restore(widget.url);
       if (resumed != null) {
         session.resumedPosition = resumed;
         await session.controller.seekTo(resumed);
@@ -199,13 +206,46 @@ class _DiscourseVideoPlayerState extends State<DiscourseVideoPlayer>
         '[Video] 初始化失败 url=${widget.url} '
         'mime=${widget.mimeType} error=$error',
       );
+      _logInit('video_init_failed', session, watch, error: error);
+      if (session.viaGateway && mounted) {
+        // 经网关没放出来：换直连再试一次（有的网络直连反而通），两次的
+        // 结果都记日志，佬友导出日志就能看出卡在哪一边
+        VideoSessionRegistry.evict(session);
+        _releaseSession();
+        return _initSession(direct: true);
+      }
       if (mounted) setState(() => _error = error);
       return;
     }
+    if (direct) _logInit('video_direct_fallback_ok', session, watch);
 
     if (!mounted) return;
     setState(() {});
     _maybeApplyRealAspectRatio();
+  }
+
+  /// 视频初始化的结果记进应用日志（只记域名和路径，不记查询串）
+  void _logInit(
+    String event,
+    VideoPlayerSession session,
+    Stopwatch watch, {
+    Object? error,
+  }) {
+    final uri = Uri.tryParse(widget.url);
+    LogWriter.instance.write({
+      'timestamp': DateTime.now().toIso8601String(),
+      'level': error == null ? 'info' : 'warning',
+      'type': 'media',
+      'event': event,
+      'message': error == null ? '视频直连重试成功' : '视频初始化失败',
+      'host': uri?.host,
+      'path': uri?.path,
+      'mime': widget.mimeType,
+      'viaGateway': session.viaGateway,
+      'elapsedMs': watch.elapsedMilliseconds,
+      if (error != null) 'error': error.toString(),
+      ...GatewayMediaSource.diagnostics(),
+    });
   }
 
   /// inline build 实际消费的 controller 状态指纹。播放中 controller 每
@@ -215,10 +255,13 @@ class _DiscourseVideoPlayerState extends State<DiscourseVideoPlayer>
   int _buildFingerprint() {
     final value = _session?.controller.value;
     if (value == null) return 0;
-    final posterVisible =
-        !value.isPlaying && value.position == Duration.zero;
-    return Object.hash(value.isInitialized, value.isPlaying, posterVisible,
-        value.aspectRatio);
+    final posterVisible = !value.isPlaying && value.position == Duration.zero;
+    return Object.hash(
+      value.isInitialized,
+      value.isPlaying,
+      posterVisible,
+      value.aspectRatio,
+    );
   }
 
   int _lastFingerprint = 0;
@@ -321,9 +364,9 @@ class _DiscourseVideoPlayerState extends State<DiscourseVideoPlayer>
             if (widget.poster != null)
               IgnorePointer(
                 child: AnimatedOpacity(
-                  opacity: (!session.controller.value.isPlaying &&
-                          session.controller.value.position ==
-                              Duration.zero)
+                  opacity:
+                      (!session.controller.value.isPlaying &&
+                          session.controller.value.position == Duration.zero)
                       ? 1
                       : 0,
                   duration: const Duration(milliseconds: 250),
