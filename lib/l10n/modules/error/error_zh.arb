@@ -71,5 +71,7 @@
   "error_unprocessable": "无法处理",
   "error_unrecognizedDataFormat": "服务器返回了无法识别的数据格式",
   "error_updatePostFailed": "更新帖子失败：响应格式异常",
-  "error_uploadNoUrl": "上传响应中未包含 URL"
+  "error_uploadNoUrl": "上传响应中未包含 URL",
+  "error_upstreamUnreachable": "连不上论坛服务器",
+  "error_upstreamUnreachableRetry": "加速通道连不上服务器节点，可能是当前网络不稳定，请稍后重试或换个网络"
 }

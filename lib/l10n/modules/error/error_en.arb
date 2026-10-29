@@ -64,5 +64,7 @@
   "error_unprocessable": "Unprocessable",
   "error_unrecognizedDataFormat": "Unrecognized data format from server",
   "error_updatePostFailed": "Failed to update post: unexpected response",
-  "error_uploadNoUrl": "Upload response missing URL"
+  "error_uploadNoUrl": "Upload response missing URL",
+  "error_upstreamUnreachable": "Cannot reach the forum server",
+  "error_upstreamUnreachableRetry": "The accelerated route could not reach a server node. The network may be unstable; retry later or try another network."
 }

@@ -95,6 +95,15 @@ void main() {
       );
     });
 
+    testWidgets('网关 502 的报错页说连不上服务器，不说服务暂不可用', (tester) async {
+      await _pumpApp(tester);
+      final info = ErrorUtils.getErrorInfo(
+        _bad(502, gateway: true, data: 'Connect failed: Connection timeout'),
+      );
+      expect(info.title, S.current.error_upstreamUnreachable);
+      expect(info.isNetworkError, isTrue);
+    });
+
     testWidgets('源站自己回的 502 不算网关错误', (tester) async {
       await _pumpApp(tester);
       final error = _bad(502, data: '<html>Bad gateway</html>');

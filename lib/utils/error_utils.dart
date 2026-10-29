@@ -7,6 +7,7 @@ import 'package:app_icons/app_icons.dart';
 
 import '../services/network/exceptions/api_exception.dart';
 import '../l10n/s.dart';
+import '../services/network/doh_proxy/gateway_error.dart';
 
 /// 结构化错误信息（图标 + 标题 + 描述）
 class ErrorInfo {
@@ -310,6 +311,15 @@ class ErrorUtils {
   }
 
   static ErrorInfo _handleHttpStatus(int? statusCode, DioException error) {
+    // 本机网关自己回的错误：不是论坛服务器出了问题，是连不上它的节点
+    if (GatewayError.isGatewayResponse(error.response)) {
+      return ErrorInfo(
+        icon: Symbols.cloud_off_rounded,
+        title: S.current.error_upstreamUnreachable,
+        message: S.current.error_upstreamUnreachableRetry,
+        isNetworkError: true,
+      );
+    }
     // 先尝试从响应体提取服务器返回的具体错误信息
     String? serverMessage;
     final data = error.response?.data;

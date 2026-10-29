@@ -71,5 +71,7 @@
   "error_unprocessable": "無法處理",
   "error_unrecognizedDataFormat": "伺服器返回了無法識別的資料格式",
   "error_updatePostFailed": "更新帖子失敗：響應格式異常",
-  "error_uploadNoUrl": "上傳響應中未包含 URL"
+  "error_uploadNoUrl": "上傳響應中未包含 URL",
+  "error_upstreamUnreachable": "連不上論壇伺服器",
+  "error_upstreamUnreachableRetry": "加速通道連不上伺服器節點，可能是目前網路不穩定，請稍後重試或換個網路"
 }
