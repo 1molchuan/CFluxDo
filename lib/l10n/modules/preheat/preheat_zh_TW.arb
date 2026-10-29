@@ -67,5 +67,7 @@
         "type": "int"
       }
     }
-  }
+  },
+  "preheat_detailUpstreamUnreachable": "連不上伺服器節點",
+  "preheat_reasonUpstreamUnreachable": "連不上伺服器節點，正在換線路重試"
 }

@@ -362,6 +362,8 @@ class _StartupStatusState extends State<_StartupStatus> {
         return l10n.preheat_reasonNativeFailed(
           p.reasonDetail ?? l10n.preheat_detailConnectionError,
         );
+      case StartupDetourReason.upstreamUnreachable:
+        return l10n.preheat_reasonUpstreamUnreachable;
       case StartupDetourReason.webViewNoData:
         return l10n.preheat_reasonWebViewNoData;
       case StartupDetourReason.webViewTimeout:

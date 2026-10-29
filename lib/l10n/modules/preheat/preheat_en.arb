@@ -67,5 +67,7 @@
         "type": "int"
       }
     }
-  }
+  },
+  "preheat_detailUpstreamUnreachable": "cannot reach a server node",
+  "preheat_reasonUpstreamUnreachable": "Cannot reach a server node; retrying on another route"
 }

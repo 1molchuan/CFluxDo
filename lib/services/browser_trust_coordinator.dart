@@ -14,6 +14,7 @@ import 'cf_challenge_service.dart';
 import 'cf_clearance_authority.dart';
 import 'cf_clearance_refresh_service.dart';
 import 'network/cf/cf_round_outcome.dart';
+import 'network/doh_proxy/gateway_error.dart';
 import 'discourse/discourse_service.dart';
 import 'network/cookie/cookie_jar_service.dart';
 import 'network/cookie/webview_cookie_priming.dart';
@@ -315,6 +316,23 @@ class BrowserTrustCoordinator {
         _log('native preload success reason=$reason');
         return;
       } catch (e) {
+        if (GatewayError.isUpstreamFailure(e)) {
+          // 本机网关连不上服务器节点：内置浏览器也经同一个网关，绕过去只会
+          // 再失败一轮、白等十几秒（还会报成 TLS 握手失败）。直接再试一次
+          // 直连，这期间选线路那边可能已经换到能连上的节点
+          _log(
+            'native preload failed: gateway upstream unreachable, retry native '
+            'without WebView detour: $e',
+            level: 'warning',
+          );
+          progress.stage(
+            StartupStage.connecting,
+            reason: StartupDetourReason.upstreamUnreachable,
+          );
+          await _preload.ensureLoaded(observer: progress);
+          _log('native preload retry success reason=$reason');
+          return;
+        }
         _log(
           'trusted native preload failed, switching to startup WebView: $e',
           level: 'warning',

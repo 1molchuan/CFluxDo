@@ -4,6 +4,7 @@ import 'package:dio/dio.dart';
 
 import '../../log/log_writer.dart';
 import '../adapters/adapter_log_metadata.dart';
+import '../doh_proxy/gateway_error.dart';
 import '../flux_request_spec.dart';
 
 /// 网络请求日志拦截器，记录每个请求的 method/url/statusCode/duration
@@ -56,14 +57,25 @@ class NetworkLogInterceptor extends Interceptor {
       options: err.requestOptions,
       statusCode: err.response?.statusCode,
       level: level,
+      gatewayError: GatewayError.textOf(err.response),
+      error: err.response == null ? _describeError(err) : null,
     );
     handler.next(err);
+  }
+
+  /// 没拿到响应时的失败原因（类型 + 底层错误的第一行），排查连不上用
+  static String _describeError(DioException err) {
+    final inner = err.error?.toString().split('\n').first ?? '';
+    final text = inner.isEmpty ? err.type.name : '${err.type.name}: $inner';
+    return text.length > 300 ? text.substring(0, 300) : text;
   }
 
   void _logRequest({
     required RequestOptions options,
     required int? statusCode,
     required String level,
+    String? gatewayError,
+    String? error,
   }) {
     final startTime = options.extra[_startTimeKey] as int?;
     final duration = startTime != null
@@ -83,6 +95,8 @@ class NetworkLogInterceptor extends Interceptor {
       'url': sanitizedUrl,
       'statusCode': statusCode,
       'duration': duration,
+      'gatewayError': ?gatewayError,
+      'error': ?error,
     };
     if (uri.path == '/topics/timings') {
       entry.addAll(_timingsDiagnostics(options));
@@ -110,9 +124,9 @@ class NetworkLogInterceptor extends Interceptor {
         options.headers[HttpHeaders.cookieHeader]?.toString() ??
         options.headers['Cookie']?.toString() ??
         '';
-    final sentT = RegExp(
-      r'(?:^|;\s*)_t=([^;]*)',
-    ).firstMatch(cookieHeader)?.group(1);
+    final sentT = RegExp(r'(?:^|;\s*)_t=([^;]*)')
+        .firstMatch(cookieHeader)
+        ?.group(1);
 
     final csrfState = csrfHeader == null
         ? 'missing'
@@ -135,9 +149,8 @@ class NetworkLogInterceptor extends Interceptor {
       'sentCookieLen': cookieHeader.length,
       'sentHasT': sentT != null && sentT.isNotEmpty,
       'sentTLen': sentT?.isNotEmpty == true ? sentT!.length : null,
-      'sentHasForumSession': RegExp(
-        r'(?:^|;\s*)_forum_session=',
-      ).hasMatch(cookieHeader),
+      'sentHasForumSession': RegExp(r'(?:^|;\s*)_forum_session=')
+          .hasMatch(cookieHeader),
     };
   }
 }

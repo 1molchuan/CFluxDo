@@ -2,6 +2,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 
 import '../l10n/s.dart';
+import 'network/doh_proxy/gateway_error.dart';
 import 'network/flux_request_spec.dart';
 
 /// 启动预加载当前所处的阶段。
@@ -43,6 +44,10 @@ enum StartupDetourReason {
 
   /// 直连本身失败,转内置浏览器。
   nativeFailed,
+
+  /// 本机网关连不上服务器节点:内置浏览器也走同一个网关,不绕过去,
+  /// 直接重新选线路再试。
+  upstreamUnreachable,
 
   /// 内置浏览器没拿到页面数据,已改回直连。
   webViewNoData,
@@ -199,6 +204,9 @@ String describeStartupFailure(Object error) {
   if (error is DioException) {
     switch (error.type) {
       case DioExceptionType.badResponse:
+        if (GatewayError.isGatewayResponse(error.response)) {
+          return l10n.preheat_detailUpstreamUnreachable;
+        }
         final code = error.response?.statusCode;
         if (code != null) return l10n.preheat_detailHttp(code);
         return l10n.preheat_detailConnectionError;
