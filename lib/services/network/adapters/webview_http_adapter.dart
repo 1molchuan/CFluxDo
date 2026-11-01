@@ -12,6 +12,7 @@ import '../../../utils/frame_jank_monitor.dart';
 import '../../auth_session.dart';
 import '../../session/webview_use.dart';
 import '../cookie/app_cookie_manager.dart';
+import '../../webview_render_gone.dart';
 import '../../webview_settings.dart';
 import '../../windows_webview_environment_service.dart';
 import 'adapter_log_metadata.dart';
@@ -110,6 +111,17 @@ class WebViewHttpAdapter implements HttpClientAdapter {
         initialUserScripts: WebViewSettings.compatPolyfillScripts,
         onReceivedServerTrustAuthRequest: (_, challenge) =>
             WebViewSettings.handleServerTrustAuthRequest(challenge),
+        // 渲染进程没了：这个实例不能再用，丢掉；在途请求按失败返回，
+        // 下一个请求重建
+        onRenderProcessGone: (_, detail) {
+          WebViewRenderGone.report('webview_http_adapter', detail);
+          if (!pageLoadCompleter.isCompleted) {
+            pageLoadCompleter.completeError(
+              StateError('WebView render process gone'),
+            );
+          }
+          close(force: true);
+        },
         onWebViewCreated: (controller) {
           _controller = controller;
           WebViewSettings.applyWindowsHeadlessMemoryTarget(controller);

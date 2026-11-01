@@ -182,7 +182,12 @@ class AppConstants {
         initialSettings: InAppWebViewSettings(
           javaScriptEnabled: true,
           isInspectable: false,
+          useOnRenderProcessGone: true,
         ),
+        onRenderProcessGone: (_, detail) {
+          debugPrint('[AppConstants] UA 探测 WebView 渲染进程退出');
+          if (!completer.isCompleted) completer.complete(null);
+        },
         onLoadStop: (controller, url) async {
           if (completer.isCompleted) return;
           try {

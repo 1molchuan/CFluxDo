@@ -16,6 +16,7 @@ import '../services/toast_service.dart';
 import '../services/app_link_service.dart';
 import '../services/network/cookie/cookie_store_observer.dart';
 import '../services/session/webview_use.dart';
+import '../services/webview_render_gone.dart';
 import '../services/webview_settings.dart';
 import '../services/windows_webview_environment_service.dart';
 import '../widgets/common/app_link_confirm_dialog.dart';
@@ -80,7 +81,8 @@ class WebViewPage extends ConsumerStatefulWidget {
   ConsumerState<WebViewPage> createState() => _WebViewPageState();
 }
 
-class _WebViewPageState extends ConsumerState<WebViewPage> {
+class _WebViewPageState extends ConsumerState<WebViewPage>
+    with WebViewRenderGoneState<WebViewPage> {
   InAppWebViewController? _controller;
   bool _isLoading = true;
   String _currentUrl = '';
@@ -142,6 +144,16 @@ class _WebViewPageState extends ConsumerState<WebViewPage> {
     );
     _controller?.dispose();
     super.dispose();
+  }
+
+  @override
+  void onWebViewDiscarded() {
+    _controller = null;
+    _isLoading = false;
+    _canGoBack = false;
+    _canGoForward = false;
+    _historyStateSettled = true;
+    _webViewSnapshot = null;
   }
 
   void _reconcileSessionToken(String reason) {
@@ -333,10 +345,19 @@ class _WebViewPageState extends ConsumerState<WebViewPage> {
                   child: Stack(
                     fit: StackFit.expand,
                     children: [
+                      if (webViewRenderGone)
+                        WebViewRenderGoneView(
+                          // 弹窗页的窗口归打开它的页面，没法单独重建
+                          onReload: widget.windowId == null
+                              ? reloadAfterRenderGone
+                              : null,
+                        )
+                      else
                       Offstage(
                         offstage: _webViewSnapshot != null,
                         child: WebViewSettings.wrapWithScrollFix(
                       InAppWebView(
+                            key: ValueKey(webViewGeneration),
                             webViewEnvironment: windowsWebViewEnvironment,
                             windowId: widget.windowId,
                             initialSettings: WebViewSettings.visible
@@ -362,18 +383,29 @@ class _WebViewPageState extends ConsumerState<WebViewPage> {
                                 WebViewSettings.handleServerTrustAuthRequest(
                                   challenge,
                                 ),
+                            onRenderProcessGone: (_, detail) =>
+                                handleWebViewRenderGone(
+                                  'in_app_browser',
+                                  detail,
+                                ),
                             onWebViewCreated: (controller) async {
                               _controller = controller;
                               // 老 WKWebView 的 JS 运行时错误回传到 LogWriter。
                               WebViewSettings.registerJsErrorReporter(controller);
-                              if (widget.url.isNotEmpty &&
+                              // 渲染进程退出后重新加载：接着打开刚才的页面
+                              final initialUrl =
+                                  webViewGeneration > 0 &&
+                                      _currentUrl.isNotEmpty
+                                  ? _currentUrl
+                                  : widget.url;
+                              if (initialUrl.isNotEmpty &&
                                   widget.windowId == null) {
                                 // 等使用期的准备（重灌）完成再加载；准备失败
                                 // 也照常加载（取代 RawSetCookieQueue.flush）
                                 await _webViewUse.ready;
                                 await controller.loadUrl(
                                   urlRequest:
-                                      URLRequest(url: WebUri(widget.url)),
+                                      URLRequest(url: WebUri(initialUrl)),
                                 );
                               }
                               // Android: 启用 WebAuthn/PassKey 支持

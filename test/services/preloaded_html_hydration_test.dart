@@ -1,4 +1,5 @@
 // 游客快照复用测试参考 liansishen/fluxdo@223f75af，原作者 liansishen。
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -84,6 +85,44 @@ void main() {
       expect(preload.categoryIdsSync, isNull);
     });
   }
+
+  test('两轮快照恢复交叠时首页列表与用户一致，不抛 Future already completed', () async {
+    String withTopic(int id) => _snapshot({
+      'currentUser': {'id': id, 'username': 'user$id'},
+      'siteSettings': {'title': '首页'},
+      'site': {'categories': []},
+      'topicList': jsonEncode({
+        'topic_list': {
+          'topics': [
+            {
+              'id': id,
+              'title': 'topic $id',
+              'slug': 'topic-$id',
+              'posts_count': 1,
+              'reply_count': 0,
+              'views': 0,
+              'like_count': 0,
+            },
+          ],
+        },
+      }),
+    });
+
+    // 两轮的异步解析谁先回来不确定；以前它们共用一个 completer，后回来的
+    // 那轮再 complete 一次就抛 StateError（在没人等的 Future 链里，成了
+    // 未捕获异常）
+    final errors = <Object>[];
+    await runZonedGuarded(() async {
+      final first = preload.hydrateFromHtml(withTopic(1));
+      final second = preload.hydrateFromHtml(withTopic(2));
+      expect(await first, isTrue);
+      expect(await second, isTrue);
+      final list = await preload.getInitialTopicList();
+      expect(list?.topics.map((t) => t.id), [preload.currentUserSync?['id']]);
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+    }, (error, _) => errors.add(error));
+    expect(errors, isEmpty);
+  });
 
   // 允许匿名只放宽用户要求，不能绕过站点引导数据的完整性检查。
   final incompleteSnapshots = <String, String>{

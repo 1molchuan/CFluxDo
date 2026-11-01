@@ -23,6 +23,7 @@ import 'session/webview_use.dart';
 import 'startup/app_startup.dart';
 import 'startup_progress.dart';
 import 'webview_session_cookie_refresh_service.dart';
+import 'webview_render_gone.dart';
 import 'webview_settings.dart';
 import 'windows_webview_environment_service.dart';
 
@@ -593,6 +594,11 @@ class BrowserTrustCoordinator {
       initialUserScripts: _startupPreloadScripts(),
       onReceivedServerTrustAuthRequest: (_, challenge) =>
           WebViewSettings.handleServerTrustAuthRequest(challenge),
+      // 渲染进程没了：这个 WebView 不能再用，取消本轮，回退原生预载
+      onRenderProcessGone: (_, detail) {
+        WebViewRenderGone.report('startup_preload', detail);
+        cancellation.cancel();
+      },
       onWebViewCreated: (createdController) {
         WebViewSettings.applyWindowsHeadlessMemoryTarget(createdController);
         WebViewSettings.registerJsErrorReporter(createdController);

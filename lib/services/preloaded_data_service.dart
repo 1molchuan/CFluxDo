@@ -1005,12 +1005,33 @@ function __fluxdoCapturePreloaded() {
     }
   }
 
+  /// 首页话题列表的异步解析按「轮」走：每次从预载数据里拿到列表就开新的
+  /// 一轮（新 completer），结果只交给发起它的那一轮；被新一轮顶掉、或期间
+  /// 数据被清掉时，旧结果作废，只把旧 completer 以 null 收尾。以前多轮共用
+  /// 字段上的 completer，旧一轮的结果会把新一轮提前完成、新结果回来再完成
+  /// 一次，抛「Future already completed」（上游 #428 日志里启动预载完就报这个）。
+  static void _completeOnce(
+    Completer<TopicListResponse?> completer,
+    TopicListResponse? value,
+  ) {
+    if (!completer.isCompleted) completer.complete(value);
+  }
+
+  Completer<TopicListResponse?> _beginTopicListRound() {
+    final previous = _topicListResponseCompleter;
+    final completer = Completer<TopicListResponse?>();
+    _topicListResponseCompleter = completer;
+    if (previous != null) _completeOnce(previous, null);
+    return completer;
+  }
+
   void _decodeTopicListAsync(String rawJson) {
-    _topicListResponseCompleter ??= Completer<TopicListResponse?>();
+    final completer = _beginTopicListRound();
     compute(_decodeTopicListInIsolate, rawJson)
         .then((decoded) {
-          if (decoded == null) {
-            _topicListResponseCompleter?.complete(null);
+          if (decoded == null ||
+              !identical(_topicListResponseCompleter, completer)) {
+            _completeOnce(completer, null);
             return;
           }
           _topicListData = decoded;
@@ -1021,25 +1042,33 @@ function __fluxdoCapturePreloaded() {
           debugPrint(
             '[PreloadedData] topic_list 解析成功 (async), topics=$topicsCount',
           );
-          _parseTopicListResponseAsync(decoded);
+          _parseTopicListResponseAsync(decoded, completer);
         })
         .catchError((e) {
           debugPrint('[PreloadedData] 异步解析 topic_list 失败: $e');
-          _topicListResponseCompleter?.complete(null);
+          _completeOnce(completer, null);
         });
   }
 
-  void _parseTopicListResponseAsync(Map<String, dynamic> data) {
-    _topicListResponseCompleter ??= Completer<TopicListResponse?>();
+  void _parseTopicListResponseAsync(
+    Map<String, dynamic> data, [
+    Completer<TopicListResponse?>? round,
+  ]) {
+    final completer = round ?? _beginTopicListRound();
     compute(_parseTopicListInIsolate, data)
         .then((result) {
+          if (!identical(_topicListResponseCompleter, completer)) {
+            debugPrint('[PreloadedData] TopicListResponse 已过期，丢弃');
+            _completeOnce(completer, null);
+            return;
+          }
           _cachedTopicListResponse = result;
           debugPrint('[PreloadedData] TopicListResponse 异步缓存成功');
-          _topicListResponseCompleter?.complete(result);
+          _completeOnce(completer, result);
         })
         .catchError((e) {
           debugPrint('[PreloadedData] 异步解析 TopicListResponse 失败: $e');
-          _topicListResponseCompleter?.complete(null);
+          _completeOnce(completer, null);
         });
   }
 

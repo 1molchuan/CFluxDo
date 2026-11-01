@@ -4,6 +4,7 @@ import 'package:app_icons/app_icons.dart';
 import 'package:m3e_ui/m3e_ui.dart';
 
 import '../l10n/s.dart';
+import '../services/webview_render_gone.dart';
 import 'package:common_ui/common_ui.dart';
 import 'image_viewer_page.dart';
 
@@ -123,7 +124,13 @@ class _MermaidViewerPageState extends State<MermaidViewerPage> {
                     // 大图初始 fit 屏宽,再由用户放大
                     useWideViewPort: true,
                     loadWithOverviewMode: true,
+                    useOnRenderProcessGone: true,
                   ),
+                  // 渲染进程没了：摘掉这个 WebView，走下面的重试 / 看位图
+                  onRenderProcessGone: (_, detail) {
+                    WebViewRenderGone.report('mermaid_viewer', detail);
+                    if (mounted) setState(() => _error = true);
+                  },
                   onLoadStop: (controller, url) {
                     if (mounted) setState(() => _loaded = true);
                   },

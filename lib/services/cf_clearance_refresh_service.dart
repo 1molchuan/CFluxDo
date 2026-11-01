@@ -13,6 +13,7 @@ import 'cf_challenge_logger.dart';
 import 'cf_clearance_authority.dart';
 import 'network/cf/turnstile_configuration.dart';
 import 'session/webview_use.dart';
+import 'webview_render_gone.dart';
 import 'webview_settings.dart';
 import 'windows_webview_environment_service.dart';
 
@@ -359,6 +360,15 @@ class CfClearanceRefreshService {
       initialUserScripts: WebViewSettings.compatPolyfillScripts,
       onReceivedServerTrustAuthRequest: (_, challenge) =>
           WebViewSettings.handleServerTrustAuthRequest(challenge),
+      // 渲染进程没了：这个 WebView 不能再碰，停掉定时器、按失败退避重建
+      // （连续失败到上限就停续期，免得弱机型上反复撑崩）
+      onRenderProcessGone: (_, detail) {
+        WebViewRenderGone.report('cf_clearance_refresh', detail);
+        if (gen != _generation || _isDisposing) return;
+        _cancelRuntimeTimers();
+        _webViewController = null;
+        _recordFailure('render_process_gone', gen: gen, restart: true);
+      },
       onWebViewCreated: (controller) {
         if (!_canHandleGeneration(gen)) {
           CfChallengeLogger.log(

@@ -83,5 +83,8 @@
       }
     }
   },
-  "webview_removeBookmark": "取消收藏"
+  "webview_removeBookmark": "取消收藏",
+  "webview_renderGoneTitle": "页面意外退出了",
+  "webview_renderGoneMessage": "浏览器内核崩溃或被系统回收了内存，重新加载即可继续",
+  "webview_renderGoneReload": "重新加载"
 }

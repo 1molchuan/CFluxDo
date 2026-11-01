@@ -14,6 +14,7 @@ import '../../../../l10n/s.dart';
 import '../../../../services/navigation/app_route_observer.dart';
 import '../../../../services/embedded_browser_controller_pool.dart';
 import '../../../../services/dynamic_content_suspension_service.dart';
+import '../../../../services/webview_render_gone.dart';
 import '../../../../services/webview_settings.dart';
 import '../../../../services/windows_webview_environment_service.dart';
 
@@ -154,6 +155,10 @@ class _IframeWidgetState extends State<IframeWidget> with RouteAware {
   bool _webViewActivated = false;
   EmbeddedBrowserLease? _browserLease;
 
+  /// WebView 渲染进程没了：实例已不能再用，摘掉后由用户点重新加载
+  bool _renderGone = false;
+  int _webViewGeneration = 0;
+
   /// 桌面平台：是否进入交互模式
   bool _interacting = false;
   OverlayEntry? _overlayEntry;
@@ -244,6 +249,27 @@ class _IframeWidgetState extends State<IframeWidget> with RouteAware {
     _showOverlay();
   }
 
+  void _onRenderProcessGone(RenderProcessGoneDetail detail) {
+    WebViewRenderGone.report('iframe', detail);
+    if (!mounted || _renderGone) return;
+    _removeOverlay();
+    _unlockLayoutIfNeeded();
+    setState(() {
+      _renderGone = true;
+      _interacting = false;
+      _isLoaded = false;
+      _hasError = false;
+    });
+  }
+
+  void _reloadAfterRenderGone() {
+    if (!mounted) return;
+    setState(() {
+      _renderGone = false;
+      _webViewGeneration++;
+    });
+  }
+
   void _exitInteractMode() {
     _removeOverlay();
     setState(() => _interacting = false);
@@ -312,10 +338,11 @@ class _IframeWidgetState extends State<IframeWidget> with RouteAware {
         children: [
           // Windows 快速滚动时禁止自动创建 WebView2 Controller。用户明确
           // 点击后才加载，避免列表构建/回收堵住 Win32 平台消息线程。
-          if (showWebView)
+          if (showWebView && !_renderGone)
             Offstage(
               offstage: _routeOverlayed,
               child: InAppWebView(
+                key: ValueKey(_webViewGeneration),
                 webViewEnvironment: deferWindowsWebView
                     ? WindowsWebViewEnvironmentService.instance.environment
                     : null,
@@ -330,6 +357,8 @@ class _IframeWidgetState extends State<IframeWidget> with RouteAware {
                 },
                 onReceivedServerTrustAuthRequest: (_, challenge) =>
                     WebViewSettings.handleServerTrustAuthRequest(challenge),
+                onRenderProcessGone: (_, detail) =>
+                    _onRenderProcessGone(detail),
                 // 允许 WebView 接收水平滑动手势
                 gestureRecognizers: {
                   Factory<HorizontalDragGestureRecognizer>(
@@ -430,8 +459,18 @@ class _IframeWidgetState extends State<IframeWidget> with RouteAware {
                 ),
               ),
             ),
+          if (_renderGone)
+            Positioned.fill(
+              child: ColoredBox(
+                color: theme.colorScheme.surfaceContainerHighest,
+                child: WebViewRenderGoneView(
+                  compact: true,
+                  onReload: _reloadAfterRenderGone,
+                ),
+              ),
+            ),
           // 加载指示器
-          if (showWebView && !_isLoaded && !_hasError)
+          if (showWebView && !_renderGone && !_isLoaded && !_hasError)
             Container(
               color: theme.colorScheme.surfaceContainerHighest,
               child: const Center(child: LoadingSpinner()),
@@ -537,6 +576,9 @@ class _IframeWidgetState extends State<IframeWidget> with RouteAware {
       // 允许混合内容和第三方 cookies
       mixedContentMode: MixedContentMode.MIXED_CONTENT_ALWAYS_ALLOW,
       thirdPartyCookiesEnabled: true,
+
+      // 渲染进程没了由我们认领，否则 Android 连 App 一起杀
+      useOnRenderProcessGone: true,
     );
   }
 

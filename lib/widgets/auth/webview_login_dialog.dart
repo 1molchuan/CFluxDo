@@ -17,6 +17,7 @@ import '../../services/preloaded_data_service.dart';
 import '../../services/session/webview_use.dart';
 import '../../services/toast_service.dart';
 import '../../services/webview_session_cookie_refresh_service.dart';
+import '../../services/webview_render_gone.dart';
 import '../../services/webview_settings.dart';
 import '../../services/windows_webview_environment_service.dart';
 
@@ -648,6 +649,14 @@ document.close();
     }
   }
 
+  /// 人机验证页的渲染进程没了（墨水屏等弱机型上 hCaptcha 容易把它撑崩）：
+  /// 这个 WebView 已不能再用，按失败收场，用户再点一次登录会开新的
+  void _onRenderProcessGone(RenderProcessGoneDetail detail) {
+    WebViewRenderGone.report('webview_login_dialog', detail);
+    _controller = null;
+    _finishFailure(LoginErrorKind.unknown, '人机验证页面意外退出了，请重新登录');
+  }
+
   void _finishFailure(LoginErrorKind kind, String? message) {
     if (_finished) return;
     _finished = true;
@@ -749,6 +758,7 @@ document.close();
                                         thirdPartyCookiesEnabled: true,
                                         userAgent: AppConstants
                                             .webViewUserAgentOverride,
+                                        useOnRenderProcessGone: true,
                                       ),
                                       initialUserScripts:
                                           WebViewSettings.compatPolyfillScripts,
@@ -757,6 +767,8 @@ document.close();
                                               WebViewSettings.handleServerTrustAuthRequest(
                                                 challenge,
                                               ),
+                                      onRenderProcessGone: (_, detail) =>
+                                          _onRenderProcessGone(detail),
                                       onWebViewCreated: (controller) {
                                         _controller = controller;
                                         WebViewSettings.registerJsErrorReporter(

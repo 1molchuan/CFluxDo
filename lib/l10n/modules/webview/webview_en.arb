@@ -69,5 +69,8 @@
   "webview_noAppForLink": "No app found for this link",
   "webview_openExternal": "Open in external browser",
   "webview_openFailed": "Open failed: {error}",
-  "webview_removeBookmark": "Remove bookmark"
+  "webview_removeBookmark": "Remove bookmark",
+  "webview_renderGoneTitle": "The page stopped unexpectedly",
+  "webview_renderGoneMessage": "The browser engine crashed or was stopped by the system to free memory. Reload to continue.",
+  "webview_renderGoneReload": "Reload"
 }

@@ -31,5 +31,8 @@
         "type": "String"
       }
     }
-  }
+  },
+  "webview_renderGoneTitle": "頁面意外退出了",
+  "webview_renderGoneMessage": "瀏覽器內核崩潰或被系統回收了記憶體，重新載入即可繼續",
+  "webview_renderGoneReload": "重新載入"
 }

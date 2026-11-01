@@ -23,6 +23,7 @@ import 'site_context.dart';
 import 'cf_verification_round.dart';
 import 'embedded_browser_controller_pool.dart';
 import 'toast_service.dart';
+import 'webview_render_gone.dart';
 import 'webview_settings.dart';
 import 'windows_webview_environment_service.dart';
 import '../l10n/s.dart';
@@ -990,6 +991,7 @@ class _CfChallengePageState extends State<CfChallengePage> {
   double _progress = 0;
   bool _hasMarkedPageReady = false;
   bool _hasPopped = false; // 防止重复 pop
+  bool _renderGone = false; // WebView 渲染进程没了，实例已不能再用
   late bool _isBackground;
   late bool _needsManualAttention;
   bool _challengeWebViewVisible = false;
@@ -2649,7 +2651,22 @@ class _CfChallengePageState extends State<CfChallengePage> {
     });
   }
 
+  /// 验证页的渲染进程没了（弱机型上 Turnstile 容易把它撑崩）：摘掉这个
+  /// WebView，这一轮按「无从判断」收场（不计失败、不动 jar 里的值），
+  /// 由调用方决定要不要再起一轮
+  void _onRenderProcessGone(RenderProcessGoneDetail detail) {
+    WebViewRenderGone.report('cf_challenge', detail);
+    if (!mounted || _renderGone) return;
+    setState(() {
+      _renderGone = true;
+      _controller = null;
+    });
+    if (!_isBackground) _showInfo(S.current.webview_renderGoneTitle);
+    _giveUp(CfRoundFailure.inconclusive, detail: 'WebView 渲染进程退出');
+  }
+
   Widget _buildChallengeWebView({required bool showUi}) {
+    if (_renderGone) return const SizedBox.expand();
     return IgnorePointer(
       ignoring: _isBackground,
       child: WebViewSettings.wrapWithScrollFix(
@@ -2666,12 +2683,14 @@ class _CfChallengePageState extends State<CfChallengePage> {
             mediaPlaybackRequiresUserGesture: false,
             useShouldOverrideUrlLoading: true,
             useOnNavigationResponse: true,
+            useOnRenderProcessGone: true,
           ),
           initialUserScripts: _initialChallengeScripts(),
           shouldOverrideUrlLoading: _shouldOverrideVerifyNavigation,
           onNavigationResponse: _handleVerifyNavigationResponse,
           onReceivedServerTrustAuthRequest: (_, challenge) =>
               WebViewSettings.handleServerTrustAuthRequest(challenge),
+          onRenderProcessGone: (_, detail) => _onRenderProcessGone(detail),
           onWebViewCreated: (controller) {
             _controller = controller;
             WebViewSettings.registerJsErrorReporter(controller);
