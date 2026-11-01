@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:app_icons/app_icons.dart';
 import 'package:flutter/services.dart';
+
 import '../../config/site_customization.dart';
 import '../../l10n/s.dart';
 import '../../services/toast_service.dart';
@@ -19,19 +20,25 @@ enum ExternalLinkOpenChoice {
 
 /// 显示外部链接确认对话框
 ///
-/// 返回用户选择的打开方式，`null` 表示取消或关闭
+/// 返回用户选择的打开方式，`null` 表示取消或关闭。
+/// [preferInApp] 是「外部链接使用内置浏览器」偏好：开着时主按钮是内置浏览器，
+/// 系统浏览器退为次选；关着时反过来
 Future<ExternalLinkOpenChoice?> showExternalLinkConfirmDialog(
   BuildContext context,
   String url,
-  LinkRiskLevel riskLevel,
-) {
+  LinkRiskLevel riskLevel, {
+  bool preferInApp = false,
+}) {
   return showAppBottomSheet<ExternalLinkOpenChoice>(
     context: context,
     isScrollControlled: true,
     backgroundColor: Colors.transparent,
     enableDrag: false, // 确认弹框:禁止下滑误关
-    builder: (context) =>
-        _ExternalLinkConfirmSheet(url: url, riskLevel: riskLevel),
+    builder: (context) => _ExternalLinkConfirmSheet(
+      url: url,
+      riskLevel: riskLevel,
+      preferInApp: preferInApp,
+    ),
   );
 }
 
@@ -49,8 +56,13 @@ Future<void> showLinkBlockedDialog(BuildContext context, String url) {
 class _ExternalLinkConfirmSheet extends StatelessWidget {
   final String url;
   final LinkRiskLevel riskLevel;
+  final bool preferInApp;
 
-  const _ExternalLinkConfirmSheet({required this.url, required this.riskLevel});
+  const _ExternalLinkConfirmSheet({
+    required this.url,
+    required this.riskLevel,
+    required this.preferInApp,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -61,6 +73,13 @@ class _ExternalLinkConfirmSheet extends StatelessWidget {
     final uri = Uri.tryParse(url);
     final canOpenInApp =
         uri != null && (uri.scheme == 'http' || uri.scheme == 'https');
+    // 主按钮跟偏好走：偏好内置浏览器时，主按钮是内置浏览器、系统浏览器在下面
+    final primary = canOpenInApp && preferInApp
+        ? ExternalLinkOpenChoice.inAppBrowser
+        : ExternalLinkOpenChoice.systemBrowser;
+    final secondary = primary == ExternalLinkOpenChoice.inAppBrowser
+        ? ExternalLinkOpenChoice.systemBrowser
+        : (canOpenInApp ? ExternalLinkOpenChoice.inAppBrowser : null);
 
     return AppSheetScaffold(
       style: AppSheetStyle.card,
@@ -213,10 +232,8 @@ class _ExternalLinkConfirmSheet extends StatelessWidget {
               const SizedBox(width: 12),
               Expanded(
                 child: FilledButton(
-                  onPressed: () => Navigator.pop(
-                    context,
-                    ExternalLinkOpenChoice.systemBrowser,
-                  ),
+                  key: const ValueKey('external-link-primary'),
+                  onPressed: () => Navigator.pop(context, primary),
                   style: FilledButton.styleFrom(
                     backgroundColor: config.buttonColor,
                     padding: const EdgeInsets.symmetric(vertical: 14),
@@ -224,33 +241,33 @@ class _ExternalLinkConfirmSheet extends StatelessWidget {
                       borderRadius: BorderRadius.circular(12),
                     ),
                   ),
-                  child: Text(context.l10n.externalLink_openInSystemBrowser),
+                  child: Text(_labelOf(context, primary)),
                 ),
               ),
             ],
           ),
 
-          // 内置浏览器选项
-          if (canOpenInApp) ...[
+          // 另一种打开方式
+          if (secondary != null) ...[
             const SizedBox(height: 12),
             SizedBox(
               width: double.infinity,
               child: OutlinedButton.icon(
-                onPressed: () => Navigator.pop(
-                  context,
-                  ExternalLinkOpenChoice.inAppBrowser,
-                ),
+                key: const ValueKey('external-link-secondary'),
+                onPressed: () => Navigator.pop(context, secondary),
                 style: OutlinedButton.styleFrom(
                   padding: const EdgeInsets.symmetric(vertical: 14),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12),
                   ),
                 ),
-                icon: const Icon(
-                  Symbols.open_in_browser_rounded,
+                icon: Icon(
+                  secondary == ExternalLinkOpenChoice.inAppBrowser
+                      ? Symbols.open_in_browser_rounded
+                      : Symbols.open_in_new_rounded,
                   size: 18,
                 ),
-                label: Text(context.l10n.externalLink_openInAppBrowser),
+                label: Text(_labelOf(context, secondary)),
               ),
             ),
           ],
@@ -258,6 +275,14 @@ class _ExternalLinkConfirmSheet extends StatelessWidget {
       ),
     );
   }
+
+  String _labelOf(BuildContext context, ExternalLinkOpenChoice choice) =>
+      switch (choice) {
+        ExternalLinkOpenChoice.inAppBrowser =>
+          context.l10n.externalLink_openInAppBrowser,
+        ExternalLinkOpenChoice.systemBrowser =>
+          context.l10n.externalLink_openInSystemBrowser,
+      };
 
   void _copyUrl(BuildContext context) {
     Clipboard.setData(ClipboardData(text: url));
@@ -367,7 +392,11 @@ class _LinkBlockedSheet extends StatelessWidget {
               color: Colors.red.withValues(alpha: 0.12),
               shape: BoxShape.circle,
             ),
-            child: const Icon(Symbols.block_rounded, color: Colors.red, size: 28),
+            child: const Icon(
+              Symbols.block_rounded,
+              color: Colors.red,
+              size: 28,
+            ),
           ),
           const SizedBox(height: 16),
           Text(

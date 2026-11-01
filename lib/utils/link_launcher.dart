@@ -98,6 +98,11 @@ Future<void> launchExternalLink(BuildContext context, String url) async {
   final uri = Uri.tryParse(url);
   if (uri == null) return;
 
+  final prefs = ProviderScope.containerOf(
+    context,
+    listen: false,
+  ).read(preferencesProvider);
+
   // 链接安全检查
   ExternalLinkOpenChoice? explicitChoice;
   final config = AppConstants.siteCustomization.linkSecurityConfig;
@@ -121,6 +126,7 @@ Future<void> launchExternalLink(BuildContext context, String url) async {
           context,
           url,
           riskLevel,
+          preferInApp: prefs.openExternalLinksInAppBrowser,
         );
         if (explicitChoice == null) return;
         break;
@@ -136,10 +142,6 @@ Future<void> launchExternalLink(BuildContext context, String url) async {
     return;
   }
 
-  final prefs = ProviderScope.containerOf(
-    context,
-    listen: false,
-  ).read(preferencesProvider);
   // 确认弹层中已显式选择「系统浏览器」：尊重本次选择，忽略偏好
   final preferInApp = explicitChoice == ExternalLinkOpenChoice.systemBrowser
       ? false
