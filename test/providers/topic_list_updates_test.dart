@@ -182,6 +182,59 @@ void main() {
       expect(queue.snapshot({}).keys, [1]);
     });
 
+    test('按创建时间倒序只提示新话题，其余排序和正序不提示', () {
+      TopicListUpdates queueFor({String? order, bool ascending = false}) =>
+          TopicListUpdates()..configure(
+            TopicListUpdateQuery(
+              filter: TopicListFilter.latest,
+              order: order,
+              ascending: ascending,
+            ),
+          );
+      void feed(TopicListUpdates queue) => queue
+        ..add(const TopicListEvent(topicId: 1, type: 'new_topic'))
+        ..add(const TopicListEvent(topicId: 2, type: 'latest'));
+
+      final byDefault = queueFor();
+      feed(byDefault);
+      expect(byDefault.snapshot({}).keys, unorderedEquals([1, 2]));
+
+      final byActivity = queueFor(order: 'activity');
+      feed(byActivity);
+      expect(byActivity.snapshot({}).keys, unorderedEquals([1, 2]));
+
+      final byCreated = queueFor(order: 'created');
+      feed(byCreated);
+      expect(byCreated.snapshot({}).keys, [1]);
+
+      for (final queue in [
+        queueFor(order: 'created', ascending: true),
+        queueFor(order: 'activity', ascending: true),
+        queueFor(ascending: true),
+        queueFor(order: 'likes'),
+        queueFor(order: 'views'),
+        queueFor(order: 'posts'),
+        queueFor(order: 'posters'),
+      ]) {
+        feed(queue);
+        expect(queue.snapshot({}), isEmpty);
+      }
+    });
+
+    test('切到按创建时间排序时丢掉已排队的新回复提示', () {
+      final queue = TopicListUpdates()
+        ..configure(TopicListUpdateQuery(filter: TopicListFilter.latest))
+        ..add(const TopicListEvent(topicId: 1, type: 'new_topic'))
+        ..add(const TopicListEvent(topicId: 2, type: 'latest'));
+      queue.configure(
+        TopicListUpdateQuery(filter: TopicListFilter.latest, order: 'created'),
+      );
+      expect(queue.snapshot({}), isEmpty);
+      queue.add(const TopicListEvent(topicId: 3, type: 'new_topic'));
+      queue.add(const TopicListEvent(topicId: 4, type: 'latest'));
+      expect(queue.snapshot({}).keys, [3]);
+    });
+
     test('用户视图设置迟到时不作废正在加载的列表', () {
       final queue = TopicListUpdates()
         ..configure(TopicListUpdateQuery(filter: TopicListFilter.newTopics));
@@ -458,10 +511,10 @@ void main() {
     });
 
     test('没有置顶时照旧插在最前', () {
-      expect(
-        ids(prependTopicUpdates([_topic(10), _topic(11)], [_topic(11)])),
-        [11, 10],
-      );
+      expect(ids(prependTopicUpdates([_topic(10), _topic(11)], [_topic(11)])), [
+        11,
+        10,
+      ]);
     });
   });
 }

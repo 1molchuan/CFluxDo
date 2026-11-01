@@ -22,7 +22,21 @@ class TopicListUpdateQuery {
   final bool ascending;
   final bool newNewView;
 
-  bool accepts(String type) => switch (filter) {
+  bool accepts(String type) => _sortAccepts(type) && _filterAccepts(type);
+
+  /// 新消息插在列表开头，只有它在当前排序下确实排到开头才提示：
+  /// 默认 / 按活跃度倒序时新话题和新回复都会顶上来；按创建时间倒序只有新话题会；
+  /// 其余排序（点赞、浏览、回复数、正序……）都不会，提示了点开也对不上
+  bool _sortAccepts(String type) {
+    if (ascending) return false;
+    return switch (order) {
+      null || 'activity' => true,
+      'created' => type == 'new_topic',
+      _ => false,
+    };
+  }
+
+  bool _filterAccepts(String type) => switch (filter) {
     TopicListFilter.latest => type == 'latest' || type == 'new_topic',
     TopicListFilter.newTopics =>
       (type == 'new_topic' && (!newNewView || subset != NewSubset.replies)) ||
