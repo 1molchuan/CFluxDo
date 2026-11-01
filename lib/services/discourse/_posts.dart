@@ -444,7 +444,15 @@ mixin _PostsMixin on _DiscourseServiceBase {
         'post_id': postId,
         'topic_id': topicId,
       },
-      options: Options(contentType: Headers.formUrlEncodedContentType),
+      options: Options(
+        contentType: Headers.formUrlEncodedContentType,
+        // 点击统计是后台请求：失败（502 等）不弹「服务器暂时不可用」，
+        // 以前点外链时偶尔跳出这条提示，让人以为是链接打不开（Issue #2）
+        extra: {
+          FluxRequestKeys.isSilent: true,
+          FluxRequestKeys.showErrorToast: false,
+        },
+      ),
     ).catchError((e) {
       debugPrint('[DiscourseService] trackClick failed: $e');
       return Response(requestOptions: RequestOptions());
