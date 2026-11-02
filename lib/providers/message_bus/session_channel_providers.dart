@@ -4,6 +4,10 @@
 /// subscribe-user-notifications.js 中的站点级订阅。这些频道的共同点是
 /// 「与某个具体话题无关、影响整个客户端会话」，所以集中放在这里，
 /// 不混进 topic_tracking_providers。
+///
+/// 各频道只 select 用户 id：currentUser 每次刷新都 emit 新对象，整份
+/// watch 会让 build 反复退订重订（-1 起订丢空窗消息）并把实时状态
+/// （免打扰等）重置回初值。
 library;
 
 import 'dart:async';
@@ -37,7 +41,9 @@ class LogoutChannelNotifier extends Notifier<void> {
     // 确保 MessageBus 已 configure（域名配置），避免用主站域名轮询
     ref.watch(messageBusInitProvider);
     final messageBus = ref.watch(messageBusServiceProvider);
-    final currentUser = ref.watch(currentUserProvider).value;
+    final currentUserId = ref.watch(
+      currentUserProvider.select((value) => value.value?.id),
+    );
 
     if (_subscribedChannel != null && _callback != null) {
       messageBus.unsubscribe(_subscribedChannel!, _callback);
@@ -45,13 +51,13 @@ class LogoutChannelNotifier extends Notifier<void> {
       _callback = null;
     }
 
-    if (currentUser == null) {
+    if (currentUserId == null) {
       // 已登出：闩锁复位，下一个会话可以再次响应
       _handled = false;
       return;
     }
 
-    final channel = '/logout/${currentUser.id}';
+    final channel = '/logout/$currentUserId';
     debugPrint('[LogoutChannel] 订阅频道: $channel');
 
     void onLogout(MessageBusMessage message) {
@@ -97,7 +103,9 @@ class DoNotDisturbNotifier extends Notifier<DateTime?> {
   DateTime? build() {
     ref.watch(messageBusInitProvider);
     final messageBus = ref.watch(messageBusServiceProvider);
-    final currentUser = ref.watch(currentUserProvider).value;
+    final currentUserId = ref.watch(
+      currentUserProvider.select((value) => value.value?.id),
+    );
 
     if (_channel != null && _callback != null) {
       messageBus.unsubscribe(_channel!, _callback);
@@ -105,9 +113,9 @@ class DoNotDisturbNotifier extends Notifier<DateTime?> {
       _callback = null;
     }
 
-    if (currentUser == null) return null;
+    if (currentUserId == null) return null;
 
-    final channel = '/do-not-disturb/${currentUser.id}';
+    final channel = '/do-not-disturb/$currentUserId';
 
     void onDoNotDisturb(MessageBusMessage message) {
       final data = message.data;

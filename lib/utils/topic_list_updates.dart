@@ -160,21 +160,34 @@ class TopicListUpdates {
 /// 新到 / 有更新的话题插到列表开头的置顶话题之后，与整页刷新的顺序一致；
 /// 否则每载入一次置顶就往下沉一截（开了自动载入时很快就沉没了）。
 /// 置顶话题自己有更新时原位换成新数据，不挪位置。
-List<Topic> prependTopicUpdates(List<Topic> current, List<Topic> updates) {
+///
+/// 对齐网页版 TopicList.loadBefore：本次请求了但服务端没返回的话题（已删除、
+/// 移入静音分类、不再符合当前筛选）也要移除，否则旧卡片会一直留在列表里。
+List<Topic> prependTopicUpdates(
+  List<Topic> current,
+  List<Topic> updates,
+  Iterable<int> requestedIds,
+) {
   final pending = {for (final topic in updates) topic.id: topic};
+  final dropped = {...requestedIds}..removeAll(pending.keys);
   var pinnedCount = 0;
   while (pinnedCount < current.length && current[pinnedCount].pinned) {
     pinnedCount++;
   }
   final pinnedHead = [
     for (final topic in current.take(pinnedCount))
-      pending.remove(topic.id) ?? topic,
+      if (!dropped.contains(topic.id)) pending.remove(topic.id) ?? topic,
   ];
   final fresh = updates.where((topic) => pending.containsKey(topic.id));
   final freshIds = fresh.map((topic) => topic.id).toSet();
   return [
     ...pinnedHead,
     ...fresh,
-    ...current.skip(pinnedCount).where((topic) => !freshIds.contains(topic.id)),
+    ...current
+        .skip(pinnedCount)
+        .where(
+          (topic) =>
+              !freshIds.contains(topic.id) && !dropped.contains(topic.id),
+        ),
   ];
 }
