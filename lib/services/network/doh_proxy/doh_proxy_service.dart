@@ -1091,6 +1091,41 @@ class DohProxyService {
     );
   }
 
+  /// 把服务端随 ECH 拒绝下发的新钥匙交给 Rust 采纳（见 FFI `doh_proxy_adopt_ech_config`）
+  Future<bool> adoptEchConfig(
+    String host,
+    String dohServer, {
+    String? dohServerEch,
+    bool preferIpv6 = false,
+    required String echConfigB64,
+  }) async {
+    if (!DohProxyFfi.isAvailable) {
+      return DohProxyFfi.instance.adoptEchConfig(
+        host,
+        dohServer,
+        dohServerEch: dohServerEch,
+        preferIpv6: preferIpv6,
+        echConfigB64: echConfigB64,
+      );
+    }
+    return _enqueueFfiOp(() async {
+      final sendPort = await _ensureFfiIsolate();
+      final response = ReceivePort();
+      sendPort.send({
+        'cmd': 'adopt_ech_config',
+        'host': host,
+        'dohServer': dohServer,
+        'dohServerEch': dohServerEch,
+        'preferIpv6': preferIpv6,
+        'echConfigB64': echConfigB64,
+        'replyTo': response.sendPort,
+      });
+      final result = await response.first;
+      response.close();
+      return result is Map && result['ok'] == true;
+    });
+  }
+
   /// 报告连 [host] -> [ip] 失败（作废粘性 IP；[ip] 是钉住的优选赢家时计入它的连败）
   Future<bool> reportHostFailure(
     String host,
@@ -1878,6 +1913,21 @@ void _ffiIsolateEntry(SendPort mainSendPort) {
             dohServerEch: dohServerEch,
             preferIpv6: preferIpv6,
             ip: ip,
+          );
+          replyTo.send({'ok': ok});
+          return;
+        case 'adopt_ech_config':
+          final host = message['host'] as String? ?? '';
+          final dohServer = message['dohServer'] as String? ?? '';
+          final dohServerEch = message['dohServerEch'] as String?;
+          final preferIpv6 = message['preferIpv6'] as bool? ?? false;
+          final echConfigB64 = message['echConfigB64'] as String? ?? '';
+          final ok = DohProxyFfi.instance.adoptEchConfig(
+            host,
+            dohServer,
+            dohServerEch: dohServerEch,
+            preferIpv6: preferIpv6,
+            echConfigB64: echConfigB64,
           );
           replyTo.send({'ok': ok});
           return;

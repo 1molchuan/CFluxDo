@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:dio/dio.dart';
@@ -36,6 +37,45 @@ class RhttpRuntime {
 /// 原生 HTTP/SOCKS5 代理、以及通过本地 Rust 代理中转 SS 连接。
 class RhttpAdapter implements HttpClientAdapter {
   RhttpAdapter(this._networkSettings, this._proxySettings);
+
+  /// rhttp_plus 把「服务端拒绝 ECH」报成这个前缀 + `retry_configs=<base64|none>`
+  static const String echRejectedPrefix = 'EchRejected retry_configs=';
+
+  /// 请求以疑似 ECH 失败收场时写进 `RequestOptions.extra` 的原因，
+  /// 外层（gateway 包装）据此临时改走网关
+  static const String echFailureExtraKey = 'rhttpEchFailure';
+
+  /// 是不是「ECH 钥匙不对」一类的失败：服务端明确拒绝 ECH，或老版本 rustls
+  /// 把拒绝伪装成的「证书域名不对」（证书只对 cloudflare-ech.com 有效）。
+  /// 只在这次连接开了 ECH 时判定，否则普通证书错误不能当成钥匙问题
+  static bool isEchSuspect(Object error, {required bool echEnabled}) {
+    if (!echEnabled) return false;
+    final text = error.toString();
+    if (text.contains(echRejectedPrefix)) return true;
+    if (error is DioException) {
+      if (error.type == DioExceptionType.badCertificate) return true;
+      final inner = error.error;
+      if (inner != null && !identical(inner, error)) {
+        return isEchSuspect(inner, echEnabled: true);
+      }
+    }
+    return text.contains('InvalidCertificate') &&
+        (text.contains('NotValidForName') || text.contains('cloudflare-ech'));
+  }
+
+  /// 从错误里取服务端随拒绝下发的新钥匙（ECHConfigList 线格式）；没有返回 null
+  static Uint8List? echRetryConfigsFrom(Object error) {
+    final match = RegExp('${RegExp.escape(echRejectedPrefix)}([A-Za-z0-9+/=]+)')
+        .firstMatch(error.toString());
+    final token = match?.group(1);
+    if (token == null || token == 'none') return null;
+    try {
+      final bytes = base64Decode(token);
+      return bytes.isEmpty ? null : bytes;
+    } catch (_) {
+      return null;
+    }
+  }
 
   final NetworkSettingsService _networkSettings;
   final ProxySettingsService _proxySettings;
@@ -76,6 +116,15 @@ class RhttpAdapter implements HttpClientAdapter {
       _markConfigSuccess(config, response.remoteIp);
       return response.responseBody;
     } catch (error) {
+      if (isEchSuspect(error, echEnabled: config.echConfig != null)) {
+        return _retryAfterEchFailure(
+          options,
+          requestStream,
+          cancelFuture,
+          config,
+          error,
+        );
+      }
       if (!_canRetryWithAlternateIp(options, requestStream, config, error)) {
         rethrow;
       }
@@ -103,6 +152,58 @@ class RhttpAdapter implements HttpClientAdapter {
       _markConfigSuccess(retryConfig, response.remoteIp);
       return response.responseBody;
     }
+  }
+
+  /// ECH 钥匙不对：先把服务端随拒绝给的新钥匙交给 Rust 采纳并丢掉本地缓存，
+  /// 换钥匙重试一次；没有新钥匙或重试仍失败时在请求上标记原因后抛出，
+  /// 由 gateway 包装把这条请求改走网关并让 rhttp 暂退
+  Future<ResponseBody> _retryAfterEchFailure(
+    RequestOptions options,
+    Stream<Uint8List>? requestStream,
+    Future<void>? cancelFuture,
+    _PreparedClientConfig config,
+    Object error,
+  ) async {
+    final host = options.uri.host;
+    final retryConfigs = echRetryConfigsFrom(error);
+    debugPrint(
+      '[DIO] RhttpAdapter ECH 失败 ${config.host} '
+      '(retry_configs: ${retryConfigs == null ? "无" : "${retryConfigs.length} bytes"}): $error',
+    );
+    if (retryConfigs != null) {
+      await _networkSettings.adoptEchRetryConfigs(host, retryConfigs);
+    }
+    final attemptedIp = config.dnsOverrides.isNotEmpty
+        ? config.dnsOverrides.first
+        : null;
+    _networkSettings.reportHostConnectionFailure(config.host, attemptedIp);
+
+    Object lastError = error;
+    // 请求体是流时没法重放，只能交给外层
+    if (requestStream == null) {
+      final retryConfig = await _prepareClientConfig(
+        host,
+        forceRefresh: retryConfigs == null,
+      );
+      if (retryConfig.clientFingerprint != config.clientFingerprint) {
+        try {
+          final retryDelegate = await _ensureDelegate(retryConfig);
+          final response = await retryDelegate.fetch(
+            options,
+            requestStream,
+            cancelFuture,
+          );
+          _markConfigSuccess(retryConfig, response.remoteIp);
+          debugPrint('[DIO] RhttpAdapter 换钥匙重试成功 ${config.host}');
+          return response.responseBody;
+        } catch (retryError) {
+          lastError = retryError;
+        }
+      }
+    }
+    options.extra[echFailureExtraKey] = lastError.toString();
+    // ignore: only_throw_errors
+    throw lastError;
   }
 
   Future<_RhttpDelegate> _ensureDelegate(_PreparedClientConfig config) {
@@ -186,11 +287,15 @@ class RhttpAdapter implements HttpClientAdapter {
     return delegate;
   }
 
-  Future<_PreparedClientConfig> _prepareClientConfig(String host) async {
+  Future<_PreparedClientConfig> _prepareClientConfig(
+    String host, {
+    bool forceRefresh = false,
+  }) async {
     final normalizedHost = host.trim().toLowerCase();
     final ns = _networkSettings.current;
     final resolvedHost = await _networkSettings.resolveHostForRequest(
       normalizedHost,
+      forceRefresh: forceRefresh,
     );
 
     return _PreparedClientConfig(

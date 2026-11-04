@@ -385,6 +385,16 @@ class DohProxyFfi {
   // 带 IP 的连接失败回报（计入赢家连败），旧版本库没有时回退到清粘性 IP
   int Function(Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>, int, Pointer<Utf8>)?
   _dohProxyReportHostFailure;
+  // 采纳服务端随 ECH 拒绝下发的新钥匙（rhttp 直连拿到的 retry_configs）；旧版本库没有
+  int Function(
+    Pointer<Utf8>,
+    Pointer<Utf8>,
+    Pointer<Utf8>,
+    int,
+    Pointer<Utf8>,
+    int,
+  )?
+  _dohProxyAdoptEchConfig;
   Pointer<Utf8> Function()? _dohProxyDnsCacheStats;
   // 网络引擎计数（只读原子量，不阻塞），旧版本库没有
   Pointer<Utf8> Function()? _dohProxyNetStats;
@@ -505,6 +515,25 @@ class DohProxyFfi {
             .asFunction();
       } catch (_) {
         _dohProxyReportHostFailure = null;
+      }
+
+      try {
+        _dohProxyAdoptEchConfig = _lib!
+            .lookup<
+              NativeFunction<
+                Int32 Function(
+                  Pointer<Utf8>,
+                  Pointer<Utf8>,
+                  Pointer<Utf8>,
+                  Int32,
+                  Pointer<Utf8>,
+                  Int64,
+                )
+              >
+            >('doh_proxy_adopt_ech_config')
+            .asFunction();
+      } catch (_) {
+        _dohProxyAdoptEchConfig = null;
       }
 
       try {
@@ -1363,6 +1392,47 @@ class DohProxyFfi {
       calloc.free(hostPtr);
       calloc.free(dohPtr);
       calloc.free(ipPtr);
+      if (hasEchPtr) {
+        calloc.free(echPtr);
+      }
+    }
+  }
+
+  /// 把服务端随 ECH 拒绝下发的新钥匙交给 Rust（[echConfigB64] 是 base64 的 ECHConfigList）。
+  /// 旧版本库没有这个符号时返回 false
+  bool adoptEchConfig(
+    String host,
+    String dohServer, {
+    String? dohServerEch,
+    bool preferIpv6 = false,
+    required String echConfigB64,
+    int ttlSecs = 0,
+  }) {
+    if (!_initialized && !initialize()) return false;
+    final adopt = _dohProxyAdoptEchConfig;
+    if (adopt == null) return false;
+
+    final hostPtr = host.toNativeUtf8();
+    final dohPtr = dohServer.toNativeUtf8();
+    final hasEchPtr = dohServerEch != null && dohServerEch.isNotEmpty;
+    final echPtr = hasEchPtr
+        ? dohServerEch.toNativeUtf8()
+        : nullptr.cast<Utf8>();
+    final keyPtr = echConfigB64.toNativeUtf8();
+    try {
+      return adopt(
+            hostPtr,
+            dohPtr,
+            echPtr,
+            preferIpv6 ? 1 : 0,
+            keyPtr,
+            ttlSecs,
+          ) !=
+          0;
+    } finally {
+      calloc.free(hostPtr);
+      calloc.free(dohPtr);
+      calloc.free(keyPtr);
       if (hasEchPtr) {
         calloc.free(echPtr);
       }

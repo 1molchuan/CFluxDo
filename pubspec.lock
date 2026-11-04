@@ -1727,9 +1727,9 @@ packages:
     dependency: "direct main"
     description:
       path: rhttp
-      ref: HEAD
-      resolved-ref: "02eb4114b57c108e76a9ed526b6118bc048b5604"
-      url: "https://github.com/Lingyan000/rhttp_plus.git"
+      ref: c8689e4879641315ab40af2ef1369b3e4cc5ac31
+      resolved-ref: c8689e4879641315ab40af2ef1369b3e4cc5ac31
+      url: "https://github.com/1molchuan/rhttp_plus.git"
     source: git
     version: "0.18.0"
   riverpod:

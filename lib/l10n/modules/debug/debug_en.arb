@@ -79,5 +79,6 @@
   "debugTools_noLogsHint": "Logs appear after enabling DOH and making requests",
   "debugTools_noLogsToShare": "No logs to share",
   "debugTools_shareLogs": "Share logs",
-  "debugTools_viewLogs": "View logs"
+  "debugTools_viewLogs": "View logs",
+  "appLogs_failureReason": "Failure reason"
 }

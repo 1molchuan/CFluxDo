@@ -1470,6 +1470,29 @@ class NetworkSettingsService {
     }
   }
 
+  /// rhttp 直连被服务端拒绝 ECH 时拿到的新钥匙（retry_configs）：交给 Rust 采纳，
+  /// 并丢掉本地缓存，下一次 [resolveHostForRequest] 就拿到新钥匙。返回 Rust 是否采纳
+  Future<bool> adoptEchRetryConfigs(String host, Uint8List key) async {
+    final normalizedHost = _normalizeHost(host);
+    if (normalizedHost == null || key.isEmpty) return false;
+    _resolvedHostCache.remove(normalizedHost);
+    _dropPinnedHostEntries();
+    _updateLocalDnsCacheStats();
+    if (!current.dohEnabled) return false;
+    final adopted = await _rustProxyService.adoptEchConfig(
+      normalizedHost,
+      _activeServerUrl,
+      dohServerEch: _effectiveEchServerUrl ?? _activeServerUrl,
+      preferIpv6: current.preferIPv6,
+      echConfigB64: base64Encode(key),
+    );
+    debugPrint(
+      '[DOH] ECH retry_configs ${adopted ? "已采纳" : "采纳失败"} host=$normalizedHost '
+      '(${key.length} bytes)',
+    );
+    return adopted;
+  }
+
   /// 丢掉钉在优选赢家上的缓存条目：赢家连不上或换了时，下一个请求重新问 Rust
   void _dropPinnedHostEntries() {
     final before = _resolvedHostCache.length;

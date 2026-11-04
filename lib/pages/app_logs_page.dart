@@ -82,6 +82,7 @@ const Set<String> _knownEntryKeys = {
   'event',
   'username',
   'reason',
+  'gatewayError',
 };
 
 /// 应用日志查看页面
@@ -582,6 +583,11 @@ class _AppLogsPageState extends State<AppLogsPage> {
     final duration = entry['duration'];
     final level = entry['level']?.toString() ?? 'info';
     final adapter = _getRequestAdapterLabel(entry);
+    // 没拿到响应的失败原因 / 网关自己回的错误正文（见 NetworkLogInterceptor）
+    final failureReason = [
+      entry['error']?.toString(),
+      entry['gatewayError']?.toString(),
+    ].whereType<String>().where((e) => e.isNotEmpty).join('\n');
     final extras = _extraFields(entry);
 
     showAppDialog(
@@ -608,6 +614,11 @@ class _AppLogsPageState extends State<AppLogsPage> {
                   detail.writeln('${S.current.networkAdapter_adapterType}: $adapter');
                 }
                 detail.writeln('${S.current.appLogs_level}: $level');
+                if (failureReason.isNotEmpty) {
+                  detail.writeln(
+                    '${S.current.appLogs_failureReason}: $failureReason',
+                  );
+                }
                 for (final e in extras.entries) {
                   detail.writeln('${e.key}: ${e.value}');
                 }
@@ -634,6 +645,11 @@ class _AppLogsPageState extends State<AppLogsPage> {
                   adapter,
                 ),
               _buildDetailField(context.l10n.appLogs_level, level == 'warning' ? context.l10n.common_loadFailed : context.l10n.common_done),
+              if (failureReason.isNotEmpty)
+                _buildDetailField(
+                  context.l10n.appLogs_failureReason,
+                  failureReason,
+                ),
               if (extras.isNotEmpty) ...[
                 const SizedBox(height: 12),
                 Text(

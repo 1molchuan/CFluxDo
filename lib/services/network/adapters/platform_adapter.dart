@@ -10,6 +10,7 @@ import '../rhttp/rhttp_settings_service.dart';
 import '../system_proxy_service.dart';
 import '../flux_request_spec.dart';
 import '../webview/webview_adapter_settings_service.dart';
+import '../../log/log_writer.dart';
 import 'adapter_log_metadata.dart';
 import 'network_http_adapter.dart';
 import '../../../l10n/s.dart';
@@ -279,7 +280,56 @@ class _GatewayAdapterWrapper implements HttpClientAdapter {
         rhttpSettings.shouldUseRhttp(settings.current, proxySettings.current) &&
         requestAllowsRhttpAdapter(options);
 
-    if (!shouldUseRhttp && settings.isGatewayMode) {
+    if (shouldUseRhttp) {
+      try {
+        return await _inner.fetch(options, requestStream, cancelFuture);
+      } on DioException catch (error) {
+        // rhttp 直连的 ECH 钥匙不对且换钥匙也没救回来：这条请求改走网关，
+        // 并让 rhttp 暂退一段时间（到点自动再试）。没开网关时只能照常报错
+        final reason = options.extra.remove(RhttpAdapter.echFailureExtraKey);
+        if (reason == null || !settings.isGatewayMode) rethrow;
+        rhttpSettings.degradeTemporarily(
+          _rhttpDegradeDuration,
+          reason: reason.toString(),
+        );
+        _logRhttpFallback(options, reason.toString(), error);
+        // 请求体是流时重放不了，交给上层的重试
+        if (requestStream != null) rethrow;
+        return _fetchViaGateway(options, requestStream, cancelFuture);
+      }
+    }
+
+    return _fetchViaGateway(options, requestStream, cancelFuture);
+  }
+
+  /// rhttp 直连失败后改走网关多久；期间 rhttp 不再被选中，到点自动恢复
+  static const Duration _rhttpDegradeDuration = Duration(minutes: 10);
+
+  void _logRhttpFallback(RequestOptions options, String reason, Object error) {
+    final uri = options.uri;
+    LogWriter.instance.write({
+      'timestamp': DateTime.now().toIso8601String(),
+      'level': 'warning',
+      'type': 'network',
+      'event': 'rhttp_fallback_gateway',
+      'message':
+          'rhttp 直连失败（疑似 ECH 钥匙过期），'
+          '${_rhttpDegradeDuration.inMinutes} 分钟内改走网关',
+      'host': uri.host,
+      'path': uri.path,
+      'reason': reason.length > 300 ? reason.substring(0, 300) : reason,
+      'errorType': error.runtimeType.toString(),
+    });
+  }
+
+  /// 网关模式下把 https 请求改写成指向本地网关的明文 http 再发；其余原样发
+  Future<ResponseBody> _fetchViaGateway(
+    RequestOptions options,
+    Stream<Uint8List>? requestStream,
+    Future<void>? cancelFuture,
+  ) async {
+    final settings = NetworkSettingsService.instance;
+    if (settings.isGatewayMode) {
       final port = settings.current.proxyPort;
       final uri = options.uri;
       if (port != null && uri.scheme == 'https') {

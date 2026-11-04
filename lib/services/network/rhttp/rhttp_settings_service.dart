@@ -19,6 +19,8 @@ class RhttpSettings {
     this.enabled = false,
     this.mode = RhttpMode.always,
     this.forceDisabled = false,
+    this.degradedUntil,
+    this.degradeReason,
   });
 
   final bool enabled;
@@ -29,15 +31,36 @@ class RhttpSettings {
   /// 下次启动自动恢复为 false 并重新尝试初始化
   final bool forceDisabled;
 
+  /// 临时回退：rhttp 直连连不上（典型是 ECH 钥匙过期）时，到这个时刻之前都改走网关；
+  /// 不持久化，过期后自动再试 rhttp
+  final DateTime? degradedUntil;
+
+  /// 最近一次回退的原因（只用于设置页展示和日志）
+  final String? degradeReason;
+
+  bool get isDegraded {
+    final until = degradedUntil;
+    return until != null && until.isAfter(DateTime.now());
+  }
+
   RhttpSettings copyWith({
     bool? enabled,
     RhttpMode? mode,
     bool? forceDisabled,
+    DateTime? degradedUntil,
+    bool clearDegraded = false,
+    String? degradeReason,
   }) {
     return RhttpSettings(
       enabled: enabled ?? this.enabled,
       mode: mode ?? this.mode,
       forceDisabled: forceDisabled ?? this.forceDisabled,
+      degradedUntil: clearDegraded
+          ? null
+          : (degradedUntil ?? this.degradedUntil),
+      degradeReason: clearDegraded
+          ? null
+          : (degradeReason ?? this.degradeReason),
     );
   }
 }
@@ -99,10 +122,33 @@ class RhttpSettingsService {
     debugPrint('[rhttp] 已强制禁用（初始化失败）');
   }
 
+  /// rhttp 直连连不上时临时改走网关 [duration]，到点自动再试 rhttp。
+  /// 已在回退期内时只延长到新的截止时刻，不重复通知
+  void degradeTemporarily(Duration duration, {required String reason}) {
+    final until = DateTime.now().add(duration);
+    final wasDegraded = current.isDegraded;
+    notifier.value = current.copyWith(
+      degradedUntil: until,
+      degradeReason: reason,
+    );
+    if (!wasDegraded) {
+      _touch();
+      debugPrint('[rhttp] 临时回退网关 ${duration.inMinutes} 分钟: $reason');
+    }
+  }
+
+  /// 手动结束临时回退（设置页「重试 rhttp」）
+  void clearDegrade() {
+    if (current.degradedUntil == null) return;
+    notifier.value = current.copyWith(clearDegraded: true);
+    _touch();
+  }
+
   /// 综合判断当前是否应该使用 rhttp
   bool shouldUseRhttp(NetworkSettings ns, ProxySettings ps) {
     if (!current.enabled) return false;
     if (current.forceDisabled) return false;
+    if (current.isDegraded) return false;
     // rhttp fork 已支持 ECH（通过 TlsSettings.echConfigList），不再排除
     // proxyOnly 模式：仅代理/DOH 启用时使用
     if (current.mode == RhttpMode.proxyOnly) {

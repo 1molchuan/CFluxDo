@@ -79,5 +79,6 @@
   "debugTools_noLogsHint": "啟用 DOH 併發起請求後會產生日誌",
   "debugTools_noLogsToShare": "暫無日誌可分享",
   "debugTools_shareLogs": "分享日誌",
-  "debugTools_viewLogs": "檢視日誌"
+  "debugTools_viewLogs": "檢視日誌",
+  "appLogs_failureReason": "失敗原因"
 }

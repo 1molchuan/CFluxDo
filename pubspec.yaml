@@ -149,9 +149,11 @@ dependencies:
   volume_controller: ^3.6.0 # 播放器竖滑手势调系统音量
   screen_brightness: ^2.1.11 # 播放器竖滑手势调 app 亮度
   just_audio: ^0.10.6 # 原生上传音频播放(FluxdoRender audioBuilder)
+  # fork：rustls 0.23.46 + 识别 ECH 被拒并带回 retry_configs（上游 02eb411 基础上）
   rhttp:
     git:
-      url: https://github.com/Lingyan000/rhttp_plus.git
+      url: https://github.com/1molchuan/rhttp_plus.git
+      ref: c8689e4879641315ab40af2ef1369b3e4cc5ac31
       path: rhttp
   ffi: any
   # 性能诊断:掉帧时 app 内连接自身 VM Service 抓取当帧 timeline,
