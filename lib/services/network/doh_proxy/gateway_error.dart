@@ -15,12 +15,27 @@ abstract final class GatewayError {
   static bool isUpstreamFailure(Object? error) =>
       error is DioException && isGatewayResponse(error.response);
 
-  /// 网关错误的正文（截断到 300 字）；不是网关错误返回 null
+  /// 网关错误的原因（截断到 300 字）；不是网关错误返回 null。
+  /// 优先用头里带的原因（流式响应在拦截器里读不到正文，正文只是个 ResponseBody），
+  /// 老版本网关头值只是 "1"，再退回正文
   static String? textOf(Response<dynamic>? response) {
     if (!isGatewayResponse(response)) return null;
-    final data = response!.data;
-    final text = data is String ? data : data?.toString();
+    final headerText = response!.headers.value(header)?.trim();
+    if (headerText != null && headerText.isNotEmpty && headerText != '1') {
+      return _clip(headerText);
+    }
+    final data = response.data;
+    final text = switch (data) {
+      String s => s,
+      List<int> bytes => String.fromCharCodes(bytes),
+      ResponseBody() => null,
+      null => null,
+      _ => data.toString(),
+    };
     if (text == null || text.isEmpty) return 'gateway error';
-    return text.length > 300 ? text.substring(0, 300) : text;
+    return _clip(text);
   }
+
+  static String _clip(String text) =>
+      text.length > 300 ? text.substring(0, 300) : text;
 }

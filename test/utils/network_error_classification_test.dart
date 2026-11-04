@@ -112,6 +112,41 @@ void main() {
       expect(describeStartupFailure(error), S.current.preheat_detailHttp(502));
     });
 
+    testWidgets('流式响应的正文读不到时用头里的原因，老网关头值 "1" 时只报 gateway error', (
+      tester,
+    ) async {
+      await _pumpApp(tester);
+      final streamed = DioException(
+        requestOptions: _options,
+        type: DioExceptionType.badResponse,
+        response: Response<dynamic>(
+          requestOptions: _options,
+          statusCode: 502,
+          data: ResponseBody.fromString('Connect failed', 502),
+          headers: Headers.fromMap({
+            GatewayError.header: ['Connect failed: Connection refused'],
+          }),
+        ),
+      );
+      expect(
+        GatewayError.textOf(streamed.response),
+        'Connect failed: Connection refused',
+      );
+      final legacy = DioException(
+        requestOptions: _options,
+        type: DioExceptionType.badResponse,
+        response: Response<dynamic>(
+          requestOptions: _options,
+          statusCode: 502,
+          data: ResponseBody.fromString('Connect failed', 502),
+          headers: Headers.fromMap({
+            GatewayError.header: ['1'],
+          }),
+        ),
+      );
+      expect(GatewayError.textOf(legacy.response), 'gateway error');
+    });
+
     testWidgets('网关错误正文过长时截断', (tester) async {
       await _pumpApp(tester);
       final error = _bad(502, gateway: true, data: 'x' * 1000);
