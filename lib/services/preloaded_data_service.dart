@@ -1,3 +1,4 @@
+import '../utils/avatar_url.dart';
 import 'dart:convert';
 import 'dart:async';
 
@@ -577,6 +578,7 @@ function __fluxdoCapturePreloaded() {
     _loaded = false;
     _currentUser = null;
     _siteSettings = null;
+    AvatarUrl.configure(_siteSettings?['avatar_sizes']);
     _site = null;
     _topicListData = null;
     _cachedTopicListResponse = null;
@@ -607,6 +609,7 @@ function __fluxdoCapturePreloaded() {
   }) {
     _currentUser = currentUser;
     _siteSettings = siteSettings;
+    AvatarUrl.configure(_siteSettings?['avatar_sizes']);
   }
 
   void reset() {
@@ -883,6 +886,7 @@ function __fluxdoCapturePreloaded() {
       // 解析 siteSettings
       if (preloaded.containsKey('siteSettings')) {
         _siteSettings = preloaded['siteSettings'] as Map<String, dynamic>;
+        AvatarUrl.configure(_siteSettings?['avatar_sizes']);
 
         // 提取 reactions 配置
         final reactionsStr =
