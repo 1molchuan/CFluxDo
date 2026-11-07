@@ -34,6 +34,7 @@ class DohProxyService {
   String? _currentDohBootstrapSignature;
   String? _currentDohAuthSignature;
   bool? _currentPreferIPv6;
+  bool? _currentIpv6Auto;
   int? _currentPreferredPort;
   String? _currentServerIp;
   bool? _currentMitmConnect;
@@ -68,6 +69,7 @@ class DohProxyService {
     int preferredPort = 0,
     bool enableDoh = true,
     bool preferIPv6 = false,
+    bool ipv6Auto = false,
     bool gatewayMode = false,
     String? dohServer,
     String? dohServerEch,
@@ -123,6 +125,7 @@ class DohProxyService {
           _currentDohBootstrapSignature == bootstrapSignature &&
           _currentDohAuthSignature == authSignature &&
           _currentPreferIPv6 == preferIPv6 &&
+          _currentIpv6Auto == ipv6Auto &&
           _currentPreferredPort == preferredPort &&
           _currentServerIp == serverIp &&
           _currentMitmConnect == mitmConnect &&
@@ -181,6 +184,7 @@ class DohProxyService {
         appVersion: appVersion,
         networkSig: networkSig,
         preconnectHosts: preconnectHosts,
+        ipv6Auto: ipv6Auto,
       );
       // 桌面平台 FFI 加载失败时，回退到进程模式
       if (!result && DohProxyFfi.canFallbackToProcess) {
@@ -208,6 +212,7 @@ class DohProxyService {
           h2Mitm,
           dohRoutesUrl,
           selectMode: selectMode,
+          ipv6Auto: ipv6Auto,
         );
       }
       return result;
@@ -234,6 +239,7 @@ class DohProxyService {
         h2Mitm,
         dohRoutesUrl,
         selectMode: selectMode,
+        ipv6Auto: ipv6Auto,
       );
     }
   }
@@ -275,6 +281,7 @@ class DohProxyService {
     String? appVersion,
     String? networkSig,
     List<String> preconnectHosts = const [],
+    bool ipv6Auto = false,
   }) async {
     try {
       return await _enqueueFfiOp(() async {
@@ -320,6 +327,7 @@ class DohProxyService {
           appVersion: appVersion,
           networkSig: networkSig,
           preconnectHosts: preconnectHosts,
+          ipv6Auto: ipv6Auto,
         );
         if (resultPort <= 0) {
           // _callFfiStart 已设置更详细的 _lastError，仅在未设置时补充
@@ -343,6 +351,7 @@ class DohProxyService {
           dohEchAuthToken,
         );
         _currentPreferIPv6 = preferIPv6;
+        _currentIpv6Auto = ipv6Auto;
         _currentPreferredPort = port;
         _currentServerIp = serverIp;
         _currentMitmConnect = mitmConnect;
@@ -391,6 +400,7 @@ class DohProxyService {
     String? dohRoutesUrl, {
     // 进程模式不做本地优选，只记下模式让 sameConfig 比较稳定
     String selectMode = 'off',
+    bool ipv6Auto = false,
   }) async {
     try {
       final executablePath = await _getExecutablePath();
@@ -507,6 +517,7 @@ class DohProxyService {
             dohEchAuthToken,
           );
           _currentPreferIPv6 = preferIPv6;
+          _currentIpv6Auto = ipv6Auto;
           _currentPreferredPort = preferredPort;
           _currentServerIp = serverIp;
           _currentMitmConnect = mitmConnect;
@@ -623,6 +634,7 @@ class DohProxyService {
     _currentDohBootstrapSignature = null;
     _currentDohAuthSignature = null;
     _currentPreferIPv6 = null;
+    _currentIpv6Auto = null;
     _currentPreferredPort = null;
     _currentServerIp = null;
     _currentMitmConnect = null;
@@ -1227,6 +1239,7 @@ class DohProxyService {
     String? appVersion,
     String? networkSig,
     List<String> preconnectHosts = const [],
+    bool ipv6Auto = false,
   }) async {
     final sendPort = await _ensureFfiIsolate();
     final response = ReceivePort();
@@ -1237,6 +1250,7 @@ class DohProxyService {
       'gatewayMode': gatewayMode,
       'h2Mitm': h2Mitm,
       'preferIpv6': preferIpv6,
+      'ipv6Auto': ipv6Auto,
       'dohServer': dohServer,
       'dohServerEch': dohServerEch,
       'dohBootstrapIps': dohBootstrapIps,
@@ -1594,6 +1608,7 @@ void _ffiIsolateEntry(SendPort mainSendPort) {
           final gatewayMode = message['gatewayMode'] as bool? ?? false;
           final h2Mitm = message['h2Mitm'] as bool? ?? false;
           final preferIpv6 = message['preferIpv6'] as bool? ?? false;
+          final ipv6Auto = message['ipv6Auto'] as bool? ?? false;
           final dohServer = message['dohServer'] as String?;
           final dohServerEch = message['dohServerEch'] as String?;
           final dohBootstrapIps = _stringList(message['dohBootstrapIps']);
@@ -1630,6 +1645,7 @@ void _ffiIsolateEntry(SendPort mainSendPort) {
             enableDoh: enableDoh,
             gatewayMode: gatewayMode,
             preferIpv6: preferIpv6,
+            ipv6Auto: ipv6Auto,
             dohServer: dohServer,
             dohServerEch: dohServerEch,
             dohBootstrapIps: dohBootstrapIps,
@@ -1668,6 +1684,7 @@ void _ffiIsolateEntry(SendPort mainSendPort) {
               enableDoh: enableDoh,
               gatewayMode: gatewayMode,
               preferIpv6: preferIpv6,
+              ipv6Auto: ipv6Auto,
               dohServer: dohServer,
               dohServerEch: dohServerEch,
               dohBootstrapIps: dohBootstrapIps,

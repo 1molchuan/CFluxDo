@@ -195,7 +195,7 @@ class LoggerUtils {
     if (doh.dohEnabled) {
       final serverName = _findDohServerName(doh.selectedServerUrl);
       final parts = <String>[serverName];
-      if (doh.preferIPv6) parts.add('IPv6');
+      parts.add('IP ${doh.ipv6Mode.wire}');
       lines.add('DOH: ${parts.join(', ')}');
     } else {
       lines.add(S.current.deviceInfo_dohOff);
@@ -210,6 +210,18 @@ class LoggerUtils {
       '${select?.latencyMs ?? '-'}ms '
       '上报:${doh.shareMeasurements ? 'on' : 'off'}',
     );
+    // 地址族：本机有没有 IPv4 / IPv6 出站路由、连接层当前亲和、这个网络上的 IPv6 竞速结论
+    final family = select?.family;
+    if (family != null) {
+      final check = family['check'];
+      lines.add(
+        '地址族: ${family['pref']} '
+        '本机 v4:${family['local_v4'] == true ? 'y' : 'n'} '
+        'v6:${family['local_v6'] == true ? 'y' : 'n'} '
+        '亲和:${family['affinity'] ?? '-'}'
+        '${check is Map ? ' IPv6 ${check['v6_ok'] == true ? '通' : '不通'}' : ''}',
+      );
+    }
     // 各公共 DoH 端点的答案计数（通过/投毒/空），只列有过答案的
     final publicDoh = select?.activePublicDoh ?? const [];
     if (publicDoh.isNotEmpty) {
@@ -265,7 +277,7 @@ class LoggerUtils {
     map['dohEnabled'] = doh.dohEnabled;
     if (doh.dohEnabled) {
       map['dohServer'] = doh.selectedServerUrl;
-      map['preferIPv6'] = doh.preferIPv6;
+      map['ipv6Mode'] = doh.ipv6Mode.wire;
     }
 
     // 本地优选
@@ -274,6 +286,7 @@ class LoggerUtils {
     map['cfSelectPhase'] = select?.phase ?? 'idle';
     map['cfSelectWinner'] = select?.winnerIp;
     map['cfSelectLatencyMs'] = select?.latencyMs;
+    map['cfSelectFamily'] = select?.family;
     map['cfSelectShare'] = doh.shareMeasurements;
     final publicDoh = select?.activePublicDoh ?? const [];
     if (publicDoh.isNotEmpty) {

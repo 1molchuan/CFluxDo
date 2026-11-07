@@ -56,6 +56,31 @@ enum CfSelectMode {
   }
 }
 
+/// 连接时偏好的地址族（「IP 协议」设置）
+enum Ipv6Mode {
+  /// 自动（默认）：本机有 IPv6 时优先用 IPv6，IPv6 不通或明显更慢时用 IPv4。
+  /// 双栈网络的 IPv4 出口多是运营商共享地址，CF 风险分高、弹盾多；IPv6 多为独享地址
+  auto('auto'),
+
+  /// IPv6 优先：有能用的 IPv6 就用，不论快慢
+  preferV6('v6'),
+
+  /// IPv4 优先（1.2.2 之前的默认）
+  preferV4('v4');
+
+  const Ipv6Mode(this.wire);
+
+  /// 存进 prefs 的字符串形式
+  final String wire;
+
+  static Ipv6Mode? fromWire(String? value) {
+    for (final mode in values) {
+      if (mode.wire == value) return mode;
+    }
+    return null;
+  }
+}
+
 class NetworkSettings {
   const NetworkSettings({
     required this.dohEnabled,
@@ -63,7 +88,7 @@ class NetworkSettings {
     this.echServerUrl,
     required this.customServers,
     required this.proxyPort,
-    this.preferIPv6 = false,
+    this.ipv6Mode = Ipv6Mode.auto,
     this.serverIp,
     this.gatewayEnabled = true,
     this.h2Mitm = false,
@@ -83,8 +108,14 @@ class NetworkSettings {
   /// 代理端口（Rust 代理统一处理 DOH + ECH）
   final int? proxyPort;
 
-  /// 优先使用 IPv6
-  final bool preferIPv6;
+  /// 连接时偏好的地址族
+  final Ipv6Mode ipv6Mode;
+
+  /// IPv6 优先（传给 Rust 的 prefer_ipv6：解析结果、兜底地址都先排 IPv6）
+  bool get preferIPv6 => ipv6Mode == Ipv6Mode.preferV6;
+
+  /// 自动：由 Rust 本地优选按本机网络决定用哪一族
+  bool get ipv6Auto => ipv6Mode == Ipv6Mode.auto;
 
   /// 全局 server IP（指定后跳过 DNS 解析直接连接）
   final String? serverIp;
@@ -107,7 +138,7 @@ class NetworkSettings {
     String? Function()? echServerUrl,
     List<DohServer>? customServers,
     int? Function()? proxyPort,
-    bool? preferIPv6,
+    Ipv6Mode? ipv6Mode,
     String? Function()? serverIp,
     bool? gatewayEnabled,
     bool? h2Mitm,
@@ -120,7 +151,7 @@ class NetworkSettings {
       echServerUrl: echServerUrl != null ? echServerUrl() : this.echServerUrl,
       customServers: customServers ?? this.customServers,
       proxyPort: proxyPort != null ? proxyPort() : this.proxyPort,
-      preferIPv6: preferIPv6 ?? this.preferIPv6,
+      ipv6Mode: ipv6Mode ?? this.ipv6Mode,
       gatewayEnabled: gatewayEnabled ?? this.gatewayEnabled,
       serverIp: serverIp != null ? serverIp() : this.serverIp,
       h2Mitm: h2Mitm ?? this.h2Mitm,
@@ -247,7 +278,9 @@ class NetworkSettingsService {
   static const _dohSelectedKey = 'doh_selected';
   static const _dohCustomKey = 'doh_custom';
   static const _proxyPortKey = 'doh_proxy_port';
+  /// 老版本的「IPv6 优先」开关（bool），只用来迁移到 [_ipv6ModeKey]
   static const _preferIPv6Key = 'doh_prefer_ipv6';
+  static const _ipv6ModeKey = 'doh_ipv6_mode';
   static const _serverIpKey = 'doh_server_ip';
   static const _echServerKey = 'doh_ech_server';
   static const _gatewayEnabledKey = 'doh_gateway_enabled';
@@ -505,7 +538,7 @@ class NetworkSettingsService {
     final custom = _decodeServers(customRaw);
     final proxyPort = prefs.getInt(_proxyPortKey);
     await prefs.remove('doh_multi_ip');
-    final preferIPv6 = prefs.getBool(_preferIPv6Key) ?? false;
+    final ipv6Mode = _loadIpv6Mode(prefs);
     final serverIp = prefs.getString(_serverIpKey);
     final echServer = prefs.getString(_echServerKey);
     final gatewayEnabled = prefs.getBool(_gatewayEnabledKey) ?? true;
@@ -517,7 +550,7 @@ class NetworkSettingsService {
       echServerUrl: echServer,
       customServers: custom,
       proxyPort: proxyPort,
-      preferIPv6: preferIPv6,
+      ipv6Mode: ipv6Mode,
       serverIp: serverIp,
       gatewayEnabled: gatewayEnabled,
       h2Mitm: h2Mitm,
@@ -528,7 +561,7 @@ class NetworkSettingsService {
     _resolver = DohResolver(
       serverUrl: activeUrl,
       bootstrapIps: _getBootstrapIps(activeUrl),
-      preferIPv6: preferIPv6,
+      preferIPv6: ipv6Mode == Ipv6Mode.preferV6,
       authToken: _authTokenFor(activeUrl),
       onAuthRejected: _handleAccelAuthRejected,
       // 有 Rust 库的平台统一走 Rust 的 DoH 客户端，Dart 侧不再自己握手
@@ -658,15 +691,31 @@ class NetworkSettingsService {
     _touch();
   }
 
-  Future<void> setPreferIPv6(bool enabled) async {
+  Future<void> setIpv6Mode(Ipv6Mode mode) async {
     final prefs = _prefs;
-    if (prefs == null) return;
-    notifier.value = notifier.value.copyWith(preferIPv6: enabled);
-    _resolver.preferIPv6 = enabled;
+    if (prefs == null || mode == current.ipv6Mode) return;
+    notifier.value = notifier.value.copyWith(ipv6Mode: mode);
+    _resolver.preferIPv6 = mode == Ipv6Mode.preferV6;
     _clearResolvedHostCache();
-    await prefs.setBool(_preferIPv6Key, enabled);
+    await prefs.setString(_ipv6ModeKey, mode.wire);
+    await prefs.remove(_preferIPv6Key);
     _scheduleApplyProxyState();
     _touch();
+  }
+
+  /// 读「IP 协议」设置。老版本只有「IPv6 优先」开关：开过 → IPv6 优先；明确关掉过 →
+  /// 尊重当时的选择，IPv4 优先；从没碰过 → 自动（新默认）
+  @visibleForTesting
+  static Ipv6Mode loadIpv6Mode(SharedPreferences prefs) => _loadIpv6Mode(prefs);
+
+  static Ipv6Mode _loadIpv6Mode(SharedPreferences prefs) {
+    final stored = Ipv6Mode.fromWire(prefs.getString(_ipv6ModeKey));
+    if (stored != null) return stored;
+    return switch (prefs.getBool(_preferIPv6Key)) {
+      true => Ipv6Mode.preferV6,
+      false => Ipv6Mode.preferV4,
+      null => Ipv6Mode.auto,
+    };
   }
 
   Future<void> setServerIp(String? ip) async {
@@ -940,6 +989,7 @@ class NetworkSettingsService {
         enableDoh: current.dohEnabled,
         gatewayMode: useGateway,
         preferIPv6: current.preferIPv6,
+        ipv6Auto: current.ipv6Auto,
         dohServer: current.dohEnabled ? dohServer : null,
         dohServerEch: current.dohEnabled ? dohServerEch : null,
         dohBootstrapIps: current.dohEnabled
@@ -1895,7 +1945,7 @@ class NetworkSettingsService {
   }
 
   String? get _currentResolvedHostCacheSignature => current.dohEnabled
-      ? '$_activeServerUrl|${_effectiveEchServerUrl ?? ""}|${current.preferIPv6 ? "v6" : "v4"}'
+      ? '$_activeServerUrl|${_effectiveEchServerUrl ?? ""}|${current.ipv6Mode.wire}'
       : null;
 
   List<String> _collectCommonHosts() {

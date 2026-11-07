@@ -16,7 +16,7 @@ import '../../widgets/common/app_bottom_sheet.dart';
 import 'package:common_ui/common_ui.dart';
 import 'package:m3e_ui/m3e_ui.dart';
 
-/// DOH 详细设置页面（服务器列表、IPv6、服务端 IP、ECH）
+/// DOH 详细设置页面（服务器列表、服务端 IP、ECH）
 class DohDetailSettingsPage extends StatefulWidget {
   const DohDetailSettingsPage({super.key});
 
@@ -54,7 +54,7 @@ class _DohDetailSettingsPageState extends State<DohDetailSettingsPage> {
           body: ListView(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             children: [
-              // IPv6 开关
+              // 网关 / h2 MITM / 服务端 IP（IP 协议在「连接方式」卡片里）
               SegmentedCardGroup(
                 children: [
                   SwitchListTile(
@@ -78,13 +78,6 @@ class _DohDetailSettingsPageState extends State<DohDetailSettingsPage> {
                     secondary: const Icon(Symbols.bolt_rounded),
                     value: settings.h2Mitm,
                     onChanged: (value) => _service.setH2Mitm(value),
-                  ),
-                  SwitchListTile(
-                    title: Text(context.l10n.dohDetail_ipv6Prefer),
-                    subtitle: Text(context.l10n.dohDetail_ipv6PreferDesc),
-                    secondary: const Icon(Symbols.language_rounded),
-                    value: settings.preferIPv6,
-                    onChanged: (value) => _service.setPreferIPv6(value),
                   ),
                   // Server IP
                   ListTile(

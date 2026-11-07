@@ -110,8 +110,6 @@
   "dohDetail_h2MitmDisabledDesc": "Disabled, WebView locked to HTTP/1.1 via proxy",
   "dohDetail_h2MitmEnabledDesc": "Enabled, WebView uses h2 multiplexing via proxy (test CF first)",
   "dohDetail_ipAddress": "IP Address",
-  "dohDetail_ipv6Prefer": "Prefer IPv6",
-  "dohDetail_ipv6PreferDesc": "Try IPv6 first, fallback to IPv4 on failure",
   "dohDetail_localDnsCache": "Shared Local DNS Cache",
   "dohDetail_noServers": "No servers",
   "dohDetail_noDnsRecords": "No DNS cache records",
@@ -230,5 +228,12 @@
   "dohDetail_domainHelper": "Enter a domain without a scheme, path, or wildcard. Subdomains are included.",
   "dohDetail_invalidDomain": "Enter a valid domain without a scheme, port, path, or wildcard",
   "dohDetail_domainAlreadyCovered": "This domain is already covered by an existing rule",
-  "@dohDetail_echDomainsCount": {"placeholders": {"builtinCount": {"type": "int"}, "customCount": {"type": "int"}}}
+  "@dohDetail_echDomainsCount": {"placeholders": {"builtinCount": {"type": "int"}, "customCount": {"type": "int"}}},
+  "cfSelect_ipFamily": "IP protocol",
+  "cfSelect_ipFamilyAuto": "Auto",
+  "cfSelect_ipFamilyV6": "Prefer IPv6",
+  "cfSelect_ipFamilyV4": "Prefer IPv4",
+  "cfSelect_ipFamilyAutoDesc": "Use IPv6 when this network has it: shared carrier IPv4 exits get challenged far more often. Falls back to IPv4 when IPv6 fails or is much slower. A changed exit may need one more verification",
+  "cfSelect_ipFamilyV6Desc": "Use IPv6 whenever it works, regardless of speed",
+  "cfSelect_ipFamilyV4Desc": "Use IPv4 whenever it works (the default before 1.2.2). Pick this if IPv6 is flaky on your network"
 }

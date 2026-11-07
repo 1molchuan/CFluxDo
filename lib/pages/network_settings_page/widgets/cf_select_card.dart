@@ -109,6 +109,12 @@ class _CfSelectCardState extends State<CfSelectCard> {
                 child: _buildModeSelector(theme, settings.selectMode),
               ),
               _divider(theme),
+              // IP 协议（挑赢家时偏好的地址族）
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+                child: _buildFamilySelector(theme, settings.ipv6Mode),
+              ),
+              _divider(theme),
               // 当前状态
               _buildStatusRow(theme, service, settings, status),
               // 操作行
@@ -170,6 +176,67 @@ class _CfSelectCardState extends State<CfSelectCard> {
           switch (mode) {
             CfSelectMode.localAtlas => l10n.cfSelect_modeLocalAtlasDesc,
             CfSelectMode.atlasOnly => l10n.cfSelect_modeAtlasOnlyDesc,
+          },
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ---- IP 协议 ----
+
+  Widget _buildFamilySelector(ThemeData theme, Ipv6Mode mode) {
+    final l10n = context.l10n;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(
+              Symbols.language_rounded,
+              size: 18,
+              color: theme.colorScheme.primary,
+            ),
+            const SizedBox(width: 8),
+            Text(
+              l10n.cfSelect_ipFamily,
+              style: theme.textTheme.titleSmall?.copyWith(
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        SizedBox(
+          width: double.infinity,
+          child: M3eButtonGroup<Ipv6Mode>(
+            items: [
+              M3eButtonGroupItem(
+                value: Ipv6Mode.auto,
+                label: Text(l10n.cfSelect_ipFamilyAuto),
+              ),
+              M3eButtonGroupItem(
+                value: Ipv6Mode.preferV6,
+                label: Text(l10n.cfSelect_ipFamilyV6),
+              ),
+              M3eButtonGroupItem(
+                value: Ipv6Mode.preferV4,
+                label: Text(l10n.cfSelect_ipFamilyV4),
+              ),
+            ],
+            selected: mode,
+            onSelected: (value) =>
+                unawaited(NetworkSettingsService.instance.setIpv6Mode(value)),
+          ),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          switch (mode) {
+            Ipv6Mode.auto => l10n.cfSelect_ipFamilyAutoDesc,
+            Ipv6Mode.preferV6 => l10n.cfSelect_ipFamilyV6Desc,
+            Ipv6Mode.preferV4 => l10n.cfSelect_ipFamilyV4Desc,
           },
           style: theme.textTheme.bodySmall?.copyWith(
             color: theme.colorScheme.onSurfaceVariant,

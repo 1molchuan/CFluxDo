@@ -110,8 +110,6 @@
   "dohDetail_h2MitmDisabledDesc": "已關閉，WebView 經代理鎖 HTTP/1.1",
   "dohDetail_h2MitmEnabledDesc": "已開啟，WebView 經代理走 h2 多路複用（需實測 CF）",
   "dohDetail_ipAddress": "IP 地址",
-  "dohDetail_ipv6Prefer": "IPv6 優先",
-  "dohDetail_ipv6PreferDesc": "優先嚐試 IPv6，失敗自動回落 IPv4",
   "dohDetail_localDnsCache": "共享本地 DNS 快取",
   "dohDetail_noServers": "暫無伺服器",
   "dohDetail_noDnsRecords": "暫無 DNS 快取記錄",
@@ -237,5 +235,12 @@
   "dohDetail_domainHelper": "僅輸入網域，不含通訊協定、路徑或萬用字元；儲存後同時比對子網域。",
   "dohDetail_invalidDomain": "請輸入有效網域，不含通訊協定、連接埠、路徑或萬用字元",
   "dohDetail_domainAlreadyCovered": "此網域已由現有規則涵蓋",
-  "@dohDetail_echDomainsCount": {"placeholders": {"builtinCount": {"type": "int"}, "customCount": {"type": "int"}}}
+  "@dohDetail_echDomainsCount": {"placeholders": {"builtinCount": {"type": "int"}, "customCount": {"type": "int"}}},
+  "cfSelect_ipFamily": "IP 協定",
+  "cfSelect_ipFamilyAuto": "自動",
+  "cfSelect_ipFamilyV6": "IPv6 優先",
+  "cfSelect_ipFamilyV4": "IPv4 優先",
+  "cfSelect_ipFamilyAutoDesc": "本機有 IPv6 時優先用 IPv6：家用寬頻和行動網路的 IPv4 出口多是電信商共用位址，更容易跳驗證；IPv6 不通或明顯更慢時自動用 IPv4。出口換了可能要重新驗證一次",
+  "cfSelect_ipFamilyV6Desc": "有能用的 IPv6 就用 IPv6，不論快慢",
+  "cfSelect_ipFamilyV4Desc": "有能用的 IPv4 就用 IPv4（1.2.2 之前的預設）。IPv6 不穩定的網路選這個"
 }

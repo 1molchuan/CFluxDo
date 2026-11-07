@@ -110,8 +110,6 @@
   "dohDetail_h2MitmDisabledDesc": "已关闭，WebView 经代理锁 HTTP/1.1",
   "dohDetail_h2MitmEnabledDesc": "已开启，WebView 经代理走 h2 多路复用（需实测 CF）",
   "dohDetail_ipAddress": "IP 地址",
-  "dohDetail_ipv6Prefer": "IPv6 优先",
-  "dohDetail_ipv6PreferDesc": "优先尝试 IPv6，失败自动回落 IPv4",
   "dohDetail_localDnsCache": "共享本地 DNS 缓存",
   "dohDetail_noServers": "暂无服务器",
   "dohDetail_noDnsRecords": "暂无 DNS 缓存记录",
@@ -237,5 +235,12 @@
   "dohDetail_domainHelper": "仅输入域名，不含协议、路径或通配符；保存后同时匹配子域名。",
   "dohDetail_invalidDomain": "请输入有效域名，不含协议、端口、路径或通配符",
   "dohDetail_domainAlreadyCovered": "该域名已被现有规则覆盖",
-  "@dohDetail_echDomainsCount": {"placeholders": {"builtinCount": {"type": "int"}, "customCount": {"type": "int"}}}
+  "@dohDetail_echDomainsCount": {"placeholders": {"builtinCount": {"type": "int"}, "customCount": {"type": "int"}}},
+  "cfSelect_ipFamily": "IP 协议",
+  "cfSelect_ipFamilyAuto": "自动",
+  "cfSelect_ipFamilyV6": "IPv6 优先",
+  "cfSelect_ipFamilyV4": "IPv4 优先",
+  "cfSelect_ipFamilyAutoDesc": "本机有 IPv6 时优先用 IPv6：家宽和流量的 IPv4 出口多是运营商共享地址，更容易弹验证；IPv6 不通或明显更慢时自动用 IPv4。出口换了可能要重新验证一次",
+  "cfSelect_ipFamilyV6Desc": "有能用的 IPv6 就用 IPv6，不论快慢",
+  "cfSelect_ipFamilyV4Desc": "有能用的 IPv4 就用 IPv4（1.2.2 之前的默认）。IPv6 不稳定的网络选这个"
 }
