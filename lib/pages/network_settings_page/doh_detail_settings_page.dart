@@ -16,7 +16,7 @@ import '../../widgets/common/app_bottom_sheet.dart';
 import 'package:common_ui/common_ui.dart';
 import 'package:m3e_ui/m3e_ui.dart';
 
-/// DOH 详细设置页面（服务器列表、服务端 IP、ECH）
+/// DNS 与网关细节页面（网关模式、内置网页 HTTP/2、服务端 IP、DoH 服务器列表、ECH、DNS 缓存）
 class DohDetailSettingsPage extends StatefulWidget {
   const DohDetailSettingsPage({super.key});
 
@@ -326,11 +326,11 @@ class _DohDetailSettingsPageState extends State<DohDetailSettingsPage> {
                 ),
               ),
               if (canAuthorizeAccel)
-                const PopupMenuItem(
+                PopupMenuItem(
                   value: 'accel_connect',
                   child: ListTile(
-                    leading: Icon(Symbols.verified_user_rounded, size: 20),
-                    title: Text('用 L 站 Connect 授权'),
+                    leading: const Icon(Symbols.verified_user_rounded, size: 20),
+                    title: Text(S.current.dohDetail_accelConnect),
                     dense: true,
                     contentPadding: EdgeInsets.zero,
                   ),
@@ -376,14 +376,14 @@ class _DohDetailSettingsPageState extends State<DohDetailSettingsPage> {
     final status = await AccelDohAuthService.instance.authorizeNow();
     switch (status) {
       case AccelDohAuthStatus.ready:
-        ToastService.showSuccess('授权成功，已切换到 CFluxDo 加速');
+        ToastService.showSuccess(S.current.dohDetail_accelAuthOk);
       case AccelDohAuthStatus.unavailable:
-        ToastService.showError('此账号无法使用 Connect，继续使用公共加速');
+        ToastService.showError(S.current.dohDetail_accelAuthUnavailable);
       case AccelDohAuthStatus.denied:
-        ToastService.showError('加速服务端拒绝了此账号，继续使用公共加速');
+        ToastService.showError(S.current.dohDetail_accelAuthDenied);
       case AccelDohAuthStatus.pending:
       case AccelDohAuthStatus.displaced:
-        ToastService.showError('授权没有完成，稍后会自动重试');
+        ToastService.showError(S.current.dohDetail_accelAuthPending);
       case AccelDohAuthStatus.notAuthorized:
       case AccelDohAuthStatus.notEligible:
         break;

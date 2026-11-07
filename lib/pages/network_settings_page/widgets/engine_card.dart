@@ -5,418 +5,374 @@ import 'package:app_icons/app_icons.dart';
 import 'package:m3e_ui/m3e_ui.dart';
 
 import '../../../l10n/s.dart';
-import '../../../services/network/adapters/platform_adapter.dart';
 import '../../../services/network/doh/network_settings_service.dart';
 import '../../../services/network/doh/webview_mitm_policy.dart';
 import '../../../services/network/proxy/proxy_settings_service.dart';
 import '../../../services/network/rhttp/rhttp_settings_service.dart';
 import '../../../services/network/webview/webview_adapter_settings_service.dart';
+import '../network_advanced_settings_page.dart';
 import 'doh_settings_card.dart' show ensureWindowsCertTrusted;
+import 'ip_family_card.dart' show CardTitleRow;
 
-/// 网络引擎卡片（预设单选 + 自定义展开）
-///
-/// 顶部用预设 chips（标准 / 高性能 / 兼容 / 自定义）单选，常用场景一键切换；
-/// 复杂开关（rhttp 模式、WebView）收进「自定义」展开区。
-/// 「当前生效引擎」压成一行，会话级兼容通道等异常即时可见。
-class EngineCard extends StatefulWidget {
-  const EngineCard({super.key});
+/// 引擎预设。不在三种预设里的组合算「自定义」，在高级设置的「引擎组合」里调
+enum EnginePreset { standard, performance, compat }
 
-  @override
-  State<EngineCard> createState() => _EngineCardState();
+/// 当前开关组合对应哪个预设；对不上任何预设时返回 null（自定义）
+EnginePreset? enginePresetOf({
+  required bool rhttpEnabled,
+  required RhttpMode rhttpMode,
+  required bool webViewEnabled,
+}) {
+  if (!rhttpEnabled && !webViewEnabled) return EnginePreset.standard;
+  if (rhttpEnabled && rhttpMode == RhttpMode.always && !webViewEnabled) {
+    return EnginePreset.performance;
+  }
+  if (!rhttpEnabled && webViewEnabled) return EnginePreset.compat;
+  return null;
 }
 
-enum _EnginePreset { standard, performance, compat, custom }
+/// 打开 WebView 引擎前确认 CA 已就绪（目前各平台都不需要，保留入口）
+Future<bool> _ensureWebViewCanBeEnabled(BuildContext context) async {
+  final requiresCa = WebViewMitmPolicy.requiresTrustedCa(
+    isWindows: Platform.isWindows,
+    dohEnabled: NetworkSettingsService.instance.current.dohEnabled,
+    webViewAdapterEnabled: true,
+  );
+  if (!requiresCa) return true;
+  return ensureWindowsCertTrusted(context);
+}
 
-class _EngineCardState extends State<EngineCard> {
-  bool _customExpanded = false;
+Listenable _engineListenable() {
+  final webview = WebViewAdapterSettingsService.instance;
+  return Listenable.merge([
+    RhttpSettingsService.instance.notifier,
+    NetworkSettingsService.instance.notifier,
+    ProxySettingsService.instance.notifier,
+    webview.notifier,
+    webview.effectiveNotifier,
+    webview.sessionFallbackNotifier,
+  ]);
+}
+
+/// 网络引擎卡片（主页面）：标准 / 高性能 / 兼容 三选一
+///
+/// 只放预设和需要用户知道的异常（临时兼容模式、Rust 引擎暂时回退或初始化失败）；
+/// 逐项开关在高级设置的 [EngineMixCard]。
+class EngineCard extends StatelessWidget {
+  const EngineCard({super.key});
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final l10n = context.l10n;
     final rhttp = RhttpSettingsService.instance;
     final webview = WebViewAdapterSettingsService.instance;
 
     return AnimatedBuilder(
-      animation: Listenable.merge([
-        rhttp.notifier,
-        NetworkSettingsService.instance.notifier,
-        NetworkSettingsService.instance.isApplying,
-        ProxySettingsService.instance.notifier,
-        webview.notifier,
-        webview.effectiveNotifier,
-      ]),
+      animation: _engineListenable(),
       builder: (context, _) {
         final rhttpSettings = rhttp.current;
-        final rhttpEnabled = rhttpSettings.enabled;
-        final webviewEnabled = webview.enabled;
-
-        final autoPreset = _presetOf(
-          rhttpEnabled,
-          rhttpSettings.mode,
-          webviewEnabled,
+        final preset = enginePresetOf(
+          rhttpEnabled: rhttpSettings.enabled,
+          rhttpMode: rhttpSettings.mode,
+          webViewEnabled: webview.enabled,
         );
-        final isCustom = _customExpanded || autoPreset == _EnginePreset.custom;
-        final shownPreset = isCustom ? _EnginePreset.custom : autoPreset;
-
-        return Card(
-          clipBehavior: Clip.antiAlias,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(20),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              // 预设单选
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
-                child: _buildPresetSelector(theme, shownPreset, rhttp, webview),
+        final hints = <Widget>[
+          if (webview.sessionFallbackEnabled)
+            _HintRow(
+              icon: Symbols.call_split_rounded,
+              color: theme.colorScheme.tertiary,
+              text: l10n.engineStatus_sessionCompat,
+              trailing: IconButton(
+                tooltip: l10n.cf_sessionCompatDisable,
+                icon: const Icon(Symbols.close_rounded, size: 18),
+                visualDensity: VisualDensity.compact,
+                onPressed: webview.disableSessionFallback,
               ),
-              _divider(theme),
-              // 当前生效引擎（压一行）
-              _buildCurrentEngineRow(theme),
-              // 自定义展开区
-              AnimatedCrossFade(
-                duration: const Duration(milliseconds: 200),
-                crossFadeState: isCustom
-                    ? CrossFadeState.showSecond
-                    : CrossFadeState.showFirst,
-                firstChild: const SizedBox(width: double.infinity),
-                secondChild: _buildCustomSection(
-                  theme,
-                  rhttp,
-                  rhttpSettings,
-                  webview,
-                  webviewEnabled,
+            ),
+          if (rhttpSettings.enabled && rhttpSettings.forceDisabled)
+            _HintRow(
+              icon: Symbols.error_rounded,
+              color: theme.colorScheme.error,
+              text: l10n.rhttpEngine_initFailedHint,
+            )
+          else if (rhttpSettings.enabled && rhttpSettings.isDegraded)
+            _HintRow(
+              icon: Symbols.warning_rounded,
+              color: Colors.orange,
+              text: l10n.engineStatus_degraded(
+                _minutesLeft(rhttpSettings.degradedUntil),
+              ),
+              trailing: TextButton(
+                style: TextButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                ),
+                onPressed: rhttp.clearDegrade,
+                child: Text(l10n.engineStatus_retryNow),
+              ),
+            ),
+        ];
+
+        // 分段卡片组：经典风格是圆角卡片，墨笺是平铺细线，与页面其余分组一致
+        return SegmentedCardGroup(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  CardTitleRow(
+                    icon: Symbols.speed_rounded,
+                    title: l10n.networkSettings_engine,
+                  ),
+                  const SizedBox(height: 10),
+                  SizedBox(
+                    width: double.infinity,
+                    child: M3eButtonGroup<EnginePreset?>(
+                      itemPadding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 10,
+                      ),
+                      items: [
+                        M3eButtonGroupItem(
+                          value: EnginePreset.standard,
+                          label: Text(l10n.enginePreset_standard),
+                        ),
+                        M3eButtonGroupItem(
+                          value: EnginePreset.performance,
+                          label: Text(l10n.enginePreset_performance),
+                        ),
+                        M3eButtonGroupItem(
+                          value: EnginePreset.compat,
+                          label: Text(l10n.enginePreset_compat),
+                        ),
+                      ],
+                      selected: preset,
+                      onSelected: (value) {
+                        if (value != null) _applyPreset(context, value);
+                      },
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    switch (preset) {
+                      EnginePreset.standard => l10n.enginePreset_standardDesc,
+                      EnginePreset.performance =>
+                        l10n.enginePreset_performanceDesc,
+                      EnginePreset.compat => l10n.enginePreset_compatDesc,
+                      null => l10n.enginePreset_customDesc,
+                    },
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            // 自定义组合：给一个直达高级设置「引擎组合」的入口
+            if (preset == null)
+              ListTile(
+                dense: true,
+                leading: const Icon(Symbols.tune_rounded, size: 20),
+                title: Text(l10n.engineMix_title),
+                trailing: const Icon(Symbols.chevron_right_rounded, size: 20),
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => const NetworkAdvancedSettingsPage(
+                      highlightId: 'engineMix',
+                    ),
+                  ),
                 ),
               ),
-            ],
-          ),
+            if (hints.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 6, 8, 6),
+                child: Column(children: hints),
+              ),
+          ],
         );
       },
     );
   }
 
-  // ---- 预设 ----
-
-  Widget _buildPresetSelector(
-    ThemeData theme,
-    _EnginePreset shown,
-    RhttpSettingsService rhttp,
-    WebViewAdapterSettingsService webview,
-  ) {
-    final l10n = context.l10n;
-    final items = <(_EnginePreset, String)>[
-      (_EnginePreset.standard, l10n.enginePreset_standard),
-      (_EnginePreset.performance, l10n.enginePreset_performance),
-      (_EnginePreset.compat, l10n.enginePreset_compat),
-      (_EnginePreset.custom, l10n.enginePreset_custom),
-    ];
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            for (final item in items)
-              ChoiceChip(
-                label: Text(item.$2),
-                selected: item.$1 == shown,
-                onSelected: (s) async {
-                  if (s) await _applyPreset(item.$1, rhttp, webview);
-                },
-              ),
-          ],
-        ),
-        const SizedBox(height: 6),
-        Text(
-          _presetDesc(shown),
-          style: theme.textTheme.bodySmall?.copyWith(
-            color: theme.colorScheme.onSurfaceVariant,
-          ),
-        ),
-      ],
-    );
+  static int _minutesLeft(DateTime? until) {
+    if (until == null) return 1;
+    final left = until.difference(DateTime.now()).inSeconds;
+    return left <= 60 ? 1 : (left / 60).ceil();
   }
 
-  Future<void> _applyPreset(
-    _EnginePreset preset,
-    RhttpSettingsService rhttp,
-    WebViewAdapterSettingsService webview,
-  ) async {
+  Future<void> _applyPreset(BuildContext context, EnginePreset preset) async {
+    final rhttp = RhttpSettingsService.instance;
+    final webview = WebViewAdapterSettingsService.instance;
     switch (preset) {
-      case _EnginePreset.standard:
-        setState(() => _customExpanded = false);
+      case EnginePreset.standard:
         webview.disableSessionFallback();
         await rhttp.setEnabled(false);
         await webview.setEnabled(false);
-      case _EnginePreset.performance:
-        setState(() => _customExpanded = false);
+      case EnginePreset.performance:
         webview.disableSessionFallback();
         await rhttp.setMode(RhttpMode.always);
         await rhttp.setEnabled(true);
         await webview.setEnabled(false);
-      case _EnginePreset.compat:
-        if (!await _ensureWebViewCanBeEnabled()) return;
-        if (!mounted) return;
-        setState(() => _customExpanded = false);
+      case EnginePreset.compat:
+        if (!await _ensureWebViewCanBeEnabled(context)) return;
         webview.disableSessionFallback();
         await rhttp.setEnabled(false);
         await webview.setEnabled(true);
-      case _EnginePreset.custom:
-        setState(() => _customExpanded = true);
     }
   }
+}
 
-  Future<bool> _ensureWebViewCanBeEnabled() async {
-    final requiresCa = WebViewMitmPolicy.requiresTrustedCa(
-      isWindows: Platform.isWindows,
-      dohEnabled: NetworkSettingsService.instance.current.dohEnabled,
-      webViewAdapterEnabled: true,
-    );
-    if (!requiresCa) return true;
-    return ensureWindowsCertTrusted(context);
-  }
+/// 引擎组合卡片（高级设置）：Rust 引擎与内置浏览器发送逐项开关
+class EngineMixCard extends StatelessWidget {
+  const EngineMixCard({super.key});
 
-  Future<void> _setWebViewEnabled(
-    bool value,
-    WebViewAdapterSettingsService webview,
-  ) async {
-    if (value && !await _ensureWebViewCanBeEnabled()) return;
-    await webview.setEnabled(value);
-  }
-
-  _EnginePreset _presetOf(bool rhttpOn, RhttpMode mode, bool webviewOn) {
-    if (!rhttpOn && !webviewOn) return _EnginePreset.standard;
-    if (rhttpOn && mode == RhttpMode.always && !webviewOn) {
-      return _EnginePreset.performance;
-    }
-    if (!rhttpOn && webviewOn) return _EnginePreset.compat;
-    return _EnginePreset.custom;
-  }
-
-  String _presetDesc(_EnginePreset preset) {
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     final l10n = context.l10n;
-    return switch (preset) {
-      _EnginePreset.standard => l10n.enginePreset_standardDesc,
-      _EnginePreset.performance => l10n.enginePreset_performanceDesc,
-      _EnginePreset.compat => l10n.enginePreset_compatDesc,
-      _EnginePreset.custom => l10n.enginePreset_customDesc,
-    };
-  }
+    final rhttp = RhttpSettingsService.instance;
+    final webview = WebViewAdapterSettingsService.instance;
 
-  // ---- 当前生效引擎（一行）----
+    return AnimatedBuilder(
+      animation: _engineListenable(),
+      builder: (context, _) {
+        final rhttpSettings = rhttp.current;
+        final rhttpEnabled = rhttpSettings.enabled;
+        final webviewEnabled = webview.enabled;
 
-  Widget _buildCurrentEngineRow(ThemeData theme) {
-    final effective = resolveEffectiveAdapter();
-    final engineName = getAdapterDisplayName(effective.type);
-    final webviewSettings = WebViewAdapterSettingsService.instance;
-    final webviewEnabled = webviewSettings.effectiveEnabled;
-    final sessionFallback = webviewSettings.sessionFallbackEnabled;
-
-    // WebView 在最外层分流：主站 API 走 WebView，其余走推算出的引擎。
-    // 它不参与 resolveEffectiveAdapter()，所以开启时要单独显示分流，
-    // 否则「兼容」预设会错误地只显示 native。
-    final IconData icon;
-    final Color iconColor;
-    final InlineSpan span;
-    if (webviewEnabled) {
-      icon = Symbols.call_split_rounded;
-      iconColor = theme.colorScheme.tertiary;
-      span = TextSpan(
-        text: context.l10n.engineStatus_webviewSplit(engineName),
-        style: theme.textTheme.bodySmall?.copyWith(
-          color: theme.colorScheme.onSurfaceVariant,
-        ),
-      );
-    } else {
-      icon = _engineIcon(effective.type);
-      iconColor = theme.colorScheme.primary;
-      span = TextSpan(
-        children: [
-          TextSpan(
-            text: '${context.l10n.engineStatus_currentEngine}: ',
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
+        return SegmentedCardGroup(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+              child: Text(
+                l10n.engineMix_desc,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
             ),
-          ),
-          TextSpan(
-            text: engineName,
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: theme.colorScheme.onSurface,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          TextSpan(
-            text: '  ·  ${_reasonText(effective.reason)}',
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
-            ),
-          ),
-        ],
-      );
-    }
-
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
-      child: Row(
-        children: [
-          Icon(icon, size: 18, color: iconColor),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text.rich(
-              span,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-          if (sessionFallback)
-            IconButton(
-              tooltip: S.current.cf_sessionCompatDisable,
-              icon: const Icon(Symbols.close_rounded, size: 20),
-              visualDensity: VisualDensity.compact,
-              onPressed: webviewSettings.disableSessionFallback,
-            ),
-        ],
-      ),
-    );
-  }
-
-  // ---- 自定义展开区 ----
-
-  Widget _buildCustomSection(
-    ThemeData theme,
-    RhttpSettingsService rhttp,
-    RhttpSettings rhttpSettings,
-    WebViewAdapterSettingsService webview,
-    bool webviewEnabled,
-  ) {
-    final l10n = context.l10n;
-    final rhttpEnabled = rhttpSettings.enabled;
-    final ns = NetworkSettingsService.instance.current;
-    final echFallback =
-        rhttpEnabled && ns.dohEnabled && ns.echServerUrl != null;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _divider(theme),
-        // rhttp 引擎
-        SwitchListTile(
-          dense: true,
-          secondary: Icon(
-            Symbols.rocket_launch_rounded,
-            fill: rhttpEnabled ? 1 : 0,
-            color: rhttpEnabled ? theme.colorScheme.primary : null,
-          ),
-          title: Text(l10n.rhttpEngine_title),
-          subtitle: Text(l10n.rhttpEngine_enabledDesc),
-          value: rhttpEnabled,
-          onChanged: (value) => rhttp.setEnabled(value),
-        ),
-        if (rhttpEnabled)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(56, 0, 16, 10),
-            child: Column(
+            Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                SizedBox(
-                  width: double.infinity,
-                  child: M3eButtonGroup<RhttpMode>(
-                    items: [
-                      M3eButtonGroupItem(
-                        value: RhttpMode.always,
-                        label: Text(l10n.rhttpEngine_alwaysUse),
-                      ),
-                      M3eButtonGroupItem(
-                        value: RhttpMode.proxyOnly,
-                        label: Text(l10n.rhttpEngine_proxyDohOnly),
-                      ),
-                    ],
-                    selected: rhttpSettings.mode,
-                    onSelected: (mode) => rhttp.setMode(mode),
+                SwitchListTile(
+                  secondary: Icon(
+                    Symbols.rocket_launch_rounded,
+                    fill: rhttpEnabled ? 1 : 0,
+                    color: rhttpEnabled ? theme.colorScheme.primary : null,
                   ),
+                  title: Text(l10n.rhttpEngine_title),
+                  subtitle: Text(l10n.rhttpEngine_enabledDesc),
+                  value: rhttpEnabled,
+                  onChanged: (value) => rhttp.setEnabled(value),
                 ),
-                if (echFallback)
-                  _miniHint(theme, l10n.rhttpEngine_echFallbackHint),
-                if (rhttpSettings.forceDisabled)
-                  _miniHint(
-                    theme,
-                    l10n.rhttpEngine_initFailedHint,
-                    color: theme.colorScheme.error,
+                if (rhttpEnabled)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(56, 0, 16, 12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        SizedBox(
+                          width: double.infinity,
+                          child: M3eButtonGroup<RhttpMode>(
+                            itemPadding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 10,
+                            ),
+                            items: [
+                              M3eButtonGroupItem(
+                                value: RhttpMode.always,
+                                label: Text(l10n.rhttpEngine_alwaysUse),
+                              ),
+                              M3eButtonGroupItem(
+                                value: RhttpMode.proxyOnly,
+                                label: Text(l10n.rhttpEngine_proxyDohOnly),
+                              ),
+                            ],
+                            selected: rhttpSettings.mode,
+                            onSelected: (mode) => rhttp.setMode(mode),
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        _HintRow(
+                          icon: Symbols.info_rounded,
+                          color: theme.colorScheme.onSurfaceVariant,
+                          text: l10n.rhttpEngine_echFallbackHint,
+                          dense: true,
+                        ),
+                        if (rhttpSettings.forceDisabled)
+                          _HintRow(
+                            icon: Symbols.error_rounded,
+                            color: theme.colorScheme.error,
+                            text: l10n.rhttpEngine_initFailedHint,
+                            dense: true,
+                          ),
+                      ],
+                    ),
                   ),
               ],
             ),
-          ),
-        _divider(theme),
-        // WebView 适配器
-        SwitchListTile(
-          dense: true,
-          secondary: Icon(
-            Symbols.language_rounded,
-            fill: webviewEnabled ? 1 : 0,
-            color: webviewEnabled ? theme.colorScheme.primary : null,
-          ),
-          title: Text(l10n.webviewAdapter_title),
-          subtitle: Text(l10n.webviewAdapter_enabledDesc),
-          value: webviewEnabled,
-          onChanged: (value) => _setWebViewEnabled(value, webview),
-        ),
-      ],
+            SwitchListTile(
+              secondary: Icon(
+                Symbols.language_rounded,
+                fill: webviewEnabled ? 1 : 0,
+                color: webviewEnabled ? theme.colorScheme.primary : null,
+              ),
+              title: Text(l10n.webviewAdapter_title),
+              subtitle: Text(l10n.webviewAdapter_enabledDesc),
+              value: webviewEnabled,
+              onChanged: (value) async {
+                if (value && !await _ensureWebViewCanBeEnabled(context)) {
+                  return;
+                }
+                await webview.setEnabled(value);
+              },
+            ),
+          ],
+        );
+      },
     );
   }
+}
 
-  // ---- 小组件 / 映射 ----
+/// 卡片里的一行提示：小图标 + 文字 + 可选的操作
+class _HintRow extends StatelessWidget {
+  const _HintRow({
+    required this.icon,
+    required this.color,
+    required this.text,
+    this.trailing,
+    this.dense = false,
+  });
 
-  Widget _miniHint(ThemeData theme, String text, {Color? color}) {
-    final c = color ?? theme.colorScheme.onSurfaceVariant;
+  final IconData icon;
+  final Color color;
+  final String text;
+  final Widget? trailing;
+  final bool dense;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return Padding(
-      padding: const EdgeInsets.only(top: 8),
+      padding: EdgeInsets.symmetric(vertical: dense ? 3 : 6),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          Icon(
-            color != null
-                ? Symbols.warning_amber_rounded
-                : Symbols.info_rounded,
-            size: 13,
-            color: c,
-          ),
-          const SizedBox(width: 6),
+          Icon(icon, size: dense ? 14 : 18, color: color),
+          SizedBox(width: dense ? 6 : 10),
           Expanded(
             child: Text(
               text,
               style: theme.textTheme.bodySmall?.copyWith(
-                color: c,
-                fontSize: 11,
+                color: theme.colorScheme.onSurfaceVariant,
+                fontSize: dense ? 11 : null,
               ),
             ),
           ),
+          ?trailing,
         ],
       ),
     );
-  }
-
-  Widget _divider(ThemeData theme) => Divider(
-    height: 1,
-    color: theme.colorScheme.outlineVariant.withValues(alpha: 0.2),
-  );
-
-  IconData _engineIcon(AdapterType type) => switch (type) {
-    AdapterType.rhttp => Symbols.rocket_launch_rounded,
-    AdapterType.network => Symbols.hub_rounded,
-    AdapterType.webview => Symbols.language_rounded,
-    AdapterType.native => Symbols.bolt_rounded,
-  };
-
-  String _reasonText(AdapterReason reason) {
-    final l10n = context.l10n;
-    return switch (reason) {
-      AdapterReason.rhttp => l10n.engineStatus_reasonRhttp,
-      AdapterReason.gateway => l10n.engineStatus_reasonGateway,
-      AdapterReason.proxy => l10n.engineStatus_reasonProxy,
-      AdapterReason.native => l10n.engineStatus_reasonNative,
-    };
   }
 }

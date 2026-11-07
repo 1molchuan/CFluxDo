@@ -150,6 +150,9 @@ final class ActionModel extends SettingsModel {
 
   final void Function(BuildContext context, WidgetRef ref) onTap;
 
+  /// 返回 false 时整行隐藏（如只在开发者模式下才有的入口）。null = 恒显示。
+  final bool Function(WidgetRef ref)? visibleWhen;
+
   const ActionModel({
     required super.id,
     required super.title,
@@ -158,7 +161,11 @@ final class ActionModel extends SettingsModel {
     this.wrapSubtitle = false,
     this.getDynamicSubtitle,
     required this.onTap,
+    this.visibleWhen,
   });
+
+  @override
+  bool isVisible(WidgetRef ref) => visibleWhen?.call(ref) ?? true;
 }
 
 /// 自定义 Widget（复杂 UI）

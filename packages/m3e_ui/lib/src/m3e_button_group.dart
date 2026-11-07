@@ -187,15 +187,25 @@ class _M3eButtonGroupState<T> extends State<M3eButtonGroup<T>>
                   ),
                   const SizedBox(width: 6),
                 ],
-                DefaultTextStyle.merge(
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
-                    color: selected
-                        ? scheme.onSecondaryContainer
-                        : scheme.onSurfaceVariant,
+                // 窄屏 / 英文长标签（如 Performance、Prefer IPv6）放不下时
+                // 等比缩小而不是溢出；放得下时尺寸与原来完全一致。
+                Flexible(
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: DefaultTextStyle.merge(
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight:
+                            selected ? FontWeight.w600 : FontWeight.w500,
+                        color: selected
+                            ? scheme.onSecondaryContainer
+                            : scheme.onSurfaceVariant,
+                      ),
+                      maxLines: 1,
+                      softWrap: false,
+                      child: item.label,
+                    ),
                   ),
-                  child: item.label,
                 ),
               ],
             ),

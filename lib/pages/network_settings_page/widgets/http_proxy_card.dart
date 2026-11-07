@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:app_icons/app_icons.dart';
 
 import '../../../l10n/s.dart';
-import '../../../services/network/doh/network_settings_service.dart';
 import '../../../utils/dialog_utils.dart';
 import '../../../services/network/proxy/proxy_settings_service.dart';
 import '../../../services/network/proxy/shadowsocks_uri_parser.dart';
@@ -16,7 +15,6 @@ class HttpProxyCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final proxyService = ProxySettingsService.instance;
-    final networkService = NetworkSettingsService.instance;
     final vpnService = VpnAutoToggleService.instance;
 
     return AnimatedBuilder(
@@ -24,18 +22,15 @@ class HttpProxyCard extends StatelessWidget {
         proxyService.notifier,
         proxyService.isTesting,
         proxyService.testResultNotifier,
-        networkService.notifier,
         vpnService.enabledNotifier,
         vpnService.vpnActiveNotifier,
         vpnService.suppressionNotifier,
       ]),
       builder: (context, _) {
         final proxySettings = proxyService.notifier.value;
-        final dohEnabled = networkService.notifier.value.dohEnabled;
         final isSuppressedByVpn = vpnService.enabled && vpnService.isProxySuppressed;
         return _HttpProxyCardInner(
           proxySettings: proxySettings,
-          dohEnabled: dohEnabled,
           isSuppressedByVpn: isSuppressedByVpn,
         );
       },
@@ -46,12 +41,10 @@ class HttpProxyCard extends StatelessWidget {
 class _HttpProxyCardInner extends StatelessWidget {
   const _HttpProxyCardInner({
     required this.proxySettings,
-    required this.dohEnabled,
     this.isSuppressedByVpn = false,
   });
 
   final ProxySettings proxySettings;
-  final bool dohEnabled;
   final bool isSuppressedByVpn;
 
   @override
@@ -72,9 +65,6 @@ class _HttpProxyCardInner extends StatelessWidget {
             VpnAutoToggleService.instance.vpnActive;
 
         return SegmentedCardGroup(
-          color: proxySettings.enabled
-              ? theme.colorScheme.tertiaryContainer.withValues(alpha: 0.3)
-              : null,
           children: [
             SwitchListTile(
               title: Text(context.l10n.httpProxy_title),
@@ -171,7 +161,8 @@ class _HttpProxyCardInner extends StatelessWidget {
                           ),
                     onTap: isTesting ? null : () => _runProxyTest(showToast: true),
                   ),
-                  if (proxySettings.enabled && dohEnabled)
+                  // 上游代理开着时 Rust 侧不做节点优选（与 DoH 开关无关）
+                  if (proxySettings.enabled)
                     Padding(
                       padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
                       child: Row(
@@ -196,28 +187,6 @@ class _HttpProxyCardInner extends StatelessWidget {
                 ],
               ),
             ],
-            if (!proxySettings.enabled)
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                child: Row(
-                  children: [
-                    Icon(
-                      Symbols.info_rounded,
-                      size: 16,
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        context.l10n.httpProxy_disabledHint,
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: theme.colorScheme.onSurfaceVariant,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
           ],
         );
       },

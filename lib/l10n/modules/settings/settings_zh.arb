@@ -45,8 +45,8 @@
   "bottomNav_singleTapAction": "单击已选中项",
   "bottomNav_singleTapActionDesc": "再次点击已选中的标签时执行的动作",
   "bottomNav_title": "底栏",
-  "cfVerify_autoTitle": "自动触发 CF 验证",
-  "cfVerify_autoDesc": "检测到 Cloudflare 安全盾时自动弹出验证页面；关闭后仅在错误页面手动触发",
+  "cfVerify_autoTitle": "自动弹出验证",
+  "cfVerify_autoDesc": "遇到 Cloudflare 人机验证时自动打开验证页；关闭后只在出错页面手动验证",
   "navTapAction_none": "无",
   "navTapAction_refresh": "刷新",
   "navTapAction_scrollToTop": "回到顶部",
@@ -228,5 +228,7 @@
   "preferences_crashlytics": "崩溃日志上报",
   "preferences_crashlyticsDesc": "发生崩溃时自动上报日志，帮助开发者定位问题",
   "preferences_enableCrashlyticsContent": "本应用使用 Firebase Crashlytics 收集崩溃信息以改进应用稳定性。\n\n收集的数据包括设备信息和崩溃详情，不包含个人隐私数据。您可以在设置中关闭此功能。",
-  "preferences_enableCrashlyticsTitle": "数据收集说明"
+  "preferences_enableCrashlyticsTitle": "数据收集说明",
+  "cfVerify_manualTitle": "立即验证",
+  "cfVerify_manualDesc": "手动打开验证页过一次人机验证，反复弹验证时可以试试"
 }

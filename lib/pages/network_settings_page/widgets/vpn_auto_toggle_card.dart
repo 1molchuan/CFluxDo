@@ -45,7 +45,9 @@ class VpnAutoToggleCard extends StatelessWidget {
               ListTile(
                 leading: const Icon(Symbols.rule_rounded),
                 title: Text(context.l10n.vpnToggle_detectionMode),
-                subtitle: Text(_detectionDescription(context, service)),
+                subtitle: service.detectionMode == VpnDetectionMode.automatic
+                    ? null
+                    : Text(_detectionDescription(context, service)),
                 trailing: SwipeDismissiblePopupMenuButton<VpnDetectionMode>(
                   tooltip: context.l10n.vpnToggle_detectionMode,
                   offset: const Offset(0, 36),
@@ -177,9 +179,8 @@ class VpnAutoToggleCard extends StatelessWidget {
   }
 
   String _buildSuppressedText(bool dohSuppressed, bool proxySuppressed) {
-    final items = <String>[];
-    if (dohSuppressed) items.add('DOH');
-    if (proxySuppressed) items.add(S.current.vpnToggle_upstreamProxy);
-    return '${items.join(S.current.vpnToggle_and)}${S.current.vpnToggle_suppressedSuffix}';
+    if (dohSuppressed && proxySuppressed) return S.current.vpnToggle_pausedBoth;
+    if (dohSuppressed) return S.current.vpnToggle_pausedAccel;
+    return S.current.vpnToggle_pausedProxy;
   }
 }

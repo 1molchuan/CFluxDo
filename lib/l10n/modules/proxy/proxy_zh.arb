@@ -5,10 +5,9 @@
   "httpProxy_cipher": "加密算法",
   "httpProxy_cipherNotSet": "未设置算法",
   "httpProxy_configTitle": "配置上游代理",
-  "httpProxy_disabledDesc": "为本地网关配置远端 HTTP / SOCKS5 / Shadowsocks 代理",
-  "httpProxy_disabledHint": "开启后会保留代理模式开关，由本地网关统一接管 Dio、WebView 和 Shadowsocks 出口",
-  "httpProxy_dohProxyHint": "当前会通过本地 DoH 网关转发到上游代理；关闭 DoH 时会切换为纯代理转发",
-  "httpProxy_enabledDesc": "已启用 {protocol} 上游代理，由本地网关统一转发",
+  "httpProxy_disabledDesc": "让 App 和内置网页经你的 HTTP / SOCKS5 / Shadowsocks 代理连接",
+  "httpProxy_dohProxyHint": "代理开启期间不做节点优选",
+  "httpProxy_enabledDesc": "已启用 {protocol} 代理",
   "@httpProxy_enabledDesc": {
     "placeholders": {
       "protocol": {
@@ -41,7 +40,7 @@
   "httpProxy_ssConfigSaved": "保存后会校验 Shadowsocks 配置，并建议返回首页做实际访问验证",
   "httpProxy_ssImportSuccess": "Shadowsocks 链接导入成功",
   "httpProxy_ssLink": "Shadowsocks 链接",
-  "httpProxy_suppressedByVpn": "已被 VPN 自动关闭，VPN 断开后将自动恢复",
+  "httpProxy_suppressedByVpn": "VPN 连接期间已暂停，VPN 断开后自动恢复",
   "httpProxy_testAvailability": "测试代理可用性",
   "httpProxy_testingProxy": "正在验证是否能通过当前代理访问 linux.do",
   "httpProxy_testingSsConfig": "正在校验 Shadowsocks 配置是否可由本地网关接管",
@@ -184,7 +183,6 @@
     }
   },
   "proxy_testTlsFailed": "TLS 握手失败",
-  "vpnToggle_and": " 和 ",
   "vpnToggle_connected": "VPN 已连接",
   "vpnToggle_detectionMode": "VPN 判定方式",
   "vpnToggle_detectionAutomatic": "自动",
@@ -194,9 +192,10 @@
   "vpnToggle_detectionForceInactive": "强制非 VPN",
   "vpnToggle_detectionForceInactiveDesc": "忽略自动检测，适合抓包代理等不应触发自动切换的场景",
   "vpnToggle_disconnected": "VPN 未连接",
-  "vpnToggle_lockedHint": "VPN 活跃，已由自动切换接管",
-  "vpnToggle_subtitle": "检测到 VPN 时自动关闭 DOH 和代理，断开后恢复",
-  "vpnToggle_suppressedSuffix": "已被自动关闭，VPN 断开后将自动恢复",
-  "vpnToggle_title": "VPN 自动切换",
-  "vpnToggle_upstreamProxy": "上游代理"
+  "vpnToggle_lockedHint": "VPN 已连接，由「VPN 自动让路」接管；这里决定 VPN 断开后开不开",
+  "vpnToggle_subtitle": "检测到 VPN 时暂停连接加速和上游代理，VPN 断开后自动恢复",
+  "vpnToggle_title": "VPN 自动让路",
+  "vpnToggle_pausedBoth": "连接加速和上游代理已暂停，VPN 断开后自动恢复",
+  "vpnToggle_pausedAccel": "连接加速已暂停，VPN 断开后自动恢复",
+  "vpnToggle_pausedProxy": "上游代理已暂停，VPN 断开后自动恢复"
 }

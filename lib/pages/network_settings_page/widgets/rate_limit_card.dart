@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:app_icons/app_icons.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:m3e_ui/m3e_ui.dart';
 
 import '../../../l10n/s.dart';
 import '../../../providers/preferences_provider.dart';
@@ -37,133 +38,139 @@ class _RateLimitCardState extends ConsumerState<RateLimitCard> {
     // 自定义模式下保持展开;反之尊重用户折叠状态。
     final advancedOpen = isCustom || _advancedExpanded;
 
-    return Card(
-      clipBehavior: Clip.antiAlias,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          _Header(
-            title: l10n.networkSettings_rateLimitTitle,
-            subtitle: l10n.networkSettings_rateLimitSubtitle,
-            onReset: _isDefault(current)
-                ? null
-                : () => _confirmReset(context, notifier),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _PresetSelector(
-                  current: preset,
-                  onSelect: (p) {
-                    if (p == _RateLimitPreset.custom) {
-                      setState(() => _advancedExpanded = true);
-                      return;
-                    }
-                    final t = _presetValues[p]!;
-                    notifier.setMaxConcurrent(t.maxConcurrent);
-                    notifier.setMaxPerWindow(t.maxPerWindow);
-                    notifier.setWindowSeconds(t.windowSeconds);
-                  },
-                ),
-                const SizedBox(height: 10),
-                Text(
-                  l10n.networkSettings_rateLimitSummary(
-                    prefs.windowSeconds,
-                    prefs.maxPerWindow,
-                    prefs.maxConcurrent,
-                  ),
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
-                  ),
-                ),
-              ],
+    // 分段卡片组：经典风格是圆角卡片，墨笺是平铺细线，与页面其余分组一致
+    return SegmentedCardGroup(
+      children: [
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _Header(
+              title: l10n.networkSettings_rateLimitTitle,
+              subtitle: l10n.networkSettings_rateLimitSubtitle,
+              onReset: _isDefault(current)
+                  ? null
+                  : () => _confirmReset(context, notifier),
             ),
-          ),
-          Divider(
-            height: 1,
-            color: theme.colorScheme.outlineVariant.withValues(alpha: 0.3),
-          ),
-          InkWell(
-            onTap: isCustom
-                ? null
-                : () => setState(() => _advancedExpanded = !_advancedExpanded),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              child: Row(
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Icon(
-                    Symbols.tune_rounded,
-                    size: 18,
-                    color: theme.colorScheme.onSurfaceVariant,
+                  _PresetSelector(
+                    current: preset,
+                    onSelect: (p) {
+                      if (p == _RateLimitPreset.custom) {
+                        setState(() => _advancedExpanded = true);
+                        return;
+                      }
+                      final t = _presetValues[p]!;
+                      notifier.setMaxConcurrent(t.maxConcurrent);
+                      notifier.setMaxPerWindow(t.maxPerWindow);
+                      notifier.setWindowSeconds(t.windowSeconds);
+                    },
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      l10n.networkSettings_rateLimitAdvanced,
-                      style: theme.textTheme.bodyMedium,
+                  const SizedBox(height: 10),
+                  Text(
+                    l10n.networkSettings_rateLimitSummary(
+                      prefs.windowSeconds,
+                      prefs.maxPerWindow,
+                      prefs.maxConcurrent,
                     ),
-                  ),
-                  AnimatedRotation(
-                    turns: advancedOpen ? 0.5 : 0,
-                    duration: const Duration(milliseconds: 180),
-                    child: Icon(
-                      Symbols.expand_more_rounded,
+                    style: theme.textTheme.bodySmall?.copyWith(
                       color: theme.colorScheme.onSurfaceVariant,
                     ),
                   ),
                 ],
               ),
             ),
-          ),
-          AnimatedCrossFade(
-            duration: const Duration(milliseconds: 200),
-            crossFadeState: advancedOpen
-                ? CrossFadeState.showSecond
-                : CrossFadeState.showFirst,
-            firstChild: const SizedBox(width: double.infinity),
-            secondChild: Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: Column(
-                children: [
-                  _SliderTile(
-                    icon: Symbols.swap_horiz_rounded,
-                    label: l10n.networkSettings_maxConcurrent,
-                    helper: l10n.networkSettings_maxConcurrentDesc,
-                    value: prefs.maxConcurrent,
-                    min: 1,
-                    max: 10,
-                    onChanged: notifier.setMaxConcurrent,
-                  ),
-                  const Divider(height: 1, indent: 56),
-                  _SliderTile(
-                    icon: Symbols.speed_rounded,
-                    label: l10n.networkSettings_maxPerWindow,
-                    helper: l10n.networkSettings_maxPerWindowDesc,
-                    value: prefs.maxPerWindow,
-                    min: 2,
-                    max: 30,
-                    onChanged: notifier.setMaxPerWindow,
-                  ),
-                  const Divider(height: 1, indent: 56),
-                  _SliderTile(
-                    icon: Symbols.timer_rounded,
-                    label: l10n.networkSettings_windowSeconds,
-                    helper: l10n.networkSettings_windowSecondsDesc,
-                    value: prefs.windowSeconds,
-                    min: 1,
-                    max: 10,
-                    suffix: l10n.networkSettings_windowSecondsSuffix,
-                    onChanged: notifier.setWindowSeconds,
-                  ),
-                ],
+          ],
+        ),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            InkWell(
+              onTap: isCustom
+                  ? null
+                  : () =>
+                        setState(() => _advancedExpanded = !_advancedExpanded),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 12,
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Symbols.tune_rounded,
+                      size: 18,
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        l10n.networkSettings_rateLimitAdvanced,
+                        style: theme.textTheme.bodyMedium,
+                      ),
+                    ),
+                    AnimatedRotation(
+                      turns: advancedOpen ? 0.5 : 0,
+                      duration: const Duration(milliseconds: 180),
+                      child: Icon(
+                        Symbols.expand_more_rounded,
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
-          ),
-        ],
-      ),
+            AnimatedCrossFade(
+              duration: const Duration(milliseconds: 200),
+              crossFadeState: advancedOpen
+                  ? CrossFadeState.showSecond
+                  : CrossFadeState.showFirst,
+              firstChild: const SizedBox(width: double.infinity),
+              secondChild: Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Column(
+                  children: [
+                    _SliderTile(
+                      icon: Symbols.swap_horiz_rounded,
+                      label: l10n.networkSettings_maxConcurrent,
+                      helper: l10n.networkSettings_maxConcurrentDesc,
+                      value: prefs.maxConcurrent,
+                      min: 1,
+                      max: 10,
+                      onChanged: notifier.setMaxConcurrent,
+                    ),
+                    const Divider(height: 1, indent: 56),
+                    _SliderTile(
+                      icon: Symbols.speed_rounded,
+                      label: l10n.networkSettings_maxPerWindow,
+                      helper: l10n.networkSettings_maxPerWindowDesc,
+                      value: prefs.maxPerWindow,
+                      min: 2,
+                      max: 30,
+                      onChanged: notifier.setMaxPerWindow,
+                    ),
+                    const Divider(height: 1, indent: 56),
+                    _SliderTile(
+                      icon: Symbols.timer_rounded,
+                      label: l10n.networkSettings_windowSeconds,
+                      helper: l10n.networkSettings_windowSecondsDesc,
+                      value: prefs.windowSeconds,
+                      min: 1,
+                      max: 10,
+                      suffix: l10n.networkSettings_windowSecondsSuffix,
+                      onChanged: notifier.setWindowSeconds,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ],
     );
   }
 
@@ -221,11 +228,7 @@ class _Header extends StatelessWidget {
   final String subtitle;
   final VoidCallback? onReset;
 
-  const _Header({
-    required this.title,
-    required this.subtitle,
-    this.onReset,
-  });
+  const _Header({required this.title, required this.subtitle, this.onReset});
 
   @override
   Widget build(BuildContext context) {
@@ -305,21 +308,23 @@ class _PresetSelector extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            for (final item in items)
-              ChoiceChip(
-                label: Text(item.$2),
-                selected: item.$1 == current,
-                onSelected: (s) {
-                  if (s) onSelect(item.$1);
-                },
-              ),
-          ],
+        // 四档一行排开（原来的 chips 在窄屏上「自定义」会单独掉到第二行）
+        SizedBox(
+          width: double.infinity,
+          child: M3eButtonGroup<_RateLimitPreset>(
+            itemPadding: const EdgeInsets.symmetric(
+              horizontal: 8,
+              vertical: 10,
+            ),
+            items: [
+              for (final item in items)
+                M3eButtonGroupItem(value: item.$1, label: Text(item.$2)),
+            ],
+            selected: current,
+            onSelected: onSelect,
+          ),
         ),
-        const SizedBox(height: 6),
+        const SizedBox(height: 8),
         Text(
           selected.$3,
           style: theme.textTheme.bodySmall?.copyWith(
@@ -362,7 +367,11 @@ class _SliderTile extends StatelessWidget {
         children: [
           Padding(
             padding: const EdgeInsets.only(top: 14),
-            child: Icon(icon, size: 22, color: theme.colorScheme.onSurfaceVariant),
+            child: Icon(
+              icon,
+              size: 22,
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
           ),
           const SizedBox(width: 16),
           Expanded(
@@ -418,7 +427,11 @@ class _RateLimitTriple {
   final int maxConcurrent;
   final int maxPerWindow;
   final int windowSeconds;
-  const _RateLimitTriple(this.maxConcurrent, this.maxPerWindow, this.windowSeconds);
+  const _RateLimitTriple(
+    this.maxConcurrent,
+    this.maxPerWindow,
+    this.windowSeconds,
+  );
 
   @override
   bool operator ==(Object other) =>

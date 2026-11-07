@@ -28,8 +28,8 @@
   "bottomNav_singleTapAction": "單擊已選中項",
   "bottomNav_singleTapActionDesc": "再次點擊已選中的標籤時執行的動作",
   "bottomNav_title": "底欄",
-  "cfVerify_autoTitle": "自動觸發 CF 驗證",
-  "cfVerify_autoDesc": "偵測到 Cloudflare 安全盾時自動彈出驗證頁面；關閉後僅在錯誤頁面手動觸發",
+  "cfVerify_autoTitle": "自動彈出驗證",
+  "cfVerify_autoDesc": "遇到 Cloudflare 人機驗證時自動打開驗證頁；關閉後只在出錯頁面手動驗證",
   "navTapAction_none": "無",
   "navTapAction_refresh": "重新載入",
   "navTapAction_scrollToTop": "回到頂部",
@@ -196,5 +196,7 @@
   "preferences_crashlytics": "崩潰日誌上報",
   "preferences_crashlyticsDesc": "發生崩潰時自動上報日誌，幫助開發者定位問題",
   "preferences_enableCrashlyticsContent": "本應用使用 Firebase Crashlytics 收集崩潰信息以改進應用穩定性。\n\n收集嘅數據包括設備信息同崩潰詳情，唔包含個人隱私數據。您可以喺設置中關閉此功能。",
-  "preferences_enableCrashlyticsTitle": "數據收集說明"
+  "preferences_enableCrashlyticsTitle": "數據收集說明",
+  "cfVerify_manualTitle": "立即驗證",
+  "cfVerify_manualDesc": "手動打開驗證頁過一次人機驗證，反覆彈驗證時可以試試"
 }

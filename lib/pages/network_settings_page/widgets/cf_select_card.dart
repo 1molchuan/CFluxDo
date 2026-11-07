@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:app_icons/app_icons.dart';
@@ -7,19 +8,16 @@ import 'package:m3e_ui/m3e_ui.dart';
 import '../../../l10n/s.dart';
 import '../../../services/network/doh/cfhub_probe_auth_service.dart';
 import '../../../services/network/doh/network_settings_service.dart';
-import '../../../services/network/doh_proxy/doh_proxy_ffi.dart';
 import '../../../services/network/proxy/proxy_settings_service.dart';
 import '../../../services/toast_service.dart';
-import '../../../utils/time_utils.dart';
 import 'cf_select_privacy_dialog.dart';
+import 'ip_family_card.dart' show CardTitleRow;
 
-/// 连接方式卡片（本地优选）
+/// 节点优选卡片（高级设置）
 ///
 /// 1.1 起 App 自己在 Cloudflare 共享池里测速选节点，atlas 节点表一起参与竞速。
-/// 卡片提供：模式切换（本地优选 + atlas / 只用 atlas 池）、当前优选状态、
-/// 手动重新优选、隐私说明入口，以及「帮助优选」（向 cfhub 分享测量结果）开关。
-///
-/// 优选状态由 Rust 侧维护，这里每 3 秒拉一次快照刷新 [NetworkSettingsService.selectStatusNotifier]。
+/// 这里放优选方式（本地优选 + atlas / 只用 atlas 池）、「帮助优选」（向 cfhub
+/// 分享测量结果）开关和隐私说明入口；当前节点、重新优选在主页面的连接状态卡里。
 class CfSelectCard extends StatefulWidget {
   const CfSelectCard({super.key});
 
@@ -28,15 +26,8 @@ class CfSelectCard extends StatefulWidget {
 }
 
 class _CfSelectCardState extends State<CfSelectCard> {
-  static const _refreshInterval = Duration(seconds: 3);
-
-  Timer? _refreshTimer;
-
   /// 正在走 cfhub 授权流程（期间禁用开关、显示进度）
   bool _enablingShare = false;
-
-  /// 正在请求重新优选（防止连点）
-  bool _reracing = false;
 
   /// 上次看到的 rejectedNotifier 值，变化才弹「授权已失效」
   late int _lastRejected;
@@ -47,29 +38,14 @@ class _CfSelectCardState extends State<CfSelectCard> {
     final rejected = CfhubProbeAuthService.instance.rejectedNotifier;
     _lastRejected = rejected.value;
     rejected.addListener(_onRejectedChanged);
-
-    unawaited(_refreshStatus());
-    _refreshTimer = Timer.periodic(_refreshInterval, (_) {
-      unawaited(_refreshStatus());
-    });
   }
 
   @override
   void dispose() {
-    _refreshTimer?.cancel();
     CfhubProbeAuthService.instance.rejectedNotifier.removeListener(
       _onRejectedChanged,
     );
     super.dispose();
-  }
-
-  Future<void> _refreshStatus() async {
-    try {
-      await NetworkSettingsService.instance.refreshSelectStatus();
-    } catch (e) {
-      // 代理未起或 FFI 暂不可用时拉不到快照，下个周期再试即可
-      debugPrint('[CfSelect] 刷新优选状态失败: $e');
-    }
   }
 
   void _onRejectedChanged() {
@@ -88,74 +64,64 @@ class _CfSelectCardState extends State<CfSelectCard> {
     return AnimatedBuilder(
       animation: Listenable.merge([
         service.notifier,
-        service.selectStatusNotifier,
         ProxySettingsService.instance.notifier,
       ]),
       builder: (context, _) {
         final settings = service.current;
-        final status = service.selectStatusNotifier.value;
-
-        return Card(
-          clipBehavior: Clip.antiAlias,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(20),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              // 标题 + 模式切换
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
-                child: _buildModeSelector(theme, settings.selectMode),
-              ),
-              _divider(theme),
-              // IP 协议（挑赢家时偏好的地址族）
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-                child: _buildFamilySelector(theme, settings.ipv6Mode),
-              ),
-              _divider(theme),
-              // 当前状态
-              _buildStatusRow(theme, service, settings, status),
-              // 操作行
-              _buildActionRow(theme, service),
-              _divider(theme),
-              // 帮助优选
-              _buildShareTile(theme, settings),
-            ],
-          ),
+        return SegmentedCardGroup(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+              child: _buildModeSelector(theme, service, settings.selectMode),
+            ),
+            _buildShareTile(theme, settings),
+            ListTile(
+              leading: const Icon(Symbols.policy_rounded),
+              title: Text(context.l10n.cfSelect_viewPrivacy),
+              trailing: const Icon(Symbols.chevron_right_rounded, size: 20),
+              onTap: () =>
+                  showCfSelectPrivacyDialog(context, firstLaunch: false),
+            ),
+          ],
         );
       },
     );
   }
 
-  // ---- 模式 ----
+  // ---- 优选方式 ----
 
-  Widget _buildModeSelector(ThemeData theme, CfSelectMode mode) {
+  Widget _buildModeSelector(
+    ThemeData theme,
+    NetworkSettingsService service,
+    CfSelectMode mode,
+  ) {
     final l10n = context.l10n;
+    final cs = theme.colorScheme;
+    // 上游代理开启 / 加速关闭 / 网关模式关闭时 Rust 侧不做优选，选了也不生效，说明原因
+    final String? ineligible = service.selectorEligible
+        ? null
+        : ProxySettingsService.instance.current.isValid
+        ? l10n.cfSelect_disabledByProxy
+        : !service.current.dohEnabled
+        ? l10n.cfSelect_disabledByDoh
+        : (Platform.isAndroid || Platform.isLinux || Platform.isWindows)
+        ? l10n.netStatus_noSelectGateway
+        : l10n.netStatus_noSelectPlatform;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          children: [
-            Icon(
-              Symbols.alt_route_rounded,
-              size: 18,
-              color: theme.colorScheme.primary,
-            ),
-            const SizedBox(width: 8),
-            Text(
-              l10n.cfSelect_title,
-              style: theme.textTheme.titleSmall?.copyWith(
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ],
+        CardTitleRow(
+          icon: Symbols.alt_route_rounded,
+          title: l10n.cfSelect_modeTitle,
         ),
         const SizedBox(height: 10),
         SizedBox(
           width: double.infinity,
           child: M3eButtonGroup<CfSelectMode>(
+            itemPadding: const EdgeInsets.symmetric(
+              horizontal: 10,
+              vertical: 10,
+            ),
             items: [
               M3eButtonGroupItem(
                 value: CfSelectMode.localAtlas,
@@ -167,259 +133,39 @@ class _CfSelectCardState extends State<CfSelectCard> {
               ),
             ],
             selected: mode,
-            onSelected: (value) =>
-                unawaited(NetworkSettingsService.instance.setSelectMode(value)),
+            onSelected: (value) => unawaited(service.setSelectMode(value)),
           ),
         ),
-        const SizedBox(height: 6),
+        const SizedBox(height: 8),
         Text(
           switch (mode) {
             CfSelectMode.localAtlas => l10n.cfSelect_modeLocalAtlasDesc,
             CfSelectMode.atlasOnly => l10n.cfSelect_modeAtlasOnlyDesc,
           },
           style: theme.textTheme.bodySmall?.copyWith(
-            color: theme.colorScheme.onSurfaceVariant,
-          ),
-        ),
-      ],
-    );
-  }
-
-  // ---- IP 协议 ----
-
-  Widget _buildFamilySelector(ThemeData theme, Ipv6Mode mode) {
-    final l10n = context.l10n;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Icon(
-              Symbols.language_rounded,
-              size: 18,
-              color: theme.colorScheme.primary,
-            ),
-            const SizedBox(width: 8),
-            Text(
-              l10n.cfSelect_ipFamily,
-              style: theme.textTheme.titleSmall?.copyWith(
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 10),
-        SizedBox(
-          width: double.infinity,
-          child: M3eButtonGroup<Ipv6Mode>(
-            items: [
-              M3eButtonGroupItem(
-                value: Ipv6Mode.auto,
-                label: Text(l10n.cfSelect_ipFamilyAuto),
-              ),
-              M3eButtonGroupItem(
-                value: Ipv6Mode.preferV6,
-                label: Text(l10n.cfSelect_ipFamilyV6),
-              ),
-              M3eButtonGroupItem(
-                value: Ipv6Mode.preferV4,
-                label: Text(l10n.cfSelect_ipFamilyV4),
-              ),
-            ],
-            selected: mode,
-            onSelected: (value) =>
-                unawaited(NetworkSettingsService.instance.setIpv6Mode(value)),
-          ),
-        ),
-        const SizedBox(height: 6),
-        Text(
-          switch (mode) {
-            Ipv6Mode.auto => l10n.cfSelect_ipFamilyAutoDesc,
-            Ipv6Mode.preferV6 => l10n.cfSelect_ipFamilyV6Desc,
-            Ipv6Mode.preferV4 => l10n.cfSelect_ipFamilyV4Desc,
-          },
-          style: theme.textTheme.bodySmall?.copyWith(
-            color: theme.colorScheme.onSurfaceVariant,
-          ),
-        ),
-      ],
-    );
-  }
-
-  // ---- 状态行 ----
-
-  Widget _buildStatusRow(
-    ThemeData theme,
-    NetworkSettingsService service,
-    NetworkSettings settings,
-    DohSelectStatus? status,
-  ) {
-    final l10n = context.l10n;
-    final cs = theme.colorScheme;
-    final eligible = service.selectorEligible;
-
-    Widget leading;
-    String text;
-    Color color = cs.onSurfaceVariant;
-
-    if (!eligible) {
-      // 应用代理开启 / 加速关闭时 Rust 侧不做优选，给出原因
-      leading = Icon(Symbols.block_rounded, size: 18, color: cs.onSurfaceVariant);
-      text = ProxySettingsService.instance.current.isValid
-          ? l10n.cfSelect_disabledByProxy
-          : l10n.cfSelect_disabledByDoh;
-    } else {
-      switch (status?.phase ?? 'idle') {
-        case 'verifying':
-          leading = _progress(cs.primary);
-          text = l10n.cfSelect_statusVerifying;
-        case 'racing':
-          leading = _progress(cs.primary);
-          text = l10n.cfSelect_statusRacing;
-        case 'ready':
-          leading = const Icon(
-            Symbols.check_circle_rounded,
-            size: 18,
-            color: Colors.green,
-          );
-          text = l10n.cfSelect_statusReady(
-            status?.winnerIp ?? '-',
-            status?.latencyMs ?? 0,
-          );
-          color = cs.onSurface;
-        case 'failed':
-          leading = Icon(Symbols.error_rounded, size: 18, color: cs.error);
-          text = l10n.cfSelect_statusFailed;
-          color = cs.error;
-        default:
-          leading = Icon(
-            Symbols.hourglass_top_rounded,
-            size: 18,
             color: cs.onSurfaceVariant,
-          );
-          text = l10n.cfSelect_statusIdle;
-      }
-    }
-
-    // 补充信息：赢家来源、上次优选时间
-    final extras = <String>[];
-    if (eligible && status != null) {
-      final source = status.source;
-      if (status.phase == 'ready' && source != null && source.isNotEmpty) {
-        extras.add(source);
-      }
-      if (status.lastRaceAt > 0) {
-        final at = DateTime.fromMillisecondsSinceEpoch(status.lastRaceAt * 1000);
-        extras.add(l10n.cfSelect_lastRace(TimeUtils.formatRelativeTime(at)));
-      }
-    }
-    final lastError = eligible && status?.phase == 'failed'
-        ? status?.lastError
-        : null;
-
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Padding(padding: const EdgeInsets.only(top: 1), child: leading),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text.rich(
-                  TextSpan(
-                    children: [
-                      TextSpan(
-                        text: text,
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: color,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      if (extras.isNotEmpty)
-                        TextSpan(
-                          text: '  ·  ${extras.join('  ·  ')}',
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: cs.onSurfaceVariant,
-                          ),
-                        ),
-                    ],
+          ),
+        ),
+        if (ineligible != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Row(
+              children: [
+                Icon(Symbols.block_rounded, size: 14, color: cs.tertiary),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    ineligible,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: cs.tertiary,
+                    ),
                   ),
-                  maxLines: 3,
-                  overflow: TextOverflow.ellipsis,
                 ),
-              ),
-            ],
-          ),
-          if (lastError != null && lastError.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(left: 26, top: 4),
-              child: Text(
-                lastError,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: cs.onSurfaceVariant,
-                  fontSize: 11,
-                ),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-              ),
+              ],
             ),
-        ],
-      ),
-    );
-  }
-
-  Widget _progress(Color color) => SizedBox(
-    width: 16,
-    height: 16,
-    child: Padding(
-      padding: const EdgeInsets.all(1),
-      child: CircularProgressIndicator(strokeWidth: 2, color: color),
-    ),
-  );
-
-  // ---- 操作行 ----
-
-  Widget _buildActionRow(ThemeData theme, NetworkSettingsService service) {
-    final l10n = context.l10n;
-    final canRerace = service.selectorEligible && !_reracing;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 4, 16, 10),
-      child: Row(
-        children: [
-          OutlinedButton.icon(
-            onPressed: canRerace ? _rerace : null,
-            icon: const Icon(Symbols.refresh_rounded, size: 18),
-            label: Text(l10n.cfSelect_rerace),
           ),
-          const SizedBox(width: 8),
-          TextButton(
-            onPressed: () =>
-                showCfSelectPrivacyDialog(context, firstLaunch: false),
-            child: Text(l10n.cfSelect_viewPrivacy),
-          ),
-        ],
-      ),
+      ],
     );
-  }
-
-  Future<void> _rerace() async {
-    setState(() => _reracing = true);
-    try {
-      final started = await NetworkSettingsService.instance.reraceSelection();
-      if (started) {
-        ToastService.showInfo(S.current.cfSelect_reraceStarted);
-        unawaited(_refreshStatus());
-      } else {
-        ToastService.showInfo(S.current.cfSelect_reraceCooldown);
-      }
-    } catch (e) {
-      ToastService.showError(S.current.common_operationFailed('$e'));
-    } finally {
-      if (mounted) setState(() => _reracing = false);
-    }
   }
 
   // ---- 帮助优选 ----
@@ -430,7 +176,6 @@ class _CfSelectCardState extends State<CfSelectCard> {
     final authorized = on && CfhubProbeAuthService.instance.isAuthorized;
 
     return SwitchListTile(
-      dense: true,
       secondary: _enablingShare
           ? SizedBox(
               width: 24,
@@ -476,11 +221,4 @@ class _CfSelectCardState extends State<CfSelectCard> {
       if (mounted) setState(() => _enablingShare = false);
     }
   }
-
-  // ---- 小组件 ----
-
-  Widget _divider(ThemeData theme) => Divider(
-    height: 1,
-    color: theme.colorScheme.outlineVariant.withValues(alpha: 0.2),
-  );
 }

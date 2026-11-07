@@ -71,7 +71,7 @@
   "debugTools_exportCfLogs": "導出 CF 日誌",
   "debugTools_logsCleared": "日誌已清除",
   "debugTools_networkLogs": "網絡日誌",
-  "debugTools_networkLogsDesc": "查看 DOH/代理診斷日誌",
+  "debugTools_networkLogsDesc": "只看連接、加速和代理相關的記錄",
   "debugTools_noCfLogs": "暫無 CF 驗證日誌",
   "debugTools_noCfLogsHint": "觸發 CF 驗證後會產生日誌",
   "debugTools_noCfLogsToShare": "暫無 CF 日誌可分享",
@@ -80,5 +80,9 @@
   "debugTools_noLogsToShare": "暫無日誌可分享",
   "debugTools_shareLogs": "分享日誌",
   "debugTools_viewLogs": "查看日誌",
-  "appLogs_failureReason": "失敗原因"
+  "appLogs_failureReason": "失敗原因",
+  "eruda_title": "網頁調試控制台（Eruda）",
+  "eruda_offDesc": "開啟後，站內網頁右下角會出現 ⚙，可看控制台、網絡和頁面元素",
+  "eruda_onDesc": "已開啟：點站內網頁右下角的 ⚙ 打開調試面板",
+  "eruda_reloadHint": "重新打開網頁後生效"
 }

@@ -71,7 +71,7 @@
   "debugTools_exportCfLogs": "Export CF logs",
   "debugTools_logsCleared": "Logs cleared",
   "debugTools_networkLogs": "Network logs",
-  "debugTools_networkLogsDesc": "View DOH & proxy diagnostics",
+  "debugTools_networkLogsDesc": "Only connection, acceleration and proxy records",
   "debugTools_noCfLogs": "No CF verification logs",
   "debugTools_noCfLogsHint": "Logs appear after CF verification is triggered",
   "debugTools_noCfLogsToShare": "No CF logs to share",
@@ -80,5 +80,9 @@
   "debugTools_noLogsToShare": "No logs to share",
   "debugTools_shareLogs": "Share logs",
   "debugTools_viewLogs": "View logs",
-  "appLogs_failureReason": "Failure reason"
+  "appLogs_failureReason": "Failure reason",
+  "eruda_title": "Web debug console (Eruda)",
+  "eruda_offDesc": "When on, a ⚙ button at the bottom right of site pages opens Console, Network and Elements",
+  "eruda_onDesc": "On: tap ⚙ at the bottom right of site pages to open the panel",
+  "eruda_reloadHint": "Takes effect after reopening the page"
 }

@@ -13,12 +13,15 @@ import '../../../services/network/doh_proxy/windows_cert_trust_service.dart';
 import '../../../services/network/vpn_auto_toggle_service.dart';
 import '../../../services/network/webview/webview_adapter_settings_service.dart';
 import '../../../services/toast_service.dart';
-import '../../../services/windows_webview_environment_service.dart';
 import 'package:m3e_ui/m3e_ui.dart';
 import '../doh_detail_settings_page.dart';
 import 'ios_cert_install_dialog.dart';
 
-/// DOH 设置卡片（简化版：开关 + 状态 + "更多设置"入口）
+/// 连接加速卡片（高级设置「网关」）：加速总开关 + 设备证书 + 网关状态 + 「DNS 与网关细节」入口
+///
+/// 总开关就是原来的「DNS over HTTPS」开关（偏好键不变），它管的是整个本地网关：
+/// 加密 DNS、ECH、节点优选和内置网页转发。国内关掉一般就连不上，所以关闭前要确认；
+/// 连接状态和启动失败在主页面的连接状态卡里也会显示。
 class DohSettingsCard extends StatelessWidget {
   const DohSettingsCard({super.key});
 
@@ -35,7 +38,6 @@ class DohSettingsCard extends StatelessWidget {
         vpnService.vpnActiveNotifier,
         vpnService.suppressionNotifier,
         WebViewAdapterSettingsService.instance.notifier,
-        WindowsWebViewEnvironmentService.instance.proxyRestartRequiredNotifier,
       ]),
       builder: (context, _) {
         final settings = service.notifier.value;
@@ -83,13 +85,10 @@ class _DohSettingsCardInner extends StatelessWidget {
         VpnAutoToggleService.instance.vpnActive;
 
     return SegmentedCardGroup(
-      color: settings.dohEnabled
-          ? theme.colorScheme.primaryContainer.withValues(alpha: 0.3)
-          : null,
       children: [
-        // DOH 开关
+        // 连接加速总开关（偏好键仍是 DoH 开关）
         SwitchListTile(
-          title: const Text('DNS over HTTPS'),
+          title: Text(context.l10n.accel_title),
           subtitle: Text(
             vpnLocked
                 ? (isSuppressedByVpn
@@ -113,6 +112,9 @@ class _DohSettingsCardInner extends StatelessWidget {
           onChanged: vpnLocked
               ? (value) => VpnAutoToggleService.instance.setDohSuppressed(value)
               : (value) async {
+                  // 关掉后国内一般直接连不上，先确认
+                  if (!value && !await _confirmTurnOff(context)) return;
+                  if (!context.mounted) return;
                   final requiresCa = WebViewMitmPolicy.requiresTrustedCa(
                     isWindows: Platform.isWindows,
                     dohEnabled: value,
@@ -127,36 +129,12 @@ class _DohSettingsCardInner extends StatelessWidget {
                 },
         ),
 
-        // Windows WebView2 的代理只能在 Environment 创建时确定。
-        if (Platform.isWindows &&
-            WindowsWebViewEnvironmentService.instance.proxyRestartRequired)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Icon(
-                  Symbols.restart_alt_rounded,
-                  size: 18,
-                  color: theme.colorScheme.tertiary,
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    context.l10n.dohSettings_webViewRestartRequired,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-
-        // 仅在开启 DOH 后显示以下内容
+        // 仅在开启加速后显示以下内容
         if (settings.dohEnabled) ...[
-          // 证书引导（iOS: 安装引导，其他平台: per-device 开关；macOS 钥匙串自动处理）
-          if (!Platform.isMacOS) _CertGuide(isApplying: isApplying),
+          // 证书：iOS 要装描述文件，Android 可选设备独有证书；
+          // Windows（WebView2 只信任设备 CA 公钥）/ Linux / macOS 自动处理，不显示
+          if (Platform.isIOS || CertPreferenceService.isPerDeviceOptional)
+            _CertGuide(isApplying: isApplying),
 
           // 状态区域（含启动失败提示）
           Column(
@@ -368,6 +346,29 @@ class _DohSettingsCardInner extends StatelessWidget {
   }
 }
 
+/// 关闭连接加速前确认（关掉后国内一般连不上；VPN 场景交给「VPN 自动让路」）
+Future<bool> _confirmTurnOff(BuildContext context) async {
+  final l10n = context.l10n;
+  final ok = await showDialog<bool>(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      title: Text(l10n.accel_offConfirmTitle),
+      content: Text(l10n.accel_offConfirmBody),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(dialogContext).pop(false),
+          child: Text(l10n.common_cancel),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(dialogContext).pop(true),
+          child: Text(l10n.accel_offConfirmAction),
+        ),
+      ],
+    ),
+  );
+  return ok == true;
+}
+
 /// Windows: 确保网关 MITM 的 CA 已进入用户根信任库
 ///
 /// 未安装时弹对话框引导安装(certutil 用户级,系统弹框二次确认)。
@@ -407,8 +408,9 @@ Future<bool> ensureWindowsCertTrusted(BuildContext context) async {
 
 /// 证书引导 Widget
 ///
-/// iOS（强制 per-device）：显示安装引导
-/// 其他平台：显示 per-device 证书开关
+/// iOS（强制 per-device）：显示描述文件安装引导；
+/// Android（per-device 可选）：显示「设备独有证书」开关。
+/// Windows / Linux / macOS 强制 per-device 且自动处理，调用方不会创建它。
 class _CertGuide extends StatefulWidget {
   const _CertGuide({required this.isApplying});
 
@@ -430,50 +432,22 @@ class _CertGuideState extends State<_CertGuide> {
   }
 
   Future<void> _loadState() async {
-    if (CertPreferenceService.isPerDeviceRequired) {
-      // iOS: 需要安装引导; macOS: 钥匙串自动处理，无需引导
-      if (Platform.isIOS) {
-        final installed = await PerDeviceCertService.instance.isCertInstalled();
-        if (mounted) {
-          setState(() {
-            _installed = installed;
-            _loading = false;
-          });
-        }
-      } else if (Platform.isWindows) {
-        // Windows: per-device 强制(共享内置 CA 绝不进系统信任库),
-        // 仍需检测设备 CA 是否已进用户根信任库并给出安装引导
-        final installed = await WindowsCertTrustService.instance.isInstalled();
-        if (mounted) {
-          setState(() {
-            _installed = installed;
-            _loading = false;
-          });
-        }
-      } else {
-        // macOS: per-device 强制启用，钥匙串自动添加，不显示引导
-        if (mounted) {
-          setState(() {
-            _loading = false;
-          });
-        }
-      }
-    } else {
-      final usePerDevice = await CertPreferenceService.usePerDevice();
+    if (Platform.isIOS) {
+      final installed = await PerDeviceCertService.instance.isCertInstalled();
       if (mounted) {
         setState(() {
-          _perDeviceEnabled = usePerDevice;
+          _installed = installed;
           _loading = false;
         });
       }
+      return;
     }
-  }
-
-  Future<void> _installWindowsCert() async {
-    final ok = await WindowsCertTrustService.instance.install();
-    if (!mounted) return;
-    if (ok) {
-      setState(() => _installed = true);
+    final usePerDevice = await CertPreferenceService.usePerDevice();
+    if (mounted) {
+      setState(() {
+        _perDeviceEnabled = usePerDevice;
+        _loading = false;
+      });
     }
   }
 
@@ -497,13 +471,7 @@ class _CertGuideState extends State<_CertGuide> {
     if (_loading) return const SizedBox.shrink();
 
     final theme = Theme.of(context);
-
     final l10n = context.l10n;
-
-    // macOS: per-device 强制但钥匙串自动处理，不显示引导
-    if (Platform.isMacOS) {
-      return const SizedBox.shrink();
-    }
 
     // iOS: 强制 per-device，显示安装引导
     if (Platform.isIOS) {
@@ -538,58 +506,18 @@ class _CertGuideState extends State<_CertGuide> {
       );
     }
 
-    // Windows: per-device 强制,不显示开关;网关 MITM 依赖系统信任库,
-    // 未安装 CA 时 WebView2 全部握手失败,必须给出安装引导
-    // (certutil 用户级安装,系统弹框确认)
-    if (Platform.isWindows) {
-      return ListTile(
-        leading: Icon(
-          _installed ? Symbols.verified_user_rounded : Symbols.security_rounded,
-          color: _installed ? Colors.green : theme.colorScheme.error,
-        ),
-        title: Text(
-          _installed
-              ? l10n.dohSettings_certInstalled
-              : l10n.dohSettings_certRequired,
-        ),
-        subtitle: Text(
-          _installed
-              ? l10n.dohSettings_certReinstallHint
-              : l10n.dohSettings_certInstallHint,
-          style: TextStyle(
-            color: theme.colorScheme.onSurfaceVariant,
-            fontSize: 12,
-          ),
-        ),
-        trailing: _installed
-            ? OutlinedButton(
-                onPressed: _installWindowsCert,
-                child: Text(l10n.dohSettings_certReinstall),
-              )
-            : FilledButton(
-                onPressed: _installWindowsCert,
-                child: Text(l10n.dohSettings_certInstall),
-              ),
-      );
-    }
-
-    // 其他平台: per-device 证书开关
+    // Android: per-device 证书开关
     return SwitchListTile(
       secondary: Icon(
-        _perDeviceEnabled
-            ? Symbols.verified_user_rounded
-            : Symbols.security_rounded,
-        color: _perDeviceEnabled ? Colors.green : null,
+        Symbols.verified_user_rounded,
+        fill: _perDeviceEnabled ? 1 : 0,
+        color: _perDeviceEnabled ? theme.colorScheme.primary : null,
       ),
       title: Text(l10n.dohSettings_perDeviceCert),
       subtitle: Text(
         _perDeviceEnabled
             ? l10n.dohSettings_perDeviceCertEnabledDesc
             : l10n.dohSettings_perDeviceCertDisabledDesc,
-        style: TextStyle(
-          color: theme.colorScheme.onSurfaceVariant,
-          fontSize: 12,
-        ),
       ),
       value: _perDeviceEnabled,
       onChanged: widget.isApplying ? null : _togglePerDevice,
