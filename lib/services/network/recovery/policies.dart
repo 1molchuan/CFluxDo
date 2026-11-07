@@ -2,7 +2,11 @@ import 'dart:io';
 
 import 'package:dio/dio.dart';
 
+import '../../log/log_writer.dart';
+import '../cookie/cookie_jar_service.dart';
+import '../cookie/csrf_token_service.dart';
 import '../exceptions/api_exception.dart';
+import 'recovery_action.dart';
 import 'recovery_policy.dart';
 import 'retry_after.dart';
 
@@ -79,6 +83,84 @@ class RateLimitPolicy implements RecoveryPolicy {
           (data['errors'] as List?)?.firstOrNull?.toString();
     }
     return null;
+  }
+}
+
+/// BAD CSRF 恢复策略。
+///
+/// 主站回 `403 ["BAD CSRF"]` 多半是会话 Cookie 刚轮换(过盾后采纳了 WebView 的
+/// 会话),手上的 token 跟着失效。刷新 token 后重放一次;重放还是 BAD CSRF 就交回
+/// 调用方。Discourse 前端为防循环不立刻重发,它的阅读时长遇到 403 也不重排、
+/// 直接丢——这里只在首次失败时重放一次,且受尝试预算约束,不会成环。
+class BadCsrfPolicy implements RecoveryPolicy {
+  BadCsrfPolicy({
+    Future<bool> Function()? refreshToken,
+    bool Function(Uri uri)? isMainSite,
+  }) : _action = _RefreshCsrfAction(refreshToken ?? _refreshMainSiteToken),
+       _isMainSite = isMainSite ?? _defaultIsMainSite;
+
+  final _RefreshCsrfAction _action;
+  final bool Function(Uri uri) _isMainSite;
+
+  @override
+  String get name => 'bad-csrf';
+
+  @override
+  bool canHandle(AttemptOutcome outcome) {
+    if (outcome.isSuccess || outcome.statusCode != 403) return false;
+    final error = outcome.error!;
+    return _isMainSite(error.requestOptions.uri) &&
+        isBadCsrfResponse(error.response?.data);
+  }
+
+  @override
+  Future<RecoveryDecision> decide(AttemptOutcome outcome) async {
+    if (outcome.attemptIndex > 0) return const RecoveryDecision.complete();
+    return RecoveryDecision.recoverThenRetry(_action);
+  }
+
+  /// Discourse 的 BAD CSRF 响应体(原文或已解码的 JSON 数组)
+  static bool isBadCsrfResponse(dynamic data) {
+    if (data is String) return data.trim() == '["BAD CSRF"]';
+    if (data is List) return data.length == 1 && data.first == 'BAD CSRF';
+    return false;
+  }
+
+  static bool _defaultIsMainSite(Uri uri) =>
+      uri.host.toLowerCase() == CookieJarService.appBaseHost;
+
+  static Future<bool> _refreshMainSiteToken() async {
+    final csrf = CsrfTokenService();
+    // 清 token 同时解除刷新失败冷却:BAD CSRF 说明请求到了服务端,不是被 CF 挡
+    csrf.clearCsrfToken();
+    await csrf.updateCsrfToken();
+    final token = csrf.csrfToken;
+    return token != null && token.isNotEmpty;
+  }
+}
+
+/// 刷新 CSRF token;同时撞上 BAD CSRF 的请求共享一次刷新
+class _RefreshCsrfAction extends RecoveryAction {
+  _RefreshCsrfAction(this._refresh);
+
+  final Future<bool> Function() _refresh;
+
+  @override
+  String get name => 'refresh-csrf';
+
+  @override
+  Future<bool> perform() async {
+    final ok = await _refresh();
+    LogWriter.instance.write({
+      'timestamp': DateTime.now().toIso8601String(),
+      'level': ok ? 'info' : 'warning',
+      'type': 'auth',
+      'event': 'csrf_bad_response_replay',
+      'message': ok
+          ? '收到 BAD CSRF，已刷新 token，原请求重放一次'
+          : '收到 BAD CSRF，刷新 token 失败，不重放',
+    });
+    return ok;
   }
 }
 

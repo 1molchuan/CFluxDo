@@ -206,18 +206,8 @@ class WebViewSessionCookieRefreshService {
     // 主线程,恰是"长时间挂后台回来卡"的来源之一)。产物 _rt/_forum_session
     // 不随 _t 轮换失效;换账号由 logout → [resetSessionState] 复位,
     // CF recover 走 force,失败补跑由退避链继续。
+    // 这是稳态(每个请求都会问一次),不记日志:以前每次都记,占了应用日志的一半
     if (!force && _lastSuccessAt != null) {
-      _logEnsureEvent(
-        event: 'webview_session_sync_skipped',
-        reason: reason,
-        level: 'info',
-        extra: {
-          'skipReason': 'synced_this_session',
-          'lastSuccessAgeMs': DateTime.now()
-              .difference(_lastSuccessAt!)
-              .inMilliseconds,
-        },
-      );
       return const SessionBootstrapResult.success();
     }
 

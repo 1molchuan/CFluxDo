@@ -426,9 +426,22 @@ class BrowserTrustCoordinator {
     );
     var bootstrap = await WebViewSessionCookieRefreshService.instance
         .ensureSynced(reason: reason, force: forceSessionSync);
-    // bootstrap 被 CF(403/429)挡下:作废本地假阳性信任,复用/发起 CF 验证拿到
+    // bootstrap 被 CF(403)挡下:作废本地假阳性信任,复用/发起 CF 验证拿到
     // 新 cf_clearance 后 force 重跑一次,避免与 Dio 侧的 CF 自愈各自为政。
-    if (bootstrap.cfBlocked) {
+    // 429 是限流规则给的挑战,不说明 clearance 坏了;bootstrap 又只是软依赖,
+    // 按它自己的失败退避稍后再试。以前也替它发起验证、把本地 clearance 记成
+    // 被拒,启动时常因此多弹一次盾(2026-11 用户日志:启动 bootstrap 被 429 挡下 9 次)
+    if (bootstrap.cfBlocked && bootstrap.status == 429) {
+      _log(
+        'bootstrap rate-limited by CF (429), backing off without verification '
+        'reason=$reason',
+        level: 'warning',
+      );
+      AppLogger.warning(
+        'WebView bootstrap 被 CF 限流(429),稍后按退避重试,不发起验证',
+        tag: 'BrowserTrust',
+      );
+    } else if (bootstrap.cfBlocked) {
       bootstrap = await _recoverBootstrapFromCfBlock(
         reason: reason,
         blocked: bootstrap,

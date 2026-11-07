@@ -188,6 +188,12 @@ class WebViewCookiePriming {
         if (initialCookie.name == 'cf_clearance') {
           continue;
         }
+        // CF 挑战平台的诊断 cookie（cf_chl_rc_i / cf_chl_rc_ni / cf_chl_rc_m 等）同理：
+        // 只由 CF 在 WebView 里写，回灌会复制出第二个变体、怎么删都删不掉，每轮
+        // priming 白白卡 4～10 秒还记一次失败（2026-11 用户日志）。原生侧也用不到它们
+        if (_isChallengePlatformCookie(initialCookie.name)) {
+          continue;
+        }
         // _t 只在对账有明确结论时重灌（见 1.5）。
         if (initialCookie.name == SessionTokenAuthority.cookieName &&
             !injectSessionToken) {
@@ -290,6 +296,7 @@ class WebViewCookiePriming {
       final currentJar = await _jar.loadCanonicalCookiesForRequest(uri);
       for (final cookie in currentJar) {
         if (cookie.value.isEmpty || _isExpired(cookie)) continue;
+        if (_isChallengePlatformCookie(cookie.name)) continue;
         final count = await _writer.countCookiesByName(url, cookie.name);
         if (count >= 1) {
           verified++;
@@ -414,6 +421,10 @@ class WebViewCookiePriming {
     final expiresAt = cookie.expiresAt;
     return expiresAt != null && expiresAt.isBefore(DateTime.now());
   }
+
+  /// CF 挑战平台写的 cookie（`cf_chl_` 前缀），只归 WebView 管，不回灌
+  static bool _isChallengePlatformCookie(String name) =>
+      name.startsWith('cf_chl_');
 
   Future<bool> _isAcceptableDuplicate(
     String url,

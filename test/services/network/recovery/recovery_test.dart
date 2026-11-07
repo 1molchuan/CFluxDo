@@ -297,6 +297,75 @@ void main() {
       expect(adapter.callCount, 1);
     });
   });
+
+  group('BadCsrfPolicy', () {
+    BadCsrfPolicy policy({required Future<bool> Function() refresh}) =>
+        BadCsrfPolicy(refreshToken: refresh, isMainSite: (_) => true);
+
+    test('只认主站的 403 ["BAD CSRF"]', () {
+      final p = policy(refresh: () async => true);
+      expect(p.canHandle(_failure(403, method: 'POST', body: '["BAD CSRF"]')), isTrue);
+      expect(p.canHandle(_failure(403, method: 'POST', body: ['BAD CSRF'])), isTrue);
+      expect(p.canHandle(_failure(403, method: 'POST', body: {'errors': ['x']})), isFalse);
+      expect(p.canHandle(_failure(429, method: 'POST', body: '["BAD CSRF"]')), isFalse);
+      final other = BadCsrfPolicy(
+        refreshToken: () async => true,
+        isMainSite: (_) => false,
+      );
+      expect(other.canHandle(_failure(403, method: 'POST', body: '["BAD CSRF"]')), isFalse);
+    });
+
+    test('刷新 token 后重放一次：调用方只看到 200，阅读时长不丢', () async {
+      var refreshed = 0;
+      final adapter = _ScriptedAdapter([
+        _Reply(403, '["BAD CSRF"]'),
+        _Reply(200, '{"ok":true}'),
+      ]);
+      final dio = _buildDio(adapter, [
+        policy(
+          refresh: () async {
+            refreshed++;
+            return true;
+          },
+        ),
+      ]);
+
+      final response = await dio.post<dynamic>(
+        '/topics/timings',
+        data: {'topic_id': 1, 'topic_time': 1000},
+      );
+
+      expect(response.statusCode, 200);
+      expect(adapter.callCount, 2);
+      expect(refreshed, 1);
+    });
+
+    test('重放还是 BAD CSRF：只重放一次就交回调用方', () async {
+      final adapter = _ScriptedAdapter([_Reply(403, '["BAD CSRF"]')]);
+      final dio = _buildDio(adapter, [policy(refresh: () async => true)]);
+
+      DioException? caught;
+      try {
+        await dio.post<dynamic>('/topics/timings', data: {'topic_id': 1});
+      } on DioException catch (e) {
+        caught = e;
+      }
+
+      expect(adapter.callCount, 2);
+      expect(caught!.response?.statusCode, 403);
+    });
+
+    test('刷新失败（取不到 token）不重放', () async {
+      final adapter = _ScriptedAdapter([_Reply(403, '["BAD CSRF"]')]);
+      final dio = _buildDio(adapter, [policy(refresh: () async => false)]);
+
+      try {
+        await dio.post<dynamic>('/topics/timings', data: {'topic_id': 1});
+      } on DioException catch (_) {}
+
+      expect(adapter.callCount, 1);
+    });
+  });
 }
 
 // --- 测试脚手架 ---

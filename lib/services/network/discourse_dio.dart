@@ -187,7 +187,7 @@ class DiscourseDio {
     // 4. 恢复协调器:全项目唯一的重放引擎
     //
     // 策略顺序即失败归属(首个 canHandle 者独占决策权):
-    //   会话自愈 → 限流等待 → 瞬态重试
+    //   会话自愈 → BAD CSRF 刷新重放 → 限流等待 → 瞬态重试
     //
     // 必须注册在 AppCookieManager **之前**:dio 5.11 三相全 FIFO,先注册者
     // 先看到响应。服务端拒绝时常带 Set-Cookie 清 _t,自愈判定要读的是那条
@@ -212,6 +212,8 @@ class DiscourseDio {
           policies: [
             // 自愈读 jar 快照时会自行等待 jar 初始化
             if (enableCookies) SessionSelfHealPolicy(),
+            // CSRF 只有带会话的主站链路才有
+            if (enableCookies) BadCsrfPolicy(),
             RateLimitPolicy(
               isChallengeResponse: CfChallengeClassifier.isChallengeResponse,
             ),
