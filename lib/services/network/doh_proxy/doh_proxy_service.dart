@@ -39,6 +39,7 @@ class DohProxyService {
   String? _currentServerIp;
   bool? _currentMitmConnect;
   bool? _currentH2Mitm;
+  bool? _currentBrowserTls;
   String? _currentUpstreamSignature;
   String? _currentDohRoutesUrl;
   String? _currentSelectMode;
@@ -102,6 +103,9 @@ class DohProxyService {
     String? appVersion,
     String? networkSig,
     List<String> preconnectHosts = const [],
+    bool browserTls = false,
+    String? fingerprintCachePath,
+    String? webviewUserAgent,
   }) async {
     final authSignature = _buildAuthSignature(dohAuthToken, dohEchAuthToken);
     final bootstrapSignature = _buildBootstrapSignature(
@@ -130,6 +134,7 @@ class DohProxyService {
           _currentServerIp == serverIp &&
           _currentMitmConnect == mitmConnect &&
           _currentH2Mitm == h2Mitm &&
+          _currentBrowserTls == browserTls &&
           _currentUpstreamSignature == upstreamSignature &&
           // 路由表 / 节点列表只是启动时的种子，内容变了不重启；只看接口地址
           _currentDohRoutesUrl == dohRoutesUrl &&
@@ -185,6 +190,9 @@ class DohProxyService {
         networkSig: networkSig,
         preconnectHosts: preconnectHosts,
         ipv6Auto: ipv6Auto,
+        browserTls: browserTls,
+        fingerprintCachePath: fingerprintCachePath,
+        webviewUserAgent: webviewUserAgent,
       );
       // 桌面平台 FFI 加载失败时，回退到进程模式
       if (!result && DohProxyFfi.canFallbackToProcess) {
@@ -282,6 +290,9 @@ class DohProxyService {
     String? networkSig,
     List<String> preconnectHosts = const [],
     bool ipv6Auto = false,
+    bool browserTls = false,
+    String? fingerprintCachePath,
+    String? webviewUserAgent,
   }) async {
     try {
       return await _enqueueFfiOp(() async {
@@ -328,6 +339,9 @@ class DohProxyService {
           networkSig: networkSig,
           preconnectHosts: preconnectHosts,
           ipv6Auto: ipv6Auto,
+          browserTls: browserTls,
+          fingerprintCachePath: fingerprintCachePath,
+          webviewUserAgent: webviewUserAgent,
         );
         if (resultPort <= 0) {
           // _callFfiStart 已设置更详细的 _lastError，仅在未设置时补充
@@ -356,6 +370,7 @@ class DohProxyService {
         _currentServerIp = serverIp;
         _currentMitmConnect = mitmConnect;
         _currentH2Mitm = h2Mitm;
+        _currentBrowserTls = browserTls;
         _currentUpstreamSignature = _buildUpstreamSignature(
           protocol: upstreamProtocol,
           host: upstreamHost,
@@ -639,6 +654,7 @@ class DohProxyService {
     _currentServerIp = null;
     _currentMitmConnect = null;
     _currentH2Mitm = null;
+    _currentBrowserTls = null;
     _currentUpstreamSignature = null;
     _currentDohRoutesUrl = null;
     _currentSelectMode = null;
@@ -1240,6 +1256,9 @@ class DohProxyService {
     String? networkSig,
     List<String> preconnectHosts = const [],
     bool ipv6Auto = false,
+    bool browserTls = false,
+    String? fingerprintCachePath,
+    String? webviewUserAgent,
   }) async {
     final sendPort = await _ensureFfiIsolate();
     final response = ReceivePort();
@@ -1281,6 +1300,9 @@ class DohProxyService {
       'appVersion': appVersion,
       'networkSig': networkSig,
       'preconnectHosts': preconnectHosts,
+      'browserTls': browserTls,
+      'fingerprintCachePath': fingerprintCachePath,
+      'webviewUserAgent': webviewUserAgent,
       'preferredPort': port,
       'replyTo': response.sendPort,
     });
@@ -1640,6 +1662,10 @@ void _ffiIsolateEntry(SendPort mainSendPort) {
           final appVersion = message['appVersion'] as String?;
           final networkSig = message['networkSig'] as String?;
           final preconnectHosts = _stringList(message['preconnectHosts']);
+          final browserTls = message['browserTls'] as bool? ?? false;
+          final fingerprintCachePath =
+              message['fingerprintCachePath'] as String?;
+          final webviewUserAgent = message['webviewUserAgent'] as String?;
           var resultPort = DohProxyFfi.instance.start(
             port: portValue,
             enableDoh: enableDoh,
@@ -1677,6 +1703,9 @@ void _ffiIsolateEntry(SendPort mainSendPort) {
             appVersion: appVersion,
             networkSig: networkSig,
             preconnectHosts: preconnectHosts,
+            browserTls: browserTls,
+            fingerprintCachePath: fingerprintCachePath,
+            webviewUserAgent: webviewUserAgent,
           );
           if (resultPort <= 0 && preferredPort != 0) {
             resultPort = DohProxyFfi.instance.start(
@@ -1716,6 +1745,9 @@ void _ffiIsolateEntry(SendPort mainSendPort) {
               appVersion: appVersion,
               networkSig: networkSig,
               preconnectHosts: preconnectHosts,
+              browserTls: browserTls,
+              fingerprintCachePath: fingerprintCachePath,
+              webviewUserAgent: webviewUserAgent,
             );
           }
           if (resultPort <= 0) {

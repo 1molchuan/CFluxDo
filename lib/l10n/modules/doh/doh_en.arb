@@ -254,5 +254,8 @@
   "dohDetail_accelAuthOk": "Authorized; switched to CFluxDo acceleration",
   "dohDetail_accelAuthUnavailable": "This account can't use Connect; staying on public acceleration",
   "dohDetail_accelAuthDenied": "The acceleration server rejected this account; staying on public acceleration",
-  "dohDetail_accelAuthPending": "Authorization didn't finish; it will retry automatically later"
+  "dohDetail_accelAuthPending": "Authorization didn't finish; it will retry automatically later",
+  "dohDetail_browserTls": "Browser fingerprint (experimental)",
+  "dohDetail_browserTlsEnabledDesc": "On: connections through the gateway copy this device's WebView handshake (TLS and HTTP/2) and request headers",
+  "dohDetail_browserTlsDisabledDesc": "Off: connections through the gateway use a generic TLS handshake"
 }

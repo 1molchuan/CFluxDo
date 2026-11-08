@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
@@ -79,6 +80,19 @@ class _DohDetailSettingsPageState extends State<DohDetailSettingsPage> {
                     value: settings.h2Mitm,
                     onChanged: (value) => _service.setH2Mitm(value),
                   ),
+                  // 浏览器指纹：只有安卓的原生库编进了这个能力
+                  if (Platform.isAndroid)
+                    SwitchListTile(
+                      title: Text(context.l10n.dohDetail_browserTls),
+                      subtitle: Text(
+                        settings.browserTls
+                            ? context.l10n.dohDetail_browserTlsEnabledDesc
+                            : context.l10n.dohDetail_browserTlsDisabledDesc,
+                      ),
+                      secondary: const Icon(Symbols.fingerprint_rounded),
+                      value: settings.browserTls,
+                      onChanged: (value) => _service.setBrowserTls(value),
+                    ),
                   // Server IP
                   ListTile(
                     leading: const Icon(Symbols.dns_rounded),

@@ -261,5 +261,8 @@
   "dohDetail_accelAuthOk": "授权成功，已切换到 CFluxDo 加速",
   "dohDetail_accelAuthUnavailable": "此账号无法使用 Connect，继续使用公共加速",
   "dohDetail_accelAuthDenied": "加速服务端拒绝了此账号，继续使用公共加速",
-  "dohDetail_accelAuthPending": "授权没有完成，稍后会自动重试"
+  "dohDetail_accelAuthPending": "授权没有完成，稍后会自动重试",
+  "dohDetail_browserTls": "浏览器指纹（实验）",
+  "dohDetail_browserTlsEnabledDesc": "已开启：经网关的连接照本机 WebView 的握手（TLS 与 HTTP/2）和请求头发出",
+  "dohDetail_browserTlsDisabledDesc": "已关闭：经网关的连接用通用的 TLS 握手"
 }

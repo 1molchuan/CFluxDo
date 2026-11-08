@@ -105,6 +105,7 @@ class AppConstants {
       // 清理 UA，使其看起来像普通浏览器
       _cachedUserAgent = _sanitizeUserAgent(webViewUA);
       _uaFromWebView = true;
+      unawaited(_rememberWebViewUserAgent(_cachedUserAgent!));
       debugPrint('[AppConstants] WebView UA: $webViewUA');
       debugPrint('[AppConstants] Sanitized UA: $_cachedUserAgent');
     } catch (e) {
@@ -152,6 +153,21 @@ class AppConstants {
       return (ua is String && ua.isNotEmpty) ? ua : null;
     } catch (_) {
       return null;
+    }
+  }
+
+  /// 上次探到的 WebView UA：本地代理比 UA 探测先起，起代理时拿它挑指纹预置档、
+  /// 核对落盘的指纹模板是否随 WebView 升级而过期
+  static const String _lastWebViewUaKey = 'webview_user_agent_last';
+
+  static Future<void> _rememberWebViewUserAgent(String ua) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (prefs.getString(_lastWebViewUaKey) != ua) {
+        await prefs.setString(_lastWebViewUaKey, ua);
+      }
+    } catch (e) {
+      debugPrint('[AppConstants] 记录 WebView UA 失败: $e');
     }
   }
 
@@ -369,6 +385,15 @@ class AppConstants {
 
   /// 同步获取 User-Agent（需确保已初始化，否则返回默认值）
   static String get userAgent => _cachedUserAgent ?? _buildDefaultUserAgent();
+
+  /// 探到的 WebView UA（清理过 wv 标识）；还没探到或探测失败（用的内置默认 UA）时为 null。
+  /// 网关按它挑浏览器指纹的预置档、判断落盘的指纹模板是否随 WebView 升级而过期
+  static String? get webViewUserAgentIfKnown =>
+      _uaFromWebView ? _cachedUserAgent : null;
+
+  /// 本次探到的 WebView UA；还没探到时用上次记下的
+  static String? lastKnownWebViewUserAgent(SharedPreferences prefs) =>
+      webViewUserAgentIfKnown ?? prefs.getString(_lastWebViewUaKey);
 
   /// 原生请求带的 Client Hints 低熵三件套，与 WebView 自己发的逐字一致（仅 Android）。
   ///

@@ -845,6 +845,9 @@ class DohProxyFfi {
     String? appVersion,
     String? networkSig,
     List<String> preconnectHosts = const [],
+    bool browserTls = false,
+    String? fingerprintCachePath,
+    String? webviewUserAgent,
   }) {
     if (!_initialized && !initialize()) {
       return -1;
@@ -917,6 +920,12 @@ class DohProxyFfi {
       if (appVersion != null && appVersion.isNotEmpty) 'app_version': appVersion,
       if (networkSig != null && networkSig.isNotEmpty) 'network_sig': networkSig,
       if (preconnectHosts.isNotEmpty) 'preconnect_hosts': preconnectHosts,
+      // 上游握手照 WebView 的 ClientHello 复刻（原生库编译时带 browser-tls 才生效）
+      if (browserTls) 'browser_tls': true,
+      if (fingerprintCachePath != null && fingerprintCachePath.isNotEmpty)
+        'fingerprint_cache_path': fingerprintCachePath,
+      if (webviewUserAgent != null && webviewUserAgent.isNotEmpty)
+        'webview_user_agent': webviewUserAgent,
     });
     final configPtr = configJson.toNativeUtf8();
     try {

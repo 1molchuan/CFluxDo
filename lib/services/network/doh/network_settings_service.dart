@@ -9,6 +9,7 @@ import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart' as inappwebview;
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../constants.dart';
@@ -92,6 +93,7 @@ class NetworkSettings {
     this.serverIp,
     this.gatewayEnabled = true,
     this.h2Mitm = false,
+    this.browserTls = false,
     this.selectMode = CfSelectMode.localAtlas,
     this.shareMeasurements = false,
   });
@@ -123,8 +125,12 @@ class NetworkSettings {
   /// Gateway（反向代理）模式开关，关闭时回退为 MITM
   final bool gatewayEnabled;
 
-  /// WebView MITM 是否启用 HTTP/2 多路复用（实验性，默认关闭；需实测 CF 指纹）
+  /// WebView MITM 是否启用 HTTP/2 多路复用（按请求转发到上游；安卓默认开，其余平台默认关）
   final bool h2Mitm;
+
+  /// 浏览器指纹：网关的上游握手（TLS 与 HTTP/2）照 WebView 复刻（安卓默认开；
+  /// 其余平台的原生库没编进这个能力，开了也不生效）
+  final bool browserTls;
 
   /// 本地动态优选的模式
   final CfSelectMode selectMode;
@@ -142,6 +148,7 @@ class NetworkSettings {
     String? Function()? serverIp,
     bool? gatewayEnabled,
     bool? h2Mitm,
+    bool? browserTls,
     CfSelectMode? selectMode,
     bool? shareMeasurements,
   }) {
@@ -155,6 +162,7 @@ class NetworkSettings {
       gatewayEnabled: gatewayEnabled ?? this.gatewayEnabled,
       serverIp: serverIp != null ? serverIp() : this.serverIp,
       h2Mitm: h2Mitm ?? this.h2Mitm,
+      browserTls: browserTls ?? this.browserTls,
       selectMode: selectMode ?? this.selectMode,
       shareMeasurements: shareMeasurements ?? this.shareMeasurements,
     );
@@ -285,6 +293,7 @@ class NetworkSettingsService {
   static const _echServerKey = 'doh_ech_server';
   static const _gatewayEnabledKey = 'doh_gateway_enabled';
   static const _h2MitmKey = 'doh_h2_mitm';
+  static const _browserTlsKey = 'doh_browser_tls';
   static const _accelSubdomainKey = 'doh_accel_subdomain';
 
   /// 加速服务端下发的路由表（原始响应 JSON），启动时回传给 Rust 直接用
@@ -542,7 +551,10 @@ class NetworkSettingsService {
     final serverIp = prefs.getString(_serverIpKey);
     final echServer = prefs.getString(_echServerKey);
     final gatewayEnabled = prefs.getBool(_gatewayEnabledKey) ?? true;
-    final h2Mitm = prefs.getBool(_h2MitmKey) ?? false;
+    // 安卓默认开：内置网页按请求转发到上游，和 App 自己的请求走同一种连接（h2 + 同一指纹）；
+    // 原样字节拷贝的 h1 MITM 上游只能谈 HTTP/1.1，指纹与原生请求对不上
+    final h2Mitm = prefs.getBool(_h2MitmKey) ?? Platform.isAndroid;
+    final browserTls = prefs.getBool(_browserTlsKey) ?? Platform.isAndroid;
     final resolvedSelected = _resolveSelected(selected, custom);
     notifier.value = NetworkSettings(
       dohEnabled: dohEnabled,
@@ -554,6 +566,7 @@ class NetworkSettingsService {
       serverIp: serverIp,
       gatewayEnabled: gatewayEnabled,
       h2Mitm: h2Mitm,
+      browserTls: browserTls,
       selectMode: selectMode,
       shareMeasurements: shareMeasurements,
     );
@@ -765,6 +778,26 @@ class NetworkSettingsService {
     await prefs.setBool(_h2MitmKey, enabled);
     _scheduleApplyProxyState();
     _touch();
+  }
+
+  /// 切换浏览器指纹（实验性）。切换后重启代理生效
+  Future<void> setBrowserTls(bool enabled) async {
+    final prefs = _prefs;
+    if (prefs == null) return;
+    notifier.value = notifier.value.copyWith(browserTls: enabled);
+    await prefs.setBool(_browserTlsKey, enabled);
+    _scheduleApplyProxyState();
+    _touch();
+  }
+
+  /// 指纹模板的落盘位置（应用支持目录下，卸载即清）
+  static Future<String?> _fingerprintCachePath() async {
+    try {
+      final dir = await getApplicationSupportDirectory();
+      return '${dir.path}/net/fingerprint_template.json';
+    } catch (_) {
+      return null;
+    }
   }
 
   /// 切换本地优选模式；网关要按新模式重启
@@ -1041,6 +1074,14 @@ class NetworkSettingsService {
         networkSig: ConnectivityService().networkSignature.value,
         // 优选出结果后先预建一条到 linux.do 的上游连接，首个请求不用再等握手
         preconnectHosts: [SiteContext.current.host],
+        browserTls: current.browserTls,
+        fingerprintCachePath: current.browserTls
+            ? await _fingerprintCachePath()
+            : null,
+        // 冷启动时 UA 还没探（探测排在起代理之后），用上次记下的
+        webviewUserAgent: prefsForSeed == null
+            ? AppConstants.webViewUserAgentIfKnown
+            : AppConstants.lastKnownWebViewUserAgent(prefsForSeed),
       );
 
       if (!success) {

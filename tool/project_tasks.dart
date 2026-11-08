@@ -607,7 +607,7 @@ Future<void> _prepareAndroidNative(
     'build',
     if (mode == _BuildMode.release) '--release',
     '--features',
-    'ech',
+    _androidRustFeatures,
     '--lib',
   ];
   await runOrExit(
@@ -615,6 +615,7 @@ Future<void> _prepareAndroidNative(
     executable: 'cargo',
     arguments: cargoArgs,
     workingDirectory: 'core/doh_proxy',
+    environment: _boringBuildEnvironment(),
   );
 
   final cargoDir = mode == _BuildMode.release ? 'release' : 'debug';
@@ -721,7 +722,10 @@ String _rustInputStamp() {
           File('core/doh_proxy/Cargo.toml'),
           File('core/doh_proxy/Cargo.lock'),
           File('core/doh_proxy/build.rs'),
+          File('core/doh_proxy/.cargo/config.toml'),
           ..._collectFiles('core/doh_proxy/src'),
+          ..._collectFiles('core/doh_proxy/vendor'),
+          ..._collectFiles('core/doh_proxy/presets'),
         ].where((file) => file.existsSync()).toList()
         ..sort((a, b) => a.path.compareTo(b.path));
 
@@ -1129,7 +1133,53 @@ List<String> _androidStagedOutputs(List<_AndroidTarget> targets) {
 }
 
 String _androidVariantKey(List<_AndroidTarget> targets) {
-  return 'targets=${targets.map((target) => target.flutterTarget).join(',')}';
+  return 'targets=${targets.map((target) => target.flutterTarget).join(',')}'
+      ';features=$_androidRustFeatures';
+}
+
+/// 安卓的原生库多编一个浏览器指纹（BoringSSL，见 core/doh_proxy 的 browser-tls 特性）
+const _androidRustFeatures = 'ech,browser-tls';
+
+/// BoringSSL 的绑定由 bindgen 生成，要能加载 libclang。没设 LIBCLANG_PATH 时用 NDK 自带的
+/// （NDK 28 起 `toolchains/llvm/prebuilt/<host>/lib` 下有 glibc 版 libclang.so）
+Map<String, String>? _boringBuildEnvironment() {
+  if ((Platform.environment['LIBCLANG_PATH'] ?? '').isNotEmpty) return null;
+  final roots = <String>{
+    for (final key in ['ANDROID_NDK_HOME', 'ANDROID_NDK_ROOT'])
+      if ((Platform.environment[key] ?? '').isNotEmpty)
+        Platform.environment[key]!,
+    for (final key in ['ANDROID_HOME', 'ANDROID_SDK_ROOT'])
+      if ((Platform.environment[key] ?? '').isNotEmpty)
+        ...(() {
+          final ndk = Directory('${Platform.environment[key]}/ndk');
+          if (!ndk.existsSync()) return const <String>[];
+          final versions =
+              ndk.listSync().whereType<Directory>().map((d) => d.path).toList()
+                ..sort();
+          return versions.reversed;
+        })(),
+  };
+  for (final root in roots) {
+    final prebuilt = Directory('$root/toolchains/llvm/prebuilt');
+    if (!prebuilt.existsSync()) continue;
+    for (final host in prebuilt.listSync().whereType<Directory>()) {
+      final lib = Directory('${host.path}/lib');
+      final found =
+          lib.existsSync() &&
+          lib.listSync().whereType<File>().any(
+            (file) => file.uri.pathSegments.last.startsWith('libclang.so'),
+          );
+      if (found) {
+        stdout.writeln('==> bindgen 用 NDK 的 libclang：${lib.path}');
+        return {'LIBCLANG_PATH': lib.path};
+      }
+    }
+  }
+  stderr.writeln(
+    '!! 没找到 libclang：浏览器指纹（BoringSSL）的绑定生成会失败。'
+    '装 NDK 28+ 或 libclang-dev，并设 LIBCLANG_PATH 指向它所在目录。',
+  );
+  return null;
 }
 
 Future<String> _detectMacOsHostArch() async {
