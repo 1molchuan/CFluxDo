@@ -10,6 +10,7 @@ import '../emoji_handler.dart';
 import '../message_bus_service.dart';
 import '../network/cookie/cookie_jar_service.dart';
 import '../network/doh/network_settings_service.dart';
+import '../network/doh_proxy/fetch_order_probe_service.dart';
 import '../preloaded_data_service.dart';
 import '../session/webview_use.dart';
 import '../site_context.dart';
@@ -53,6 +54,8 @@ class ProductionStartupPorts implements AppStartupPorts {
   void afterPreload() {
     DiscourseService().getEnabledReactions();
     EmojiHandler().init();
+    // 首页的原生请求发过一阵后，让 WebView 补采对不上的请求头组合
+    FetchOrderProbeService.instance.schedule(reason: 'startup');
   }
 
   @override
@@ -105,6 +108,7 @@ class ProductionStartupPorts implements AppStartupPorts {
     NetworkSettingsService.instance.ensureProxyAlive();
     // 主动检查连通性（等同 Discourse 的 visibilitychange）
     unawaited(ConnectivityService().check());
+    FetchOrderProbeService.instance.schedule(reason: 'resume');
   }
 
   @override

@@ -1078,6 +1078,12 @@ class DohProxyService {
     return DohProxyFfi.instance.netStats();
   }
 
+  /// 浏览器指纹模板的状态（见 [DohProxyFfi.fingerprintStatus]）；进程模式 / 库不支持返回 null
+  Map<String, dynamic>? fingerprintStatus() {
+    if (!DohProxyFfi.isAvailable || _process != null) return null;
+    return DohProxyFfi.instance.fingerprintStatus();
+  }
+
   Future<DohDnsCacheStats?> dnsCacheStats() async {
     if (!DohProxyFfi.isAvailable) {
       return DohProxyFfi.instance.dnsCacheStats();

@@ -1297,6 +1297,25 @@ class DohProxyFfi {
     return stats is Map<String, dynamic> ? stats : null;
   }
 
+  /// 浏览器指纹模板的状态（来源、代数、采样簿组数、`probe_pending` 待采组数）；
+  /// 代理没在跑、没开浏览器指纹或库不支持时返回 null
+  Map<String, dynamic>? fingerprintStatus() {
+    if (!_initialized && !initialize()) return null;
+    final fn = _dohProxyNetStats;
+    if (fn == null) return null;
+
+    final resultPtr = fn();
+    if (resultPtr == nullptr) return null;
+
+    final jsonStr = resultPtr.toDartString();
+    _dohProxyFreeString(resultPtr);
+
+    final decoded = jsonDecode(jsonStr);
+    if (decoded is! Map<String, dynamic> || decoded['ok'] != true) return null;
+    final status = decoded['fingerprint'];
+    return status is Map<String, dynamic> ? status : null;
+  }
+
   DohDnsCacheStats? dnsCacheStats() {
     if (!_initialized && !initialize()) return null;
     final fn = _dohProxyDnsCacheStats;
