@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -6,12 +7,15 @@ import 'package:flutter/material.dart';
 import 'package:app_icons/app_icons.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:m3e_ui/m3e_ui.dart';
+import '../../../../config/forum_site.dart';
 import '../../../../constants.dart';
 import '../../../../utils/layout_lock.dart';
 import '../../../../utils/url_helper.dart';
 import '../../../../pages/webview_page.dart';
 import '../../../../l10n/s.dart';
 import '../../../../services/navigation/app_route_observer.dart';
+import '../../../../services/session/webview_use.dart';
+import '../../../../services/site_context.dart';
 import '../../../../services/embedded_browser_controller_pool.dart';
 import '../../../../services/dynamic_content_suspension_service.dart';
 import '../../../../services/webview_render_gone.dart';
@@ -20,6 +24,12 @@ import '../../../../services/windows_webview_environment_service.dart';
 
 /// 是否需要交互遮罩（macOS 上 WebView 会捕获滚动事件）
 bool get _needsInteractionMask => !kIsWeb && Platform.isMacOS;
+
+/// 本站嵌入页 `window.open` 开的新窗口叠一页内置浏览器承载（Android）。linux.do 微应用
+/// （红包等）的「打开链接」是站方宿主脚本在用户确认后 window.open（应用本身在 sandbox
+/// 里开不了窗口）：不接的话 Android 在这个嵌入框里直接换成新页面，帖子里的应用被顶掉。
+/// 其他平台没验过新窗口接管，保持原样
+bool get _supportsPopupPages => !kIsWeb && Platform.isAndroid;
 
 /// iframe 属性解析结果
 class IframeAttributes {
@@ -167,12 +177,29 @@ class _IframeWidgetState extends State<IframeWidget> with RouteAware {
   /// 避免 hybrid composition 持续脏帧触发 BackdropFilter 全屏重算。
   bool _routeOverlayed = false;
 
+  /// 本站页面（微应用、红包等）的 WebView 使用期：加载前从 jar 重灌登录 cookie，
+  /// 关掉时把页内请求轮换过的 `_t` 交给 authority，与内置浏览器同一口径。
+  /// 不灌的话 WebView 带着旧的或空的 `_t` 打开，微应用当成没登录（「检查访问权限」）
+  WebViewUse? _webViewUse;
+  bool _loadedOnce = false;
+
+  /// 新窗口只给本站页面接（见 [_supportsPopupPages]）；第三方嵌入照旧
+  bool get _allowPopups => _supportsPopupPages && _webViewUse != null;
+
   @override
   void initState() {
     super.initState();
     DynamicContentSuspensionService.instance.addListener(
       _handleDynamicContentSuspension,
     );
+    final uri = Uri.tryParse(widget.attributes.fullUrl);
+    if (uri != null && ForumSite.fromUri(uri) == SiteContext.current) {
+      _webViewUse = WebViewUses.instance.start(
+        WebViewUsePurpose.browsing,
+        url: widget.attributes.fullUrl,
+        reason: 'post_iframe',
+      );
+    }
   }
 
   void _handleDynamicContentSuspension() {
@@ -209,8 +236,21 @@ class _IframeWidgetState extends State<IframeWidget> with RouteAware {
     _removeOverlay();
     _unlockLayoutIfNeeded();
     _browserLease?.release();
+    final use = _webViewUse;
+    if (use != null) {
+      unawaited(
+        _loadedOnce
+            ? use.end(WebViewUseOutcome.loaded, reason: 'post_iframe_dispose')
+            : use.end(WebViewUseOutcome.aborted),
+      );
+    }
     super.dispose();
   }
+
+  URLRequest _initialRequest(IframeAttributes attrs) => URLRequest(
+    url: WebUri(attrs.fullUrl),
+    headers: {'Referer': AppConstants.baseUrl},
+  );
 
   void _activateWindowsWebView() {
     if (_webViewActivated ||
@@ -268,6 +308,27 @@ class _IframeWidgetState extends State<IframeWidget> with RouteAware {
       _renderGone = false;
       _webViewGeneration++;
     });
+  }
+
+  /// 网页要开新窗口：叠一页内置浏览器承载它（同 WebViewPage 的弹窗）。
+  /// 必须同步答应，新窗口的地址由网页随后加载进这一页
+  Future<bool?> _openPopupPage(
+    InAppWebViewController controller,
+    CreateWindowAction action,
+  ) async {
+    if (!mounted) return false;
+    unawaited(
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => WebViewPage(
+            url: action.request.url?.toString() ?? '',
+            allowPopups: true,
+            windowId: action.windowId,
+          ),
+        ),
+      ),
+    );
+    return true;
   }
 
   void _exitInteractMode() {
@@ -346,14 +407,19 @@ class _IframeWidgetState extends State<IframeWidget> with RouteAware {
                 webViewEnvironment: deferWindowsWebView
                     ? WindowsWebViewEnvironmentService.instance.environment
                     : null,
-                initialUrlRequest: URLRequest(
-                  url: WebUri(attrs.fullUrl),
-                  headers: {'Referer': AppConstants.baseUrl},
-                ),
+                // 本站页面等 cookie 灌好再加载（见 [_webViewUse]）
+                initialUrlRequest: _webViewUse == null
+                    ? _initialRequest(attrs)
+                    : null,
                 initialSettings: _buildSettings(attrs),
                 initialUserScripts: WebViewSettings.compatPolyfillScripts,
-                onWebViewCreated: (controller) {
+                onWebViewCreated: (controller) async {
                   WebViewSettings.registerJsErrorReporter(controller);
+                  final use = _webViewUse;
+                  if (use == null) return;
+                  await use.ready;
+                  if (!mounted) return;
+                  await controller.loadUrl(urlRequest: _initialRequest(attrs));
                 },
                 onReceivedServerTrustAuthRequest: (_, challenge) =>
                     WebViewSettings.handleServerTrustAuthRequest(challenge),
@@ -380,6 +446,7 @@ class _IframeWidgetState extends State<IframeWidget> with RouteAware {
                   }
                 },
                 onLoadStop: (controller, url) async {
+                  _loadedOnce = true;
                   if (mounted) {
                     setState(() => _isLoaded = true);
                   }
@@ -424,6 +491,7 @@ class _IframeWidgetState extends State<IframeWidget> with RouteAware {
                   }
                   return NavigationActionPolicy.CANCEL;
                 },
+                onCreateWindow: _allowPopups ? _openPopupPage : null,
               ),
             ),
           if (!showWebView)
@@ -564,8 +632,10 @@ class _IframeWidgetState extends State<IframeWidget> with RouteAware {
       // 外观
       transparentBackground: true,
 
-      // 安全
-      javaScriptCanOpenWindowsAutomatically: false,
+      // 新窗口：网页 window.open 开的页面叠一页内置浏览器承载（见 [_openPopupPage]）。
+      // 不接的话 Android 会在这个嵌入框里直接换成新页面，帖子里的应用就没了
+      supportMultipleWindows: _allowPopups,
+      javaScriptCanOpenWindowsAutomatically: _allowPopups,
 
       // 性能
       useHybridComposition: true,
