@@ -161,6 +161,11 @@ dependencies:
   vm_service: ^15.2.0
   full_svg_flutter: ^1.3.0
 dependency_overrides:
+  # Dio 5.11.1 内置一份（移植自上游 FluxDO third_party/dio），只改
+  # response_stream_handler.dart：消费方订阅后才读源、取消向下传到适配器、暂停停表，
+  # 被取消的图片下载和跳转响应体不再在后台继续读。说明见 third_party/dio/FLUXDO_PATCH.md
+  dio:
+    path: third_party/dio
   # super_clipboard 0.9.1 要求 device_info_plus <12.0.0，
   # 但实际 12.x 接口兼容，强制使用项目版本
   device_info_plus: 12.3.0
