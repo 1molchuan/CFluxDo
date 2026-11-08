@@ -149,9 +149,6 @@ class DiscourseDio {
     dio.transformer = BackgroundTransformer();
 
     // 1. 配置平台适配器
-    //
-    // 需要绕开 rhttp 走系统栈的场景(如 MessageBus 长轮询依赖系统级省电)
-    // 由请求侧的 FluxRequestKeys.skipRhttpAdapter 逐请求声明,不在这里分档。
     configurePlatformAdapter(dio);
 
     // 论坛引擎只服务一个站点，另一站（含子域）不能进入会话拦截器链。

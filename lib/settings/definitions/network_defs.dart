@@ -5,9 +5,9 @@ import '../../l10n/s.dart';
 import '../../pages/app_logs_page.dart';
 import '../../pages/network_settings_page/network_advanced_settings_page.dart';
 import '../../pages/network_settings_page/widgets/cf_select_card.dart';
+import '../../pages/network_settings_page/widgets/compat_mode_card.dart';
 import '../../pages/network_settings_page/widgets/connection_status_card.dart';
 import '../../pages/network_settings_page/widgets/doh_settings_card.dart';
-import '../../pages/network_settings_page/widgets/engine_card.dart';
 import '../../pages/network_settings_page/widgets/eruda_card.dart';
 import '../../pages/network_settings_page/widgets/http_proxy_card.dart';
 import '../../pages/network_settings_page/widgets/ip_family_card.dart';
@@ -23,13 +23,13 @@ import 'package:m3e_ui/m3e_ui.dart';
 
 /// 网络设置（主页面）
 ///
-/// 只放大多数人会看、会改的：连接状态、IP 协议、引擎预设、人机验证、代理与 VPN；
-/// 其余（节点优选方式、加速总开关、DNS、引擎逐项组合、限流、上传、调试）
-/// 收进 [buildNetworkAdvancedGroups]。
+/// 只放大多数人会看、会改的：连接状态、IP 协议、人机验证、代理与 VPN；
+/// 其余（节点优选方式、加速总开关、DNS、兼容模式、限流、上传、调试）
+/// 收进 [buildNetworkAdvancedGroups]。只有一个网络引擎（本地网关），没有引擎可选
 List<SettingsGroup> buildNetworkGroups(BuildContext context) {
   final l10n = context.l10n;
   return [
-    // 连接：状态 + IP 协议 + 引擎预设
+    // 连接：状态 + IP 协议
     SettingsGroup(
       title: l10n.networkSettings_connection,
       icon: Symbols.alt_route_rounded,
@@ -46,13 +46,6 @@ List<SettingsGroup> buildNetworkGroups(BuildContext context) {
           title: l10n.cfSelect_ipFamily,
           subtitle: 'IPv6 · IPv4',
           builder: (_, _) => const IpFamilyCard(),
-        ),
-        CustomModel(
-          id: 'engine',
-          title: l10n.networkSettings_engine,
-          subtitle:
-              '${l10n.enginePreset_standard} · ${l10n.enginePreset_performance} · ${l10n.enginePreset_compat}',
-          builder: (_, _) => const EngineCard(),
         ),
       ],
     ),
@@ -187,17 +180,17 @@ List<SettingsGroup> buildNetworkAdvancedGroups(BuildContext context) {
       ],
     ),
 
-    // 引擎组合：在三种预设之外逐项开关
+    // 兼容模式：主站接口请求交给内置浏览器发送（排查用；平时撞盾时会自动询问临时切换）
     SettingsGroup(
-      title: l10n.engineMix_title,
-      icon: Symbols.speed_rounded,
+      title: l10n.compatMode_title,
+      icon: Symbols.language_rounded,
       wrapInCard: false,
       items: [
         CustomModel(
-          id: 'engineMix',
-          title: l10n.engineMix_title,
-          subtitle: l10n.engineMix_searchDesc,
-          builder: (_, _) => const EngineMixCard(),
+          id: 'compatMode',
+          title: l10n.compatMode_title,
+          subtitle: l10n.compatMode_searchDesc,
+          builder: (_, _) => const CompatModeCard(),
         ),
       ],
     ),

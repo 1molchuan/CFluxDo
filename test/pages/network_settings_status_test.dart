@@ -1,9 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fluxdo/pages/network_settings_page/widgets/connection_status_card.dart';
-import 'package:fluxdo/pages/network_settings_page/widgets/engine_card.dart';
-import 'package:fluxdo/services/network/rhttp/rhttp_settings_service.dart';
 
-/// 网络设置主页面：连接状态卡显示哪种情形、引擎预设怎么认
+/// 网络设置主页面：连接状态卡显示哪种情形
 void main() {
   group('resolveNetStatusKind', () {
     NetStatusKind kind({
@@ -74,28 +72,6 @@ void main() {
       expect(kind(phase: 'ready'), NetStatusKind.ready);
       expect(kind(phase: 'failed'), NetStatusKind.selectFailed);
       expect(kind(phase: 'idle'), NetStatusKind.idle);
-    });
-  });
-
-  group('enginePresetOf', () {
-    EnginePreset? preset(bool rhttp, RhttpMode mode, bool webView) =>
-        enginePresetOf(
-          rhttpEnabled: rhttp,
-          rhttpMode: mode,
-          webViewEnabled: webView,
-        );
-
-    test('三种预设', () {
-      expect(preset(false, RhttpMode.always, false), EnginePreset.standard);
-      // rhttp 关着时模式无所谓
-      expect(preset(false, RhttpMode.proxyOnly, false), EnginePreset.standard);
-      expect(preset(true, RhttpMode.always, false), EnginePreset.performance);
-      expect(preset(false, RhttpMode.always, true), EnginePreset.compat);
-    });
-
-    test('对不上预设的组合算自定义', () {
-      expect(preset(true, RhttpMode.proxyOnly, false), isNull);
-      expect(preset(true, RhttpMode.always, true), isNull);
     });
   });
 }

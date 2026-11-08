@@ -244,7 +244,6 @@ class DohDnsCacheStats {
     required this.ipRttCount,
     required this.preferredIpCount,
     required this.totalEntries,
-    this.dartEntryCount = 0,
   });
 
   const DohDnsCacheStats.empty()
@@ -255,8 +254,7 @@ class DohDnsCacheStats {
       echNegativeCount = 0,
       ipRttCount = 0,
       preferredIpCount = 0,
-      totalEntries = 0,
-      dartEntryCount = 0;
+      totalEntries = 0;
 
   final int resolverCount;
   final int hostCount;
@@ -266,16 +264,11 @@ class DohDnsCacheStats {
   final int ipRttCount;
   final int preferredIpCount;
   final int totalEntries;
-  final int dartEntryCount;
 
-  int get rustVisibleHostEntries {
+  int get visibleHostEntries {
     final fallbackCount = ipCount + echCount + echNegativeCount;
     return hostCount > 0 ? hostCount : fallbackCount;
   }
-
-  int get visibleHostEntries => rustVisibleHostEntries > dartEntryCount
-      ? rustVisibleHostEntries
-      : dartEntryCount;
 
   DohDnsCacheStats copyWith({
     int? resolverCount,
@@ -286,7 +279,6 @@ class DohDnsCacheStats {
     int? ipRttCount,
     int? preferredIpCount,
     int? totalEntries,
-    int? dartEntryCount,
   }) {
     return DohDnsCacheStats(
       resolverCount: resolverCount ?? this.resolverCount,
@@ -297,7 +289,6 @@ class DohDnsCacheStats {
       ipRttCount: ipRttCount ?? this.ipRttCount,
       preferredIpCount: preferredIpCount ?? this.preferredIpCount,
       totalEntries: totalEntries ?? this.totalEntries,
-      dartEntryCount: dartEntryCount ?? this.dartEntryCount,
     );
   }
 
@@ -368,8 +359,6 @@ class DohProxyFfi {
   late int Function() _dohProxyIsRunning;
   late int Function() _dohProxyGetPort;
   late void Function() _dohProxyInitLogging;
-  late Pointer<Utf8> Function(Pointer<Utf8>, Pointer<Utf8>)
-  _dohProxyLookupEchConfig;
   late Pointer<Utf8> Function(Pointer<Utf8>, Pointer<Utf8>, int)
   _dohProxyLookupIp;
   late Pointer<Utf8> Function(
@@ -381,29 +370,6 @@ class DohProxyFfi {
   )
   _dohProxyLookupHost;
   late int Function() _dohProxyClearDnsCache;
-  late int Function(
-    Pointer<Utf8>,
-    Pointer<Utf8>,
-    Pointer<Utf8>,
-    int,
-    Pointer<Utf8>,
-  )
-  _dohProxyRecordHostSuccess;
-  late int Function(Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>, int)
-  _dohProxyClearPreferredHostIp;
-  // 带 IP 的连接失败回报（计入赢家连败），旧版本库没有时回退到清粘性 IP
-  int Function(Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>, int, Pointer<Utf8>)?
-  _dohProxyReportHostFailure;
-  // 采纳服务端随 ECH 拒绝下发的新钥匙（rhttp 直连拿到的 retry_configs）；旧版本库没有
-  int Function(
-    Pointer<Utf8>,
-    Pointer<Utf8>,
-    Pointer<Utf8>,
-    int,
-    Pointer<Utf8>,
-    int,
-  )?
-  _dohProxyAdoptEchConfig;
   Pointer<Utf8> Function()? _dohProxyDnsCacheStats;
   // 网络引擎计数（只读原子量，不阻塞），旧版本库没有
   Pointer<Utf8> Function()? _dohProxyNetStats;
@@ -454,12 +420,6 @@ class DohProxyFfi {
           .lookup<NativeFunction<Void Function()>>('doh_proxy_init_logging')
           .asFunction();
 
-      _dohProxyLookupEchConfig = _lib!
-          .lookup<
-            NativeFunction<Pointer<Utf8> Function(Pointer<Utf8>, Pointer<Utf8>)>
-          >('doh_proxy_lookup_ech_config')
-          .asFunction();
-
       _dohProxyLookupIp = _lib!
           .lookup<
             NativeFunction<
@@ -485,65 +445,6 @@ class DohProxyFfi {
       _dohProxyClearDnsCache = _lib!
           .lookup<NativeFunction<Int32 Function()>>('doh_proxy_clear_dns_cache')
           .asFunction();
-
-      _dohProxyRecordHostSuccess = _lib!
-          .lookup<
-            NativeFunction<
-              Int32 Function(
-                Pointer<Utf8>,
-                Pointer<Utf8>,
-                Pointer<Utf8>,
-                Int32,
-                Pointer<Utf8>,
-              )
-            >
-          >('doh_proxy_record_host_success')
-          .asFunction();
-
-      _dohProxyClearPreferredHostIp = _lib!
-          .lookup<
-            NativeFunction<
-              Int32 Function(Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>, Int32)
-            >
-          >('doh_proxy_clear_preferred_host_ip')
-          .asFunction();
-
-      try {
-        _dohProxyReportHostFailure = _lib!
-            .lookup<
-              NativeFunction<
-                Int32 Function(
-                  Pointer<Utf8>,
-                  Pointer<Utf8>,
-                  Pointer<Utf8>,
-                  Int32,
-                  Pointer<Utf8>,
-                )
-              >
-            >('doh_proxy_report_host_failure')
-            .asFunction();
-      } catch (_) {
-        _dohProxyReportHostFailure = null;
-      }
-
-      try {
-        _dohProxyAdoptEchConfig = _lib!
-            .lookup<
-              NativeFunction<
-                Int32 Function(
-                  Pointer<Utf8>,
-                  Pointer<Utf8>,
-                  Pointer<Utf8>,
-                  Int32,
-                  Pointer<Utf8>,
-                  Int64,
-                )
-              >
-            >('doh_proxy_adopt_ech_config')
-            .asFunction();
-      } catch (_) {
-        _dohProxyAdoptEchConfig = null;
-      }
 
       try {
         _dohProxyDnsCacheStats = _lib!
@@ -976,32 +877,6 @@ class DohProxyFfi {
     return pem;
   }
 
-  /// Lookup ECH config for a host via DOH DNS HTTPS record.
-  /// Returns raw ECH config bytes, or null if not available.
-  Uint8List? lookupEchConfig(String host, String dohServer) {
-    if (!_initialized && !initialize()) return null;
-
-    final hostPtr = host.toNativeUtf8();
-    final dohPtr = dohServer.toNativeUtf8();
-    try {
-      final resultPtr = _dohProxyLookupEchConfig(hostPtr, dohPtr);
-      if (resultPtr == nullptr) return null;
-
-      final jsonStr = resultPtr.toDartString();
-      _dohProxyFreeString(resultPtr);
-
-      final map = jsonDecode(jsonStr) as Map<String, dynamic>;
-      if (map['ok'] == true && map['data'] is String) {
-        return base64Decode(map['data'] as String);
-      }
-      debugPrint('[DOH FFI] ECH lookup: ${map['error'] ?? 'unknown error'}');
-      return null;
-    } finally {
-      calloc.free(hostPtr);
-      calloc.free(dohPtr);
-    }
-  }
-
   /// Lookup IP addresses for a host via DOH A/AAAA records.
   /// Returns ordered IP strings, or null on failure.
   List<String>? lookupIp(
@@ -1361,152 +1236,6 @@ class DohProxyFfi {
       '[DOH FFI] DNS cache records: ${map['error'] ?? 'unknown error'}',
     );
     return null;
-  }
-
-  bool recordHostSuccess(
-    String host,
-    String dohServer, {
-    String? dohServerEch,
-    bool preferIpv6 = false,
-    required String ip,
-  }) {
-    if (!_initialized && !initialize()) return false;
-
-    final hostPtr = host.toNativeUtf8();
-    final dohPtr = dohServer.toNativeUtf8();
-    final hasEchPtr = dohServerEch != null && dohServerEch.isNotEmpty;
-    final echPtr = hasEchPtr
-        ? dohServerEch.toNativeUtf8()
-        : nullptr.cast<Utf8>();
-    final ipPtr = ip.toNativeUtf8();
-    try {
-      return _dohProxyRecordHostSuccess(
-            hostPtr,
-            dohPtr,
-            echPtr,
-            preferIpv6 ? 1 : 0,
-            ipPtr,
-          ) !=
-          0;
-    } finally {
-      calloc.free(hostPtr);
-      calloc.free(dohPtr);
-      calloc.free(ipPtr);
-      if (hasEchPtr) {
-        calloc.free(echPtr);
-      }
-    }
-  }
-
-  /// 报告连 [host] -> [ip] 失败：Rust 作废该域名的粘性 IP，[ip] 是钉住的赢家时计入它的连败。
-  /// 旧版本库没有该符号时退化为 [clearPreferredHostIp]
-  bool reportHostFailure(
-    String host,
-    String dohServer, {
-    String? dohServerEch,
-    bool preferIpv6 = false,
-    required String ip,
-  }) {
-    if (!_initialized && !initialize()) return false;
-    final report = _dohProxyReportHostFailure;
-    if (report == null) {
-      return clearPreferredHostIp(
-        host,
-        dohServer,
-        dohServerEch: dohServerEch,
-        preferIpv6: preferIpv6,
-      );
-    }
-
-    final hostPtr = host.toNativeUtf8();
-    final dohPtr = dohServer.toNativeUtf8();
-    final hasEchPtr = dohServerEch != null && dohServerEch.isNotEmpty;
-    final echPtr = hasEchPtr
-        ? dohServerEch.toNativeUtf8()
-        : nullptr.cast<Utf8>();
-    final ipPtr = ip.toNativeUtf8();
-    try {
-      return report(hostPtr, dohPtr, echPtr, preferIpv6 ? 1 : 0, ipPtr) != 0;
-    } finally {
-      calloc.free(hostPtr);
-      calloc.free(dohPtr);
-      calloc.free(ipPtr);
-      if (hasEchPtr) {
-        calloc.free(echPtr);
-      }
-    }
-  }
-
-  /// 把服务端随 ECH 拒绝下发的新钥匙交给 Rust（[echConfigB64] 是 base64 的 ECHConfigList）。
-  /// 旧版本库没有这个符号时返回 false
-  bool adoptEchConfig(
-    String host,
-    String dohServer, {
-    String? dohServerEch,
-    bool preferIpv6 = false,
-    required String echConfigB64,
-    int ttlSecs = 0,
-  }) {
-    if (!_initialized && !initialize()) return false;
-    final adopt = _dohProxyAdoptEchConfig;
-    if (adopt == null) return false;
-
-    final hostPtr = host.toNativeUtf8();
-    final dohPtr = dohServer.toNativeUtf8();
-    final hasEchPtr = dohServerEch != null && dohServerEch.isNotEmpty;
-    final echPtr = hasEchPtr
-        ? dohServerEch.toNativeUtf8()
-        : nullptr.cast<Utf8>();
-    final keyPtr = echConfigB64.toNativeUtf8();
-    try {
-      return adopt(
-            hostPtr,
-            dohPtr,
-            echPtr,
-            preferIpv6 ? 1 : 0,
-            keyPtr,
-            ttlSecs,
-          ) !=
-          0;
-    } finally {
-      calloc.free(hostPtr);
-      calloc.free(dohPtr);
-      calloc.free(keyPtr);
-      if (hasEchPtr) {
-        calloc.free(echPtr);
-      }
-    }
-  }
-
-  bool clearPreferredHostIp(
-    String host,
-    String dohServer, {
-    String? dohServerEch,
-    bool preferIpv6 = false,
-  }) {
-    if (!_initialized && !initialize()) return false;
-
-    final hostPtr = host.toNativeUtf8();
-    final dohPtr = dohServer.toNativeUtf8();
-    final hasEchPtr = dohServerEch != null && dohServerEch.isNotEmpty;
-    final echPtr = hasEchPtr
-        ? dohServerEch.toNativeUtf8()
-        : nullptr.cast<Utf8>();
-    try {
-      return _dohProxyClearPreferredHostIp(
-            hostPtr,
-            dohPtr,
-            echPtr,
-            preferIpv6 ? 1 : 0,
-          ) !=
-          0;
-    } finally {
-      calloc.free(hostPtr);
-      calloc.free(dohPtr);
-      if (hasEchPtr) {
-        calloc.free(echPtr);
-      }
-    }
   }
 
   /// Stop the DOH proxy server

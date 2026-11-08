@@ -375,7 +375,6 @@ class MessageBusService {
               'isSilent': true,
               'skipCsrf': true,
               'skipNetworkLog': true,
-              'skipRhttpAdapter': true,
             },
           ),
         );

@@ -12,7 +12,7 @@ import '../utils/app_data_dir.dart';
 /// 文件下载服务（单例）
 ///
 /// 使用 DiscourseDio.create() 创建 Dio 实例，
-/// 自动继承代理/DOH/rhttp/Cookie 等所有网络设置。
+/// 自动继承代理/DOH/Cookie 等所有网络设置。
 class DownloadService {
   DownloadService._();
   static final DownloadService instance = DownloadService._();

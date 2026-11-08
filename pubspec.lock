@@ -105,14 +105,6 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.1.2"
-  build_cli_annotations:
-    dependency: transitive
-    description:
-      name: build_cli_annotations
-      sha256: e563c2e01de8974566a1998410d3f6f03521788160a02503b0b1f1a46c7b3d95
-      url: "https://pub.dev"
-    source: hosted
-    version: "2.1.1"
   catcher_2:
     dependency: "direct main"
     description:
@@ -752,14 +744,6 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "3.3.2"
-  flutter_rust_bridge:
-    dependency: "direct overridden"
-    description:
-      name: flutter_rust_bridge
-      sha256: e87d6b9ee934dcd24a128ccb2bd91905d2d5fe5c06245d6a8f5477d4907a437a
-      url: "https://pub.dev"
-    source: hosted
-    version: "2.12.0"
   flutter_secure_storage:
     dependency: "direct main"
     description:
@@ -986,14 +970,6 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "4.1.2"
-  http_profile:
-    dependency: transitive
-    description:
-      name: http_profile
-      sha256: "7e679e355b09aaee2ab5010915c932cce3f2d1c11c3b2dc177891687014ffa78"
-      url: "https://pub.dev"
-    source: hosted
-    version: "0.1.0"
   image:
     dependency: "direct main"
     description:
@@ -1722,15 +1698,6 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.2.2"
-  rhttp:
-    dependency: "direct main"
-    description:
-      path: rhttp
-      ref: c8689e4879641315ab40af2ef1369b3e4cc5ac31
-      resolved-ref: c8689e4879641315ab40af2ef1369b3e4cc5ac31
-      url: "https://github.com/1molchuan/rhttp_plus.git"
-    source: git
-    version: "0.18.0"
   riverpod:
     dependency: transitive
     description:

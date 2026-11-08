@@ -29,7 +29,7 @@ void main() {
         'topic_new_subset',
         'auto_check_update',
         'notion_config_alice',
-        'rhttp_enabled',
+        'webview_adapter_enabled',
         'cdk_enabled',
         'ldc_enabled',
         // 被排除前缀误伤的真配置,精确回捞

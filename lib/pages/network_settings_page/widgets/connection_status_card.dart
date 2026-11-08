@@ -14,6 +14,7 @@ import '../../../services/network/vpn_auto_toggle_service.dart';
 import '../../../services/toast_service.dart';
 import '../../../services/windows_webview_environment_service.dart';
 import '../../../utils/time_utils.dart';
+import 'compat_mode_card.dart';
 
 /// 连接状态的几种情形，按优先级从上往下判断，见 [resolveNetStatusKind]
 enum NetStatusKind {
@@ -83,7 +84,8 @@ NetStatusKind resolveNetStatusKind({
 /// 网络设置最上方的连接状态卡：现在怎么连上 linux.do、有没有问题、能做什么
 ///
 /// 把原来分散在「连接方式」「DNS over HTTPS」卡片里的状态（优选进度、
-/// 赢家节点、网关启动失败、VPN 接管、Windows 需重启）收拢成一句话 + 一个操作。
+/// 赢家节点、网关启动失败、VPN 接管、Windows 需重启）收拢成一句话 + 一个操作；
+/// 兼容模式开着（主站接口改由内置浏览器发送）时多一行说明，可直接关掉。
 /// 优选状态由 Rust 侧维护，这里每 3 秒拉一次快照。
 class ConnectionStatusCard extends StatefulWidget {
   const ConnectionStatusCard({super.key});
@@ -140,6 +142,7 @@ class _ConnectionStatusCardState extends State<ConnectionStatusCard> {
         vpn.vpnActiveNotifier,
         vpn.suppressionNotifier,
         windowsEnv.proxyRestartRequiredNotifier,
+        compatModeListenable(),
       ]),
       builder: (context, _) {
         final settings = service.current;
@@ -303,6 +306,8 @@ class _ConnectionStatusCardState extends State<ConnectionStatusCard> {
       ],
     );
 
+    final compatHint = compatModeHintRow(context);
+
     // 用分段卡片组：经典风格是圆角卡片，墨笺是平铺细线，与页面其余分组一致
     return SegmentedCardGroup(
       children: [
@@ -336,6 +341,7 @@ class _ConnectionStatusCardState extends State<ConnectionStatusCard> {
               ],
             ),
           ),
+        ?compatHint,
       ],
     );
   }

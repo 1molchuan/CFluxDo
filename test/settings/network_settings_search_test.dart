@@ -56,7 +56,6 @@ void main() {
     const mainIds = [
       'connectionStatus',
       'ipFamily',
-      'engine',
       'autoCfChallenge',
       'cfVerify',
       'httpProxy',
@@ -68,7 +67,7 @@ void main() {
     const advancedIds = [
       'cfSelect',
       'dohSettings',
-      'engineMix',
+      'compatMode',
       'rateLimit',
       'forceDisableMultipartUpload',
       'erudaConsole',

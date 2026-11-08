@@ -120,8 +120,7 @@ class _DohSettingsCardInner extends StatelessWidget {
                     dohEnabled: value,
                     webViewAdapterEnabled: webViewEnabled,
                   );
-                  // Windows 仅 WebView 网络引擎经 DoH 时需要 MITM CA；
-                  // 高性能 rhttp 保持端到端 TLS，不弹证书安装窗口。
+                  // Windows 仅 WebView 网络引擎经 DoH 时需要 MITM CA。
                   if (requiresCa && !await ensureWindowsCertTrusted(context)) {
                     return;
                   }

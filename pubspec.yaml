@@ -149,12 +149,6 @@ dependencies:
   volume_controller: ^3.6.0 # 播放器竖滑手势调系统音量
   screen_brightness: ^2.1.11 # 播放器竖滑手势调 app 亮度
   just_audio: ^0.10.6 # 原生上传音频播放(FluxdoRender audioBuilder)
-  # fork：rustls 0.23.46 + 识别 ECH 被拒并带回 retry_configs（上游 02eb411 基础上）
-  rhttp:
-    git:
-      url: https://github.com/1molchuan/rhttp_plus.git
-      ref: c8689e4879641315ab40af2ef1369b3e4cc5ac31
-      path: rhttp
   ffi: any
   # 性能诊断:掉帧时 app 内连接自身 VM Service 抓取当帧 timeline,
   # 自动归并出耗时 widget(debug/profile 有效,release 无 VM Service)
@@ -169,9 +163,6 @@ dependency_overrides:
   # super_clipboard 0.9.1 要求 device_info_plus <12.0.0，
   # 但实际 12.x 接口兼容，强制使用项目版本
   device_info_plus: 12.3.0
-  # 锁定 flutter_rust_bridge 版本，与 rhttp 插件的 codegen 版本保持一致。
-  # rhttp_plus 已同步 upstream 0.18.0，生成代码基于 2.12.0。
-  flutter_rust_bridge: 2.12.0
   # Linux WebView（WPE WebKit）插件内置一份：要加「预先放行代理叶子证书」的接口，
   # 并兼容旧版 WPE 的编译（见 packages/flutter_inappwebview_linux/CFLUXDO_PATCHES.md）
   flutter_inappwebview_linux:

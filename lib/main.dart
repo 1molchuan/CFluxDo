@@ -51,7 +51,6 @@ import 'services/network/doh/cf_select_notice.dart';
 import 'services/network/doh/cfhub_probe_auth_service.dart';
 import 'services/network/doh/network_settings_service.dart';
 import 'services/network/proxy/proxy_settings_service.dart';
-import 'services/network/rhttp/rhttp_settings_service.dart';
 import 'services/network/webview/webview_adapter_settings_service.dart';
 import 'services/eruda_settings_service.dart';
 import 'services/network/vpn_auto_toggle_service.dart';
@@ -105,7 +104,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:ai_model_manager/ai_model_manager.dart';
 import 'services/app_logger.dart';
 import 'services/network/adapters/platform_adapter.dart';
-import 'services/network/adapters/rhttp_adapter.dart' show RhttpRuntime;
 import 'providers/preferences_provider.dart';
 import 'providers/theme_provider.dart';
 import 'package:dynamic_color/dynamic_color.dart';
@@ -359,24 +357,17 @@ Future<void> main(List<String> args) async {
   // 开发者模式下 debug 级日志落盘（高频追踪信息）
   AppLogger.setVerbose(developerMode);
   await ProxySettingsService.instance.initialize(prefs);
-  // rhttp (Rust reqwest) 初始化：在 ProxySettingsService 之后、NetworkSettingsService 之前
-  await RhttpSettingsService.instance.initialize(prefs);
   // WebView 适配器设置
   await WebViewAdapterSettingsService.instance.initialize(prefs);
   // Eruda 调试控制台开关 (默认关)
   await ErudaSettingsService.instance.initialize(prefs);
   StartupTimeline.mark('settings');
-  // rhttp 默认关闭：关着就不在冷启动里初始化它的 Rust 运行时，首次用到时再初始化
-  if (RhttpSettingsService.instance.current.enabled) {
-    await RhttpRuntime.ensureInitialized();
-  }
 
   // Windows 固定系统代理必须先于本地 DoH/WebView 网关读取，网关才能按
   // 「应用代理 > 系统代理 > 直连」选择首次启动的上游出口。
   if (Platform.isWindows) {
     SystemProxyService.instance.start();
   }
-  StartupTimeline.mark('rhttp');
   // 一般早就出结果了；还没出来最多再等 300 ms，晚到的结果照样补种（网络设置在监听签名，
   // 会转告 Rust）。不能等 ConnectivityService.init()：它在首页挂载后才跑，预加载卡住时永远等不到
   final startupConnectivity = await startupConnectivityCheck.timeout(
@@ -412,8 +403,8 @@ Future<void> main(List<String> args) async {
   // WindowsWebViewEnvironmentService 必须等 NetworkSettingsService 把本次
   // 会话真正要用的代理端口定下来之后再创建 Environment。之前放在最早那批
   // 并行初始化里,等的是"猜的"8s 超时——NetworkSettingsService 前面还排
-  // 着 rhttp(自己就留了最多 5s 预算)等好几个服务,8s 经常等不到真实端口
-  // 就用旧端口摆烂,导致 WebView2 全程连着一个不存在的代理、CF 验证怎么
+  // 着好几个服务,8s 经常等不到真实端口就用旧端口摆烂,
+  // 导致 WebView2 全程连着一个不存在的代理、CF 验证怎么
   // 也过不去。现在严格排在 NetworkSettingsService 完全初始化(本地代理
   // 已经启动、setProxy() 已经真正调用过)之后再建,proxyDecision 这时
   // 早就 complete 了,创建时直接读到确定值,不用再赌超时。
