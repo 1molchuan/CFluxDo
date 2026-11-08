@@ -9,6 +9,7 @@ import '../../providers/core_providers.dart';
 import '../../services/accounts/account_store.dart';
 import '../../services/accounts/account_switcher.dart';
 import '../../services/toast_service.dart';
+import '../../utils/avatar_url.dart';
 import '../../utils/dialog_utils.dart';
 import '../../utils/url_helper.dart';
 import '../common/loading_dialog.dart';
@@ -252,7 +253,7 @@ class _AccountTile extends StatelessWidget {
       leading: SmartAvatar(
         imageUrl: template == null
             ? null
-            : UrlHelper.resolveUrlWithCdn(template.replaceAll('{size}', '96')),
+            : UrlHelper.resolveUrlWithCdn(AvatarUrl.resolve(template, size: 96)),
         radius: 20,
         fallbackText: account.username,
       ),
