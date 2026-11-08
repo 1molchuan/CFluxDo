@@ -1516,8 +1516,39 @@ class _CfChallengePageState extends State<CfChallengePage> {
   }
   window.addEventListener('beforeunload', function(){ notifyNav('beforeunload'); });
   window.addEventListener('pagehide', function(){ notifyNav('pagehide'); });
+
+  // Turnstile 内嵌框架经 postMessage 向宿主页上报状态：
+  // {source:'cloudflare-challenge', event, widgetId}。interactiveBegin 表示 CF 判定
+  // 这次要人工操作（勾选框等），后台验证据此立即转前台，不必干等静默期超时
+  // （思路取自上游 a4067bc8）。
+  window.addEventListener('message', function(e) {
+    var d = e.data;
+    if (!d || typeof d !== 'object' || d.source !== 'cloudflare-challenge') return;
+    if (d.event !== 'interactiveBegin' && d.event !== 'interactiveTimeout') return;
+    try {
+      window.flutter_inappwebview.callHandler('onChallengeInteractive', d.event);
+    } catch(e) {}
+  });
 })();
 ''';
+  }
+
+  /// Turnstile 上报「需要人工操作」（interactiveBegin / interactiveTimeout）。
+  ///
+  /// 后台尝试中、且有人在等结果（先静默再前台，或有前台等待者）时立即转前台：
+  /// 勾选框已经出来了，再静默等下去只是白白多等几秒。纯静默轮次维持原样——
+  /// 只露胶囊、超时放弃，不把验证页弹到正在阅读的用户脸上。
+  void _onChallengeInteractive(List<dynamic> args) {
+    if (!mounted || _hasPopped || _handedOff) return;
+    final event = args.isNotEmpty ? '${args.first}' : 'interactive';
+    if (!_isBackground) return;
+    final someoneWaiting =
+        widget.foregroundAfter != null || widget.signals.hasForegroundWaiter;
+    CfChallengeLogger.log(
+      '[VERIFY] Turnstile $event while in background'
+      '${someoneWaiting ? ', promoting to foreground' : ', silent round keeps waiting'}',
+    );
+    if (someoneWaiting) _promoteToForeground();
   }
 
   /// challenge-platform 响应到达时的回调
@@ -2707,6 +2738,10 @@ class _CfChallengePageState extends State<CfChallengePage> {
             controller.addJavaScriptHandler(
               handlerName: 'onCfPreclearance',
               callback: _onPreclearanceEvent,
+            );
+            controller.addJavaScriptHandler(
+              handlerName: 'onChallengeInteractive',
+              callback: _onChallengeInteractive,
             );
           },
           onLoadStart: (controller, url) {
