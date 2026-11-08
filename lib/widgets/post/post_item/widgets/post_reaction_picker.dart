@@ -6,8 +6,6 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../../../models/topic.dart';
-import '../../../../services/discourse_cache_manager.dart';
-import '../../../../services/emoji_handler.dart';
 import '../../../../theme/mojian_theme.dart';
 import 'reaction_emoji.dart';
 
