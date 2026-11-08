@@ -303,6 +303,16 @@ class AppCookieManager extends Interceptor {
         normalized.startsWith('cf_');
   }
 
+  /// CSRF 刷新可能轮换会话，发送原 POST 前按相同策略重新取 Cookie
+  /// （移植自上游 eac274bd）。显式 skipCookieManager 的请求不动。
+  Future<void> refreshRequestCookies(RequestOptions options) async {
+    if (options.extra[skipCookieManagerExtraKey] == true) return;
+    final cookies = await loadCookies(options);
+    options.headers[HttpHeaders.cookieHeader] = cookies.isNotEmpty
+        ? cookies
+        : null;
+  }
+
   @override
   Future<void> onRequest(
     RequestOptions options,
@@ -314,10 +324,7 @@ class AppCookieManager extends Interceptor {
     }
 
     try {
-      final cookies = await loadCookies(options);
-      options.headers[HttpHeaders.cookieHeader] = cookies.isNotEmpty
-          ? cookies
-          : null;
+      await refreshRequestCookies(options);
       handler.next(options);
     } catch (e, s) {
       handler.reject(
