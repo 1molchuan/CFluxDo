@@ -13,6 +13,9 @@ class AppLogger {
 
   static bool _enabled = true;
 
+  /// 详细日志开关的当前值；图片下载 / 缓存写入等按它决定是否逐条记阶段耗时
+  static final ValueNotifier<bool> verboseNotifier = ValueNotifier(false);
+
   /// 设置日志开关
   static void setEnabled(bool enabled) {
     _enabled = enabled;
@@ -21,6 +24,7 @@ class AppLogger {
   /// 设置详细日志（debug 级落盘），跟随开发者模式
   static void setVerbose(bool verbose) {
     LogWriter.verboseEnabled = verbose;
+    verboseNotifier.value = verbose;
   }
 
   /// 调试级别日志：高频追踪信息，仅开发者模式落盘
