@@ -28,11 +28,20 @@
   "miniApp_sortUsedDesc": "累计去重使用量",
   "miniApp_unavailable": "应用不可用，或无访问权限",
   "miniApp_unrated": "暂无评分",
+  "miniApp_updateWebView": "去更新",
   "miniApp_uses": "{count} 次使用",
   "@miniApp_uses": {
     "placeholders": {
       "count": {
         "type": "String"
+      }
+    }
+  },
+  "miniApp_webViewOutdated": "系统 WebView 内核较旧（Chrome {version}），微应用可能打不开。更新「Android System WebView」后再试",
+  "@miniApp_webViewOutdated": {
+    "placeholders": {
+      "version": {
+        "type": "int"
       }
     }
   }

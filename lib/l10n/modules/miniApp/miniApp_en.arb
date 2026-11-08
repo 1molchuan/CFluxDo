@@ -28,11 +28,20 @@
   "miniApp_sortUsedDesc": "Unique uses in total",
   "miniApp_unavailable": "The app is unavailable or you don't have access",
   "miniApp_unrated": "No ratings",
+  "miniApp_updateWebView": "Update",
   "miniApp_uses": "{count} uses",
   "@miniApp_uses": {
     "placeholders": {
       "count": {
         "type": "String"
+      }
+    }
+  },
+  "miniApp_webViewOutdated": "Your system WebView is outdated (Chrome {version}), so mini apps may fail to load. Update \"Android System WebView\" and try again.",
+  "@miniApp_webViewOutdated": {
+    "placeholders": {
+      "version": {
+        "type": "int"
       }
     }
   }

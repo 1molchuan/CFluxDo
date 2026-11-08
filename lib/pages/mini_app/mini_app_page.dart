@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:collection';
+import 'dart:io';
 
 import 'package:app_icons/app_icons.dart';
 import 'package:flutter/material.dart';
@@ -14,6 +15,7 @@ import '../../models/mini_app.dart';
 import '../../providers/core_providers.dart';
 import '../../providers/download_provider.dart';
 import '../../services/deep_link_service.dart';
+import '../../services/log/log_writer.dart';
 import '../../services/session/webview_use.dart';
 import '../../services/toast_service.dart';
 import '../../services/webview_render_gone.dart';
@@ -51,6 +53,46 @@ final _chromeScript = UserScript(
   injectionTime: UserScriptInjectionTime.AT_DOCUMENT_END,
   forMainFrameOnly: true,
 );
+
+/// 站方加载器显示加载失败（`.mini-app-loader` 加上 is-error）时，把页面上的
+/// 错误文字报给 App；重试后再失败会再报一次
+final _failureWatchScript = UserScript(
+  source: '''
+(function () {
+  if (window.__cfluxdoMiniAppWatch) return;
+  window.__cfluxdoMiniAppWatch = true;
+  var reported = false;
+  var check = function () {
+    var loader = document.querySelector('.mini-app-loader.is-error');
+    if (!loader) {
+      reported = false;
+      return;
+    }
+    if (reported || !window.flutter_inappwebview) return;
+    reported = true;
+    var detail = loader.querySelector('[data-role="detail"]');
+    window.flutter_inappwebview.callHandler(
+      'cfluxdoMiniAppFailed',
+      detail ? detail.textContent.trim() : ''
+    );
+  };
+  new MutationObserver(check).observe(document.documentElement, {
+    subtree: true,
+    childList: true,
+    attributes: true,
+    attributeFilter: ['class']
+  });
+  check();
+})();
+''',
+  injectionTime: UserScriptInjectionTime.AT_DOCUMENT_END,
+  forMainFrameOnly: true,
+);
+
+/// 站方微应用实际用到的最新浏览器特性是 `AbortSignal.any`（Chrome 116）。
+/// 低于这个版本的子框架靠 [WebViewSettings.compatPolyfillScripts] 补，再加载
+/// 失败就提示用户更新系统 WebView
+const _miniAppWebViewBaseline = 116;
 
 /// 点开站方的应用菜单（应用信息、声音、分享、收藏、评分、打赏、举报）；
 /// 页面里还没有菜单按钮时返回 false
@@ -118,6 +160,13 @@ class _MiniAppPageState extends ConsumerState<MiniAppPage>
   double _progress = 0;
   bool _canGoBack = false;
 
+  /// 各框架最近的未捕获异常。站方把应用启动时的异常一律报成「浏览器无法安全
+  /// 运行此应用」，真正的原因只在这里，加载失败时一起记进日志
+  final List<String> _uncaughtErrors = [];
+
+  /// 系统 WebView 比站方要求的旧、应用又加载失败时，页面顶上提示去更新
+  ({int major, String? package})? _outdatedWebView;
+
   String get _embedUrl => MiniAppPage.embedUrl(widget.appId);
 
   @override
@@ -174,6 +223,61 @@ class _MiniAppPageState extends ConsumerState<MiniAppPage>
     } catch (e) {
       // 只影响顶栏标题和「参与讨论」；应用照常加载，出错由站方页面提示
       debugPrint('[MiniApp] 获取应用详情失败: $e');
+    }
+  }
+
+  void _recordUncaughtError(ConsoleMessage message) {
+    final text = message.message;
+    if (message.messageLevel != ConsoleMessageLevel.ERROR ||
+        !text.startsWith('Uncaught')) {
+      return;
+    }
+    if (_uncaughtErrors.length == 3) _uncaughtErrors.removeAt(0);
+    _uncaughtErrors.add(text.length > 300 ? text.substring(0, 300) : text);
+  }
+
+  /// 站方页面显示了加载失败：记日志（带 WebView 版本和未捕获异常），WebView
+  /// 太旧时提示更新
+  Future<void> _onAppFailed(String detail) async {
+    final appId = widget.appId;
+    final uncaughtErrors = List.of(_uncaughtErrors);
+    // 版本以探到的 UA 为准：厂商自带的 WebView 包版本号不是 Chromium 版本
+    final ua = AppConstants.webViewUserAgentIfKnown;
+    final major = ua == null
+        ? null
+        : int.tryParse(RegExp(r'Chrome/(\d+)').firstMatch(ua)?.group(1) ?? '');
+    WebViewPackageInfo? webView;
+    if (Platform.isAndroid) {
+      try {
+        webView = await InAppWebViewController.getCurrentWebViewPackage();
+      } catch (_) {}
+    }
+    LogWriter.instance.write({
+      'timestamp': DateTime.now().toIso8601String(),
+      'level': 'warning',
+      'type': 'webview',
+      'event': 'mini_app_load_failed',
+      'message': detail,
+      'appId': appId,
+      'chromeMajor': major,
+      'webViewPackage': webView?.packageName,
+      'webViewVersion': webView?.versionName,
+      'uncaughtErrors': uncaughtErrors,
+    });
+    if (major == null || major >= _miniAppWebViewBaseline || !mounted) return;
+    setState(() {
+      _outdatedWebView = (major: major, package: webView?.packageName);
+    });
+  }
+
+  Future<void> _openWebViewStore(String package) async {
+    if (await openWithSystem(Uri.parse('market://details?id=$package'))) {
+      return;
+    }
+    if (!await launchInExternalBrowser(
+      'https://play.google.com/store/apps/details?id=$package',
+    )) {
+      ToastService.showError(S.current.webview_cannotOpenBrowser);
     }
   }
 
@@ -373,6 +477,7 @@ class _MiniAppPageState extends ConsumerState<MiniAppPage>
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final iconUrl = _iconUrl;
+    final outdatedWebView = _outdatedWebView;
     return PopScope(
       // 应用里还有历史（单页应用切了页面）时，返回键先回退应用
       canPop: !_canGoBack,
@@ -417,22 +522,50 @@ class _MiniAppPageState extends ConsumerState<MiniAppPage>
         ),
         body: webViewRenderGone
             ? WebViewRenderGoneView(onReload: reloadAfterRenderGone)
-            : Stack(
+            : Column(
                 children: [
-                  Positioned.fill(child: _buildWebView()),
-                  if (_isLoading)
-                    Positioned(
-                      top: 0,
-                      left: 0,
-                      right: 0,
-                      child: M3eLinearProgress(
-                        value: _progress,
-                        trackColor: theme.colorScheme.surfaceContainerHighest,
-                      ),
+                  if (outdatedWebView != null)
+                    _buildOutdatedBanner(outdatedWebView),
+                  Expanded(
+                    child: Stack(
+                      children: [
+                        Positioned.fill(child: _buildWebView()),
+                        if (_isLoading)
+                          Positioned(
+                            top: 0,
+                            left: 0,
+                            right: 0,
+                            child: M3eLinearProgress(
+                              value: _progress,
+                              trackColor:
+                                  theme.colorScheme.surfaceContainerHighest,
+                            ),
+                          ),
+                      ],
                     ),
+                  ),
                 ],
               ),
       ),
+    );
+  }
+
+  Widget _buildOutdatedBanner(({int major, String? package}) outdated) {
+    final package = outdated.package;
+    return MaterialBanner(
+      leading: const Icon(Symbols.system_update_rounded),
+      content: Text(context.l10n.miniApp_webViewOutdated(outdated.major)),
+      actions: [
+        if (package != null)
+          TextButton(
+            onPressed: () => _openWebViewStore(package),
+            child: Text(context.l10n.miniApp_updateWebView),
+          ),
+        TextButton(
+          onPressed: () => setState(() => _outdatedWebView = null),
+          child: Text(context.l10n.common_close),
+        ),
+      ],
     );
   }
 
@@ -449,10 +582,20 @@ class _MiniAppPageState extends ConsumerState<MiniAppPage>
         initialUserScripts: UnmodifiableListView([
           ...WebViewSettings.compatPolyfillScripts,
           _chromeScript,
+          _failureWatchScript,
         ]),
         onWebViewCreated: (controller) async {
           _controller = controller;
           WebViewSettings.registerJsErrorReporter(controller);
+          controller.addJavaScriptHandler(
+            handlerName: 'cfluxdoMiniAppFailed',
+            callback: (args) {
+              if (mounted) {
+                unawaited(_onAppFailed(args.isEmpty ? '' : '${args.first}'));
+              }
+              return null;
+            },
+          );
           // 等使用期的准备（重灌 cookie）完成再加载，否则应用当成没登录。
           // 回调里拿到的 controller 每次是新包装，不能按对象比，按代数比
           final generation = webViewGeneration;
@@ -476,6 +619,7 @@ class _MiniAppPageState extends ConsumerState<MiniAppPage>
         onRenderProcessGone: (_, detail) =>
             handleWebViewRenderGone('mini_app', detail),
         onLoadStart: (controller, url) {
+          _uncaughtErrors.clear();
           if (mounted) setState(() => _isLoading = true);
         },
         onProgressChanged: (controller, progress) {
@@ -493,6 +637,8 @@ class _MiniAppPageState extends ConsumerState<MiniAppPage>
         },
         onUpdateVisitedHistory: (controller, url, isReload) =>
             _onHistoryChanged(controller, url),
+        onConsoleMessage: (controller, message) =>
+            _recordUncaughtError(message),
         onTitleChanged: (controller, title) {
           if (title == null || title.isEmpty || !mounted) return;
           final separator = title.lastIndexOf(' - ');
