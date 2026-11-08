@@ -9,6 +9,8 @@ import '../config/site_customization.dart';
 import '../constants.dart';
 import '../pages/chat/channel/chat_channel_page.dart';
 import '../pages/image_viewer_page.dart';
+import '../pages/mini_app/mini_app_directory_page.dart';
+import '../pages/mini_app/mini_app_page.dart';
 import '../pages/webview_page.dart';
 import '../providers/preferences_provider.dart';
 import '../providers/category_provider.dart';
@@ -238,6 +240,21 @@ Future<void> launchContentLink(
           threadId: chatInfo.threadId,
           initialMessageId: chatInfo.messageId,
         ),
+      ),
+    );
+    return;
+  }
+
+  // 微应用：/apps 是应用广场，/apps/<应用 ID> 是某个应用，都用原生页面
+  final miniAppInfo = DiscourseUrlParser.parseMiniApp(url);
+  if (miniAppInfo != null && isInternalUrlString(url)) {
+    final appId = miniAppInfo.appId;
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => appId == null
+            ? const MiniAppDirectoryPage()
+            : MiniAppPage(appId: appId),
       ),
     );
     return;

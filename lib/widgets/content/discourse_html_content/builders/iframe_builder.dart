@@ -9,8 +9,10 @@ import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:m3e_ui/m3e_ui.dart';
 import '../../../../config/forum_site.dart';
 import '../../../../constants.dart';
+import '../../../../utils/discourse_url_parser.dart';
 import '../../../../utils/layout_lock.dart';
 import '../../../../utils/url_helper.dart';
+import '../../../../pages/mini_app/mini_app_page.dart';
 import '../../../../pages/webview_page.dart';
 import '../../../../l10n/s.dart';
 import '../../../../services/navigation/app_route_observer.dart';
@@ -186,6 +188,10 @@ class _IframeWidgetState extends State<IframeWidget> with RouteAware {
   /// 新窗口只给本站页面接（见 [_supportsPopupPages]）；第三方嵌入照旧
   bool get _allowPopups => _supportsPopupPages && _webViewUse != null;
 
+  /// 嵌的是微应用（/apps/<应用 ID>）时的应用 ID：帖子里的框只能横向操作、
+  /// 纵向滚不动，下面给一个全屏打开的入口
+  String? _miniAppId;
+
   @override
   void initState() {
     super.initState();
@@ -199,6 +205,9 @@ class _IframeWidgetState extends State<IframeWidget> with RouteAware {
         url: widget.attributes.fullUrl,
         reason: 'post_iframe',
       );
+      _miniAppId = DiscourseUrlParser.parseMiniApp(
+        widget.attributes.fullUrl,
+      )?.appId;
     }
   }
 
@@ -608,9 +617,27 @@ class _IframeWidgetState extends State<IframeWidget> with RouteAware {
       );
     }
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      child: sizedContent,
+    final miniAppId = _miniAppId;
+    if (miniAppId == null) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: sizedContent,
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(padding: const EdgeInsets.only(top: 8), child: sizedContent),
+        Align(
+          alignment: Alignment.centerRight,
+          child: TextButton.icon(
+            onPressed: () => MiniAppPage.open(context, miniAppId),
+            icon: const Icon(Symbols.open_in_full_rounded, size: 18),
+            label: Text(context.l10n.miniApp_openFullscreen),
+            style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
+          ),
+        ),
+      ],
     );
   }
 

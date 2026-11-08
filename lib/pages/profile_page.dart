@@ -30,6 +30,7 @@ import '../widgets/common/flair_badge.dart';
 import '../widgets/common/smart_avatar.dart';
 import '../providers/app_state_refresher.dart';
 import 'metaverse_page.dart';
+import 'mini_app/mini_app_directory_page.dart';
 import 'package:ai_model_manager/ai_model_manager.dart';
 import 'topic_detail_page/topic_detail_page.dart';
 import 'drafts_page.dart';
@@ -957,6 +958,14 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
             MaterialPageRoute(builder: (_) => const ExportHistoryPage()),
           ),
         ),
+        // 微应用广场（discourse-mini-app 插件，只有 LINUX DO 有）
+        if (SiteContext.isLinuxDo)
+          _buildOptionTile(
+            icon: Symbols.widgets_rounded,
+            iconColor: Colors.purple,
+            title: context.l10n.miniApp_plaza,
+            onTap: () => MiniAppDirectoryPage.open(context),
+          ),
         _buildOptionTile(
           icon: Symbols.explore_rounded,
           iconColor: Colors.deepOrange,

@@ -1,0 +1,39 @@
+{
+  "@@locale": "en",
+  "miniApp_count": "{count} mini apps",
+  "@miniApp_count": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "miniApp_discussion": "Discussion",
+  "miniApp_empty": "No mini apps yet",
+  "miniApp_favorites": "Favorites",
+  "miniApp_menu": "App menu",
+  "miniApp_noFavorites": "No favorites yet. Open an app and tap ⋯ at the top right to add it.",
+  "miniApp_noMatches": "No mini apps found. Try another name.",
+  "miniApp_openFullscreen": "Open full screen",
+  "miniApp_plaza": "Mini App Plaza",
+  "miniApp_plazaDesc": "Tools and games made by the community",
+  "miniApp_search": "Search mini apps",
+  "miniApp_sortHot": "Hot",
+  "miniApp_sortHotDesc": "Unique uses in the last 7 days",
+  "miniApp_sortLatest": "Latest",
+  "miniApp_sortLatestDesc": "When the current version went live",
+  "miniApp_sortRating": "Top rated",
+  "miniApp_sortRatingDesc": "Average rating, more ratings first on ties",
+  "miniApp_sortUsed": "Most used",
+  "miniApp_sortUsedDesc": "Unique uses in total",
+  "miniApp_unavailable": "The app is unavailable or you don't have access",
+  "miniApp_unrated": "No ratings",
+  "miniApp_uses": "{count} uses",
+  "@miniApp_uses": {
+    "placeholders": {
+      "count": {
+        "type": "String"
+      }
+    }
+  }
+}

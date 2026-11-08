@@ -30,6 +30,16 @@ class ChatLinkInfo {
   const ChatLinkInfo({required this.channelId, this.threadId, this.messageId});
 }
 
+/// 微应用链接解析结果：`/apps` 是应用广场（[appId] 为空），`/apps/<应用 ID>`
+/// 是某个应用
+class MiniAppLinkInfo {
+  final String? appId;
+
+  const MiniAppLinkInfo({this.appId});
+
+  bool get isDirectory => appId == null;
+}
+
 /// 标题中可自动解析的绝对 URL。
 class TitleUrlInfo {
   /// 用户在标题里写的原文（仅 trim），用于与当前标题比对
@@ -75,6 +85,13 @@ class DiscourseUrlParser {
   );
 
   static final _tagRegex = RegExp(r'/tag/([^/?#]+)', caseSensitive: false);
+
+  /// 微应用：/apps 或 /apps/<应用 ID>（应用 ID 是 UUID）。只认整段路径，
+  /// /apps-sandbox/... 等别的路由不算
+  static final _miniAppRegex = RegExp(
+    r'^/apps(?:/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}))?/?$',
+    caseSensitive: false,
+  );
 
   /// 聊天链接:官方 chat_message.url 口径
   /// - `/chat/c/:slug/:channelId/t/:threadId/:messageId?`(thread 内消息)
@@ -222,6 +239,15 @@ class DiscourseUrlParser {
       );
     }
     return null;
+  }
+
+  /// 解析微应用链接（见 [MiniAppLinkInfo]），不是微应用链接返回 null
+  static MiniAppLinkInfo? parseMiniApp(String url) {
+    final path = Uri.tryParse(url)?.path;
+    if (path == null) return null;
+    final match = _miniAppRegex.firstMatch(path);
+    if (match == null) return null;
+    return MiniAppLinkInfo(appId: match.group(1)?.toLowerCase());
   }
 
   static bool isHomepage(String url) {

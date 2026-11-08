@@ -101,4 +101,37 @@ void main() {
       expect(result?.absoluteUrl, 'https://example.com/a?b=1');
     });
   });
+
+  group('微应用链接', () {
+    const appId = '01a1966a-f4a0-7b43-ad9c-c46b7f0e0281';
+
+    test('应用广场', () {
+      expect(DiscourseUrlParser.parseMiniApp('/apps')?.isDirectory, isTrue);
+      expect(
+        DiscourseUrlParser.parseMiniApp('https://linux.do/apps/?sort=hot')
+            ?.isDirectory,
+        isTrue,
+      );
+    });
+
+    test('某个应用（含嵌入页地址），ID 统一小写', () {
+      expect(DiscourseUrlParser.parseMiniApp('/apps/$appId')?.appId, appId);
+      expect(
+        DiscourseUrlParser.parseMiniApp(
+          'https://linux.do/apps/${appId.toUpperCase()}?embed_mode=true',
+        )?.appId,
+        appId,
+      );
+    });
+
+    test('别的路由不算', () {
+      expect(DiscourseUrlParser.parseMiniApp('/apps-sandbox/$appId/1.0'), isNull);
+      expect(DiscourseUrlParser.parseMiniApp('/apps/not-an-id'), isNull);
+      expect(DiscourseUrlParser.parseMiniApp('/t/apps/123'), isNull);
+      expect(
+        DiscourseUrlParser.parseMiniApp('/mini-app-api/apps.json'),
+        isNull,
+      );
+    });
+  });
 }

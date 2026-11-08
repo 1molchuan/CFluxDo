@@ -1,0 +1,39 @@
+{
+  "@@locale": "zh",
+  "miniApp_count": "{count} 个微应用",
+  "@miniApp_count": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "miniApp_discussion": "参与讨论",
+  "miniApp_empty": "暂无微应用",
+  "miniApp_favorites": "已收藏",
+  "miniApp_menu": "应用菜单",
+  "miniApp_noFavorites": "还没有收藏的应用，打开应用后点右上角的 ⋯ 收藏",
+  "miniApp_noMatches": "没有找到微应用，换个名称试试",
+  "miniApp_openFullscreen": "全屏打开",
+  "miniApp_plaza": "微应用广场",
+  "miniApp_plazaDesc": "发现社区创作的工具和游戏",
+  "miniApp_search": "搜索微应用",
+  "miniApp_sortHot": "最热",
+  "miniApp_sortHotDesc": "近 7 天去重使用量",
+  "miniApp_sortLatest": "最新上线",
+  "miniApp_sortLatestDesc": "当前版本首次上线时间",
+  "miniApp_sortRating": "评分最高",
+  "miniApp_sortRatingDesc": "平均评分，同分时评分人数多的优先",
+  "miniApp_sortUsed": "使用最多",
+  "miniApp_sortUsedDesc": "累计去重使用量",
+  "miniApp_unavailable": "应用不可用，或无访问权限",
+  "miniApp_unrated": "暂无评分",
+  "miniApp_uses": "{count} 次使用",
+  "@miniApp_uses": {
+    "placeholders": {
+      "count": {
+        "type": "String"
+      }
+    }
+  }
+}

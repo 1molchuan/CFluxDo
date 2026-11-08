@@ -6,6 +6,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../config/forum_site.dart';
 import 'site_context.dart';
 import 'site_switch_service.dart';
+import '../pages/mini_app/mini_app_directory_page.dart';
+import '../pages/mini_app/mini_app_page.dart';
 import '../pages/topic_detail_page/topic_detail_page.dart';
 import '../pages/user_profile_page.dart';
 import '../pages/webview_login_page.dart';
@@ -193,6 +195,20 @@ class DeepLinkService {
     final topicSlug = DiscourseUrlParser.parseTopicSlug(uri.path);
     if (topicSlug != null) {
       _handleTopicBySlug(context, topicSlug);
+      return;
+    }
+
+    // 微应用：/apps 应用广场、/apps/<应用 ID> 某个应用
+    final miniAppInfo = DiscourseUrlParser.parseMiniApp(uri.path);
+    if (miniAppInfo != null) {
+      final appId = miniAppInfo.appId;
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => appId == null
+              ? const MiniAppDirectoryPage()
+              : MiniAppPage(appId: appId),
+        ),
+      );
       return;
     }
 
