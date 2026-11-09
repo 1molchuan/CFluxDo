@@ -60,9 +60,9 @@ cd CFluxDo
 dart run melos bootstrap                 # 初始化 workspace
 dart run tool/project_prep.dart app      # pub get、l10n 生成、代理证书同步，等价于 just sync
 dart tool/flutterw.dart build apk --release --target-platform android-arm64 \
-  --build-name 1.3.0 --build-number 2026110902
+  --build-name 1.3.0 --build-number 2026110903
 dart tool/flutterw.dart build apk --release --target-platform android-arm \
-  --build-name 1.3.0 --build-number 2026110902
+  --build-name 1.3.0 --build-number 2026110903
 ```
 
 `flutterw` 会在构建前用 `cargo ndk` 编译对应架构的 Rust 库并放进 `android/app/src/main/jniLibs/`。两个架构各出一个 APK，不出合并包。
