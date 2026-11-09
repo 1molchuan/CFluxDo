@@ -6,7 +6,7 @@
 [![Platform](https://img.shields.io/badge/platform-Android%20arm64%20%7C%20armv7%20%7C%20Windows%20%7C%20Linux-3DDC84?style=for-the-badge&logo=android&logoColor=white)](https://github.com/1molchuan/CFluxDo/releases)
 [![License](https://img.shields.io/badge/license-GPL--3.0-blue?style=for-the-badge)](LICENSE)
 
-CFluxDo 源自 FluxDO 0.2.28，已脱离 fork 关系独立维护，并持续同步上游（目前到 v0.2.29）。它保留了 FluxDO 的全部论坛功能，重点解决国内网络下访问 linux.do 时遇到的 DNS 污染、频繁弹 Cloudflare 验证、无征兆掉登录等问题。以 Android 为主，Windows、Linux 桌面端为预览版。
+CFluxDo 源自 FluxDO 0.2.28，已脱离 fork 关系独立维护，并持续同步上游（目前到 v0.2.29，另挑选了 v0.2.30 开发版的部分修复）。它保留了 FluxDO 的全部论坛功能，重点解决国内网络下访问 linux.do 时遇到的 DNS 污染、频繁弹 Cloudflare 验证、无征兆掉登录等问题。以 Android 为主，Windows、Linux 桌面端为预览版。
 
 ## 下载安装
 
@@ -27,14 +27,16 @@ CFluxDo 源自 FluxDO 0.2.28，已脱离 fork 关系独立维护，并持续同�
 3. **使用**：之后 linux.do 及其所有子域都走赢家这一个节点、同一个地址族，保证 Cloudflare 看到的出口 IP 不变。Cloudflare 换 ECH 钥匙时，用服务端返回的 retry_configs 当场换钥匙重试，不等 DNS 刷新。
 4. **重测时机**：切换网络、赢家连续失败、或在设置里手动点「重新优选」。没有定时重测，也没有后台任务。单次竞速约 50–200 KB 流量。
 
-当前线路显示在「应用设置 → 网络设置」最上方；「高级设置 → 节点优选」可以改为「只用 atlas 池」。两种方式都拿不到候选时，自动回退到原有的 DoH 加速线路，仍然连不上则回退系统 DNS，不会因此打不开 App。
+地址族默认「自动」：本机 IPv6 可用时优先用 IPv6（家宽的 IPv4 多是运营商共享出口，更容易弹人机验证），可以在「网络设置 → IP 协议」里改。Android 上经本地网关发出的请求，按本机 WebView 的 TLS 握手（BoringSSL）、HTTP/2 设置和请求头顺序发出，和验证页的浏览器指纹对得上，「高级网络设置」里可以关。
+
+当前线路显示在「应用设置 → 网络设置」最上方；「高级网络设置 → 节点优选」可以改为「只用 atlas 池」。两种方式都拿不到候选时，自动回退到原有的 DoH 加速线路，仍然连不上则回退系统 DNS，不会因此打不开 App。
 
 ## 与 FluxDO 的差异
 
 - **连接方式**：上面的本地优选替代了对加速服务端的依赖；原有的 DoH 加速线路降为兜底。
 - **弹盾与掉登录**：针对 Cloudflare 验证页、`cf_clearance` 与登录 Cookie `_t` 的轮换做了一系列修复，详见各版本的 Release 说明。
 - **界面**：默认「墨笺」阅读风格（纸色底、宋体标题、细线分隔）；原来的界面保留为「经典」，在「我的 → 应用设置 → 外观 → 界面风格」切换。
-- **平台**：以 Android 为主；Windows、Linux 桌面端为预览版，和 Android 共用同一套连接层，视频楼层播放等功能还不完整。移除了 iOS、macOS、Web 的平台代码，以及 Cronet、rhttp 两个网络引擎和 Firebase 崩溃上报，崩溃排查依靠应用内的日志导出。App 的请求只有一条出路：经本地网关（`core/doh_proxy`）发出；登录或验证反复失败时，可以在「高级设置 → 兼容模式」把主站接口请求交给内置浏览器发送。
+- **平台**：以 Android 为主；Windows、Linux 桌面端为预览版，和 Android 共用同一套连接层，视频楼层播放等功能还不完整。移除了 iOS、macOS、Web 的平台代码，以及 Cronet、rhttp 两个网络引擎和 Firebase 崩溃上报，崩溃排查依靠应用内的日志导出。App 的请求只有一条出路：经本地网关（`core/doh_proxy`）发出；登录或验证反复失败时，可以在「高级网络设置 → 兼容模式」把主站接口请求交给内置浏览器发送。
 - **上游补丁**：挑选上游尚未合并的 PR 一并接入，保留原作者署名。
 
 ## 隐私
@@ -58,9 +60,9 @@ cd CFluxDo
 dart run melos bootstrap                 # 初始化 workspace
 dart run tool/project_prep.dart app      # pub get、l10n 生成、代理证书同步，等价于 just sync
 dart tool/flutterw.dart build apk --release --target-platform android-arm64 \
-  --build-name 1.2.1 --build-number 2026102408
+  --build-name 1.3.0 --build-number 2026110902
 dart tool/flutterw.dart build apk --release --target-platform android-arm \
-  --build-name 1.2.1 --build-number 2026102408
+  --build-name 1.3.0 --build-number 2026110902
 ```
 
 `flutterw` 会在构建前用 `cargo ndk` 编译对应架构的 Rust 库并放进 `android/app/src/main/jniLibs/`。两个架构各出一个 APK，不出合并包。
