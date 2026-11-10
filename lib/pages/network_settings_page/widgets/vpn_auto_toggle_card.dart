@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:app_icons/app_icons.dart';
 
 import '../../../l10n/s.dart';
+import '../../../services/network/doh/network_settings_service.dart';
 import '../../../services/network/vpn_auto_toggle_service.dart';
 import 'package:common_ui/common_ui.dart';
 import 'package:m3e_ui/m3e_ui.dart';
@@ -20,6 +21,7 @@ class VpnAutoToggleCard extends StatelessWidget {
         service.enabledNotifier,
         service.vpnActiveNotifier,
         service.detectionModeNotifier,
+        NetworkSettingsService.instance.notifier,
       ]),
       builder: (context, _) {
         final enabled = service.enabled;
@@ -179,8 +181,15 @@ class VpnAutoToggleCard extends StatelessWidget {
   }
 
   String _buildSuppressedText(bool dohSuppressed, bool proxySuppressed) {
-    if (dohSuppressed && proxySuppressed) return S.current.vpnToggle_pausedBoth;
-    if (dohSuppressed) return S.current.vpnToggle_pausedAccel;
-    return S.current.vpnToggle_pausedProxy;
+    final paused = dohSuppressed && proxySuppressed
+        ? S.current.vpnToggle_pausedBoth
+        : dohSuppressed
+        ? S.current.vpnToggle_pausedAccel
+        : S.current.vpnToggle_pausedProxy;
+    // 加速让路后安卓仍为浏览器指纹起本机网关，说一声，免得以为 App 完全不经网关
+    if (NetworkSettingsService.instance.fingerprintOnlyGateway) {
+      return '$paused\n${S.current.vpnToggle_fingerprintKept}';
+    }
+    return paused;
   }
 }

@@ -197,5 +197,6 @@
   "vpnToggle_title": "VPN 自動讓路",
   "vpnToggle_pausedBoth": "連線加速和上游代理已暫停，VPN 中斷後自動恢復",
   "vpnToggle_pausedAccel": "連線加速已暫停，VPN 中斷後自動恢復",
-  "vpnToggle_pausedProxy": "上游代理已暫停，VPN 中斷後自動恢復"
+  "vpnToggle_pausedProxy": "上游代理已暫停，VPN 中斷後自動恢復",
+  "vpnToggle_fingerprintKept": "App 的請求仍經本機閘道按瀏覽器指紋送出（只換握手，DNS 和線路都跟著 VPN）"
 }

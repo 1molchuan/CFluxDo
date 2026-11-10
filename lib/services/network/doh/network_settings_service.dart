@@ -321,11 +321,30 @@ class NetworkSettingsService {
   NetworkSettings get current => notifier.value;
 
   /// 当前是否使用 gateway（反向代理）模式
-  /// Gateway 模式：DOH 开启 + 用户开关开启 + 代理运行中
+  /// Gateway 模式：DOH 开启 + 用户开关开启 + 代理运行中。内置网页也经它中转（MITM），
+  /// WebView 的证书放行以此为准
   bool get isGatewayMode =>
       current.dohEnabled &&
       current.gatewayEnabled &&
       _rustProxyService.isRunning;
+
+  /// 加速关着（含 VPN 自动让路）、也没有上游代理时，安卓仍为浏览器指纹起本地网关：
+  /// 系统 DNS（开着 VPN 就是 VPN 的）、不做 ECH 和优选，内置网页不经它。
+  ///
+  /// CF 对原生连接收紧的站点（2026-11-10 实测 IDC Flare）认握手不认 cf_clearance：
+  /// 同一枚值浏览器指纹的连接 200，Dart 自己握手的连接（含关掉指纹的网关）验证多少轮
+  /// 都 403，登录时兑换令牌也就过不去
+  bool get fingerprintOnlyGateway =>
+      Platform.isAndroid &&
+      !current.dohEnabled &&
+      !_proxyService.current.isValid &&
+      current.browserTls &&
+      current.gatewayEnabled;
+
+  /// App 的请求是否改写成明文发给本地网关（加速网关，或只为浏览器指纹起的网关）
+  bool get routesAppThroughGateway =>
+      isGatewayMode ||
+      (fingerprintOnlyGateway && _rustProxyService.isRunning);
 
   /// 本地动态优选只在 Android / Linux / Windows 网关模式下跑：DoH 开着、没有上游代理、网关开关开着
   /// （网关/上游的判断和 [_applyProxyState] 里启动代理时用的一致）
@@ -422,8 +441,13 @@ class NetworkSettingsService {
   }
 
   // Rust 代理同时服务 App 自己的请求（网关）和 WebView（MITM 代理）
+  /// 需要本地代理中转（内置网页也经它）：加速或上游代理开着
   bool get shouldRunLocalProxy =>
       current.dohEnabled || _proxyService.current.isValid;
+
+  /// 本地网关要不要跑：中转之外，还有只为浏览器指纹的情形（见 [fingerprintOnlyGateway]）
+  bool get _shouldRunProxyProcess =>
+      shouldRunLocalProxy || fingerprintOnlyGateway;
 
   List<DohServer> get servers => [
     ..._builtInServers,
@@ -522,8 +546,8 @@ class NetworkSettingsService {
   Future<void> setDohEnabled(bool enabled) async {
     final prefs = _prefs;
     if (prefs == null) return;
-    _beginApply(enabled: enabled || _proxyService.current.isValid);
     notifier.value = notifier.value.copyWith(dohEnabled: enabled);
+    _beginApply(enabled: _shouldRunProxyProcess);
     if (!enabled && _lastStartFailed) {
       _setStartFailed(false);
     }
@@ -810,7 +834,7 @@ class NetworkSettingsService {
         await Future<void>.delayed(const Duration(milliseconds: 16));
       }
     }
-    if (!shouldRunLocalProxy) {
+    if (!_shouldRunProxyProcess) {
       try {
         await _stopLocalProxyUnlessRequiredByWebView();
         if (_pendingStart) {
@@ -864,16 +888,22 @@ class NetworkSettingsService {
             ? SystemProxyService.instance.effectiveProxyUrl
             : null,
       );
-      final mitmConnect = WebViewMitmPolicy.useMitmConnect(
-        isWindows: Platform.isWindows,
-        webViewAdapterEnabled: webViewAdapterEnabled,
-      );
-      final useGateway = WebViewMitmPolicy.useGatewayMode(
-        isWindows: Platform.isWindows,
-        dohEnabled: current.dohEnabled,
-        gatewayEnabled: current.gatewayEnabled,
-        webViewAdapterEnabled: webViewAdapterEnabled,
-      );
+      // 只为浏览器指纹起的网关不中转内置网页，也就没有 MITM
+      final fingerprintOnly = fingerprintOnlyGateway;
+      final mitmConnect =
+          !fingerprintOnly &&
+          WebViewMitmPolicy.useMitmConnect(
+            isWindows: Platform.isWindows,
+            webViewAdapterEnabled: webViewAdapterEnabled,
+          );
+      final useGateway =
+          fingerprintOnly ||
+          WebViewMitmPolicy.useGatewayMode(
+            isWindows: Platform.isWindows,
+            dohEnabled: current.dohEnabled,
+            gatewayEnabled: current.gatewayEnabled,
+            webViewAdapterEnabled: webViewAdapterEnabled,
+          );
 
       // macOS: 启动前确保 CA 在钥匙串中被信任
       if (Platform.isMacOS && current.dohEnabled) {
@@ -998,7 +1028,7 @@ class NetworkSettingsService {
       // start 耗时较长(读证书/绑端口),期间设置可能已被改为无需本地代理
       // (如 VPN 自动压制关闭了 DoH 与上游代理)。此时并发的 stop 分支先于
       // start 完成,会留下"开关已关、代理仍在跑"的孤儿网关,这里必须复查。
-      if (!shouldRunLocalProxy) {
+      if (!_shouldRunProxyProcess) {
         debugPrint('[DOH] 启动期间设置已变更为无需本地代理,重新核对 WebView 路由');
         await _stopLocalProxyUnlessRequiredByWebView();
         _setPendingStart(false);
@@ -1065,7 +1095,7 @@ class NetworkSettingsService {
   }
 
   Future<void> restartProxy() async {
-    _beginApply(enabled: shouldRunLocalProxy);
+    _beginApply(enabled: _shouldRunProxyProcess);
     await _applyProxyState();
     _touch();
   }
@@ -1079,7 +1109,7 @@ class NetworkSettingsService {
     AccelDohAuthService.instance.checkNow();
     unawaited(_checkAuthRejected());
     unawaited(_checkAccelUpdate());
-    if (!shouldRunLocalProxy) return;
+    if (!_shouldRunProxyProcess) return;
     if (!_rustProxyService.isRunning) {
       // 上次启动失败、当前处于直连状态：回到前台时再试一次
       if (_lastStartFailed && !isApplying.value) {
@@ -1096,7 +1126,7 @@ class NetworkSettingsService {
   }
 
   void _scheduleApplyProxyState() {
-    _beginApply(enabled: shouldRunLocalProxy);
+    _beginApply(enabled: _shouldRunProxyProcess);
     _applyDebounce?.cancel();
     _applyDebounce = Timer(const Duration(milliseconds: 350), () async {
       await _applyProxyState();
@@ -1143,7 +1173,11 @@ class NetworkSettingsService {
   }
 
   Future<void> _applyWebViewProxy() async {
-    if (!shouldRunLocalProxy) return;
+    if (!shouldRunLocalProxy) {
+      // 只为浏览器指纹起的网关：内置网页照常直连（VPN 开着就走 VPN），之前设过的代理要撤掉
+      await _clearWebViewProxy();
+      return;
+    }
     final port = _activeProxyPort;
     if (port == null) return;
 

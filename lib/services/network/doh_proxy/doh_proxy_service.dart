@@ -296,9 +296,12 @@ class DohProxyService {
   }) async {
     try {
       return await _enqueueFfiOp(() async {
-        NetworkLogger.log(
-          '[DOH] 使用 FFI 启动代理，模式: ${enableDoh ? "DoH 网关" : "纯上游代理"}',
-        );
+        final mode = enableDoh
+            ? 'DoH 网关'
+            : gatewayMode
+            ? '浏览器指纹网关（不开 DoH）'
+            : '纯上游代理';
+        NetworkLogger.log('[DOH] 使用 FFI 启动代理，模式: $mode');
 
         _currentPreferredPort = port;
         await _ensureFfiStopped();

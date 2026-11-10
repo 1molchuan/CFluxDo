@@ -118,5 +118,6 @@
   "vpnToggle_title": "Step aside for VPN",
   "vpnToggle_pausedBoth": "Acceleration and the upstream proxy are paused and resume when the VPN disconnects",
   "vpnToggle_pausedAccel": "Acceleration is paused and resumes when the VPN disconnects",
-  "vpnToggle_pausedProxy": "The upstream proxy is paused and resumes when the VPN disconnects"
+  "vpnToggle_pausedProxy": "The upstream proxy is paused and resumes when the VPN disconnects",
+  "vpnToggle_fingerprintKept": "App requests still go out through the local gateway with the browser fingerprint (only the handshake changes; DNS and routing follow the VPN)"
 }
