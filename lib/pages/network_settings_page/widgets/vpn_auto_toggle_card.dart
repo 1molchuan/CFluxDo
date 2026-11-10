@@ -21,6 +21,7 @@ class VpnAutoToggleCard extends StatelessWidget {
         service.enabledNotifier,
         service.vpnActiveNotifier,
         service.detectionModeNotifier,
+        service.accelResumedNotifier,
         NetworkSettingsService.instance.notifier,
       ]),
       builder: (context, _) {
@@ -29,6 +30,7 @@ class VpnAutoToggleCard extends StatelessWidget {
         final dohSuppressed = enabled && service.isDohSuppressed;
         final proxySuppressed = enabled && service.isProxySuppressed;
         final hasSuppressed = dohSuppressed || proxySuppressed;
+        final accelResumed = enabled && vpnActive && service.accelResumed;
 
         return SegmentedCardGroup(
           children: [
@@ -125,34 +127,36 @@ class VpnAutoToggleCard extends StatelessWidget {
                 ),
               ),
             if (enabled && hasSuppressed)
-              Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 12,
-                ),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Icon(
-                      Symbols.info_rounded,
-                      size: 16,
-                      color: theme.colorScheme.primary,
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        _buildSuppressedText(dohSuppressed, proxySuppressed),
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: theme.colorScheme.primary,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
+              _hintRow(
+                theme,
+                _buildSuppressedText(dohSuppressed, proxySuppressed),
               ),
+            if (accelResumed)
+              _hintRow(theme, context.l10n.vpnToggle_accelResumed),
           ],
         );
       },
+    );
+  }
+
+  Widget _hintRow(ThemeData theme, String text) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Symbols.info_rounded, size: 16, color: theme.colorScheme.primary),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              text,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.primary,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 

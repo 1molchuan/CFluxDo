@@ -114,10 +114,12 @@
   "vpnToggle_detectionForceInactiveDesc": "Ignore automatic detection for packet-capture proxies and similar tools",
   "vpnToggle_disconnected": "VPN Disconnected",
   "vpnToggle_lockedHint": "VPN connected and managed by \"Step aside for VPN\"; this decides whether it's on after the VPN disconnects",
-  "vpnToggle_subtitle": "Pause acceleration and the upstream proxy while a VPN is on, and resume when it disconnects",
+  "vpnToggle_subtitle": "Pause acceleration and the upstream proxy while a VPN is on, and resume when it disconnects; acceleration comes back if the forum is unreachable over the VPN",
   "vpnToggle_title": "Step aside for VPN",
   "vpnToggle_pausedBoth": "Acceleration and the upstream proxy are paused and resume when the VPN disconnects",
   "vpnToggle_pausedAccel": "Acceleration is paused and resumes when the VPN disconnects",
   "vpnToggle_pausedProxy": "The upstream proxy is paused and resumes when the VPN disconnects",
-  "vpnToggle_fingerprintKept": "App requests still go out through the local gateway with the browser fingerprint (only the handshake changes; DNS and routing follow the VPN)"
+  "vpnToggle_fingerprintKept": "App requests still go out through the local gateway with the browser fingerprint (only the handshake changes; DNS and routing follow the VPN)",
+  "vpnToggle_accelResumed": "This VPN isn't carrying the forum's connections (they kept failing with acceleration paused), so acceleration is back on for this VPN session; stepping aside resumes after it disconnects",
+  "vpnToggle_accelResumedToast": "Couldn't reach the forum over the VPN, acceleration resumed"
 }

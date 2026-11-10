@@ -5,6 +5,10 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../l10n/s.dart';
+import '../app_logger.dart';
+import '../local_notification_service.dart';
+import '../toast_service.dart';
 import 'doh/network_settings_service.dart';
 import 'proxy/proxy_settings_service.dart';
 import 'system_proxy_service.dart';
@@ -24,11 +28,59 @@ enum VpnDetectionMode {
   }
 }
 
+/// 论坛连接层的连续失败：拿到任何 HTTP 响应就清零；[window] 内连续 [threshold] 次
+/// 连不上、且这串失败至少持续了 [minSpan] 才算数——换网瞬间一起失败的几个请求不算
+class ForumUnreachableStreak {
+  ForumUnreachableStreak({
+    this.threshold = 3,
+    this.minSpan = const Duration(seconds: 2),
+    this.window = const Duration(minutes: 1),
+    DateTime Function()? clock,
+  }) : _clock = clock ?? DateTime.now;
+
+  final int threshold;
+  final Duration minSpan;
+  final Duration window;
+  final DateTime Function() _clock;
+
+  int _count = 0;
+  DateTime? _since;
+
+  void reset() {
+    _count = 0;
+    _since = null;
+  }
+
+  /// 记一次连不上。不够数返回 null；够数返回还要再等多久才能确认
+  /// （[Duration.zero] 即现在就算），等的期间拿到任何响应就作废
+  Duration? recordFailure() {
+    final now = _clock();
+    final since = _since;
+    if (since == null || now.difference(since) > window) {
+      _since = now;
+      _count = 0;
+    }
+    _count++;
+    if (_count < threshold) return null;
+    final lasted = now.difference(_since!);
+    return lasted >= minSpan ? Duration.zero : minSpan - lasted;
+  }
+
+  /// 等待期满时确认：这期间没拿到过响应就算连不上，并清零（一串失败只触发一次）
+  bool confirm() {
+    if (_count < threshold) return false;
+    reset();
+    return true;
+  }
+}
+
 /// VPN 自动切换服务
 ///
 /// 检测到 VPN 开启时自动关闭 DOH 和上游代理，VPN 关闭后自动恢复。
 /// 采用"压制标记"模式：通过 SharedPreferences 标记哪些项是被 VPN 自动关闭的，
 /// VPN 关闭后根据标记恢复，不修改 NetworkSettingsService / ProxySettingsService 内部逻辑。
+///
+/// 让路期间论坛一直连不上时，本次 VPN 期间恢复连接加速（见 [reportForumTransport]）。
 class VpnAutoToggleService {
   VpnAutoToggleService._();
   static final VpnAutoToggleService instance = VpnAutoToggleService._();
@@ -37,8 +89,20 @@ class VpnAutoToggleService {
   static const _keySuppressedDoh = 'vpn_suppressed_doh';
   static const _keySuppressedProxy = 'vpn_suppressed_proxy';
   static const _keyDetectionMode = 'vpn_detection_mode';
+  static const _keyAccelResumed = 'vpn_accel_resumed';
 
   late SharedPreferences _prefs;
+
+  /// 本次 VPN 期间已因连不上论坛恢复了连接加速：之后的网络变化不再暂停它，
+  /// VPN 断开或关掉让路时清掉。落盘，VPN 一直连着时重启 App 也照旧
+  final accelResumedNotifier = ValueNotifier<bool>(false);
+
+  /// 让路期间论坛连接层的连续失败
+  @visibleForTesting
+  ForumUnreachableStreak unreachableStreak = ForumUnreachableStreak();
+
+  /// 连续失败够数后等确认的计时
+  Timer? _unreachableConfirmTimer;
 
   /// 功能是否启用
   final enabledNotifier = ValueNotifier<bool>(false);
@@ -91,6 +155,11 @@ class VpnAutoToggleService {
   bool get enabled => enabledNotifier.value;
   bool get vpnActive => vpnActiveNotifier.value;
   VpnDetectionMode get detectionMode => detectionModeNotifier.value;
+  bool get accelResumed => accelResumedNotifier.value;
+
+  /// 连接加速开关此刻由让路接管（拨动只记 VPN 断开后的意图）：VPN 连着、
+  /// 且本次没有因连不上论坛恢复加速
+  bool get locksAcceleration => enabled && vpnActive && !accelResumed;
 
   @visibleForTesting
   static bool resolveVpnActive({
@@ -140,6 +209,8 @@ class VpnAutoToggleService {
     detectionModeNotifier.value = VpnDetectionMode.fromString(
       prefs.getString(_keyDetectionMode),
     );
+    accelResumedNotifier.value = prefs.getBool(_keyAccelResumed) ?? false;
+    _resetUnreachableWatch();
   }
 
   /// 开关控制
@@ -281,11 +352,13 @@ class VpnAutoToggleService {
       final proxyService = ProxySettingsService.instance;
 
       // 检查 DOH 是否开启，开启则压制。冷启动时网络设置还没初始化（还没起代理）：
-      // 直接改偏好，初始化时就按关着来，不用先起代理再关掉
+      // 直接改偏好，初始化时就按关着来，不用先起代理再关掉。
+      // 本次 VPN 期间已因连不上论坛恢复了加速的，不再暂停
       final dohEnabled = dohService.isInitialized
           ? dohService.notifier.value.dohEnabled
           : NetworkSettingsService.storedDohEnabled(_prefs);
-      if (dohEnabled) {
+      if (dohEnabled && !accelResumed) {
+        _resetUnreachableWatch();
         await _prefs.setBool(_keySuppressedDoh, true);
         if (dohService.isInitialized) {
           await dohService.setDohEnabled(false);
@@ -313,6 +386,14 @@ class VpnAutoToggleService {
     _isSuppressing = true;
 
     try {
+      // 「本次 VPN 期间已恢复加速」到此为止：下次连 VPN 照常先让路
+      _resetUnreachableWatch();
+      if (accelResumed) {
+        accelResumedNotifier.value = false;
+        await _prefs.remove(_keyAccelResumed);
+        debugPrint('[VpnAutoToggle] 清除本次 VPN 期间恢复加速的记号');
+      }
+
       // 恢复 DOH（冷启动时网络设置还没初始化：直接改偏好）
       if (isDohSuppressed) {
         await _prefs.remove(_keySuppressedDoh);
@@ -335,6 +416,68 @@ class VpnAutoToggleService {
       _isSuppressing = false;
       _bumpSuppression();
     }
+  }
+
+  /// 网络适配器报告论坛请求在连接层的结果（[reachable]：拿到了 HTTP 响应）。
+  ///
+  /// 只在让路正暂停着用户开着的加速时计数。一直连不上说明这个 VPN 没接管论坛的连接：
+  /// 去广告 / 防火墙 / DNS 类应用也占着 VPN 接口，或分流规则把论坛设成了直连。国内明文
+  /// 域名会被重置、系统 DNS 还常被污染，只留浏览器指纹的网关也连不上，于是本次 VPN 期间
+  /// 恢复完整加速（ECH + 优选）。[detail] 是失败原因，只进日志
+  void reportForumTransport({required bool reachable, String? detail}) {
+    if (!_watchingStepAside) return;
+    if (reachable) {
+      _resetUnreachableWatch();
+      return;
+    }
+    final wait = unreachableStreak.recordFailure();
+    if (wait == null) return;
+    _unreachableConfirmTimer?.cancel();
+    _unreachableConfirmTimer = Timer(wait, () {
+      if (_watchingStepAside && unreachableStreak.confirm()) {
+        unawaited(resumeAccelerationForVpn(detail ?? 'unreachable'));
+      }
+    });
+  }
+
+  /// 让路正在暂停用户本来开着的加速，且本次还没恢复过
+  bool get _watchingStepAside =>
+      enabled && _shouldSuppress && !accelResumed && isDohSuppressed;
+
+  void _resetUnreachableWatch() {
+    _unreachableConfirmTimer?.cancel();
+    _unreachableConfirmTimer = null;
+    unreachableStreak.reset();
+  }
+
+  /// 本次 VPN 期间恢复连接加速：去掉暂停记号、打开加速，记下「本次已恢复」
+  @visibleForTesting
+  Future<bool> resumeAccelerationForVpn(String reason) async {
+    if (!_watchingStepAside || _isSuppressing) return false;
+    _isSuppressing = true;
+    try {
+      accelResumedNotifier.value = true;
+      await _prefs.setBool(_keyAccelResumed, true);
+      await _prefs.remove(_keySuppressedDoh);
+      final dohService = NetworkSettingsService.instance;
+      if (dohService.isInitialized) {
+        await dohService.setDohEnabled(true);
+      } else {
+        await NetworkSettingsService.storeDohEnabled(_prefs, true);
+      }
+    } finally {
+      _isSuppressing = false;
+      _bumpSuppression();
+    }
+    AppLogger.warning(
+      'VPN 让路期间论坛一直连不上（$reason），本次 VPN 期间恢复连接加速',
+      tag: 'VpnAutoToggle',
+    );
+    // 没有界面时（单测、启动早期）不弹
+    if (navigatorKey.currentContext != null) {
+      ToastService.showInfo(S.current.vpnToggle_accelResumedToast);
+    }
+    return true;
   }
 
   /// 当用户在 VPN 活跃期间手动开启被压制的项时，清除对应标记

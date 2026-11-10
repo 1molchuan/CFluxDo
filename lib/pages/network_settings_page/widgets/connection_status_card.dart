@@ -141,6 +141,7 @@ class _ConnectionStatusCardState extends State<ConnectionStatusCard> {
         vpn.enabledNotifier,
         vpn.vpnActiveNotifier,
         vpn.suppressionNotifier,
+        vpn.accelResumedNotifier,
         windowsEnv.proxyRestartRequiredNotifier,
         compatModeListenable(),
       ]),
@@ -148,7 +149,7 @@ class _ConnectionStatusCardState extends State<ConnectionStatusCard> {
         final settings = service.current;
         final status = service.selectStatusNotifier.value;
         final proxy = ProxySettingsService.instance.current;
-        final vpnLocked = vpn.enabled && vpn.vpnActive;
+        final vpnLocked = vpn.locksAcceleration;
         final kind = resolveNetStatusKind(
           dohEnabled: settings.dohEnabled,
           proxyActive: proxy.isValid,

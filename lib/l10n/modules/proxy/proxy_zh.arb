@@ -193,10 +193,12 @@
   "vpnToggle_detectionForceInactiveDesc": "忽略自动检测，适合抓包代理等不应触发自动切换的场景",
   "vpnToggle_disconnected": "VPN 未连接",
   "vpnToggle_lockedHint": "VPN 已连接，由「VPN 自动让路」接管；这里决定 VPN 断开后开不开",
-  "vpnToggle_subtitle": "检测到 VPN 时暂停连接加速和上游代理，VPN 断开后自动恢复",
+  "vpnToggle_subtitle": "检测到 VPN 时暂停连接加速和上游代理，VPN 断开后自动恢复；VPN 下连不上论坛时自动恢复加速",
   "vpnToggle_title": "VPN 自动让路",
   "vpnToggle_pausedBoth": "连接加速和上游代理已暂停，VPN 断开后自动恢复",
   "vpnToggle_pausedAccel": "连接加速已暂停，VPN 断开后自动恢复",
   "vpnToggle_pausedProxy": "上游代理已暂停，VPN 断开后自动恢复",
-  "vpnToggle_fingerprintKept": "App 的请求仍经本机网关按浏览器指纹发出（只换握手，DNS 和线路都随 VPN）"
+  "vpnToggle_fingerprintKept": "App 的请求仍经本机网关按浏览器指纹发出（只换握手，DNS 和线路都随 VPN）",
+  "vpnToggle_accelResumed": "这个 VPN 没有接管论坛的连接（暂停加速后一直连不上），本次 VPN 期间已恢复连接加速，断开后照常让路",
+  "vpnToggle_accelResumedToast": "VPN 下连不上论坛，已恢复连接加速"
 }

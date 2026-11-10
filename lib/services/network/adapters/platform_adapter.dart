@@ -4,10 +4,13 @@ import 'package:dio/dio.dart';
 import 'package:dio/io.dart';
 import 'package:flutter/foundation.dart';
 
+import '../../../config/forum_site.dart';
 import '../doh/network_settings_service.dart';
+import '../doh_proxy/gateway_error.dart';
 import '../proxy/proxy_settings_service.dart';
 import '../system_proxy_service.dart';
 import '../flux_request_spec.dart';
+import '../vpn_auto_toggle_service.dart';
 import '../webview/webview_adapter_settings_service.dart';
 import 'adapter_log_metadata.dart';
 import 'network_http_adapter.dart';
@@ -227,9 +230,9 @@ class _GatewayAdapterWrapper implements HttpClientAdapter {
     Future<void>? cancelFuture,
   ) async {
     final settings = NetworkSettingsService.instance;
+    final uri = options.uri;
     if (settings.routesAppThroughGateway) {
       final port = settings.current.proxyPort;
-      final uri = options.uri;
       if (port != null && uri.scheme == 'https') {
         // 保存原始状态
         final savedBaseUrl = options.baseUrl;
@@ -250,7 +253,10 @@ class _GatewayAdapterWrapper implements HttpClientAdapter {
         options.path = gatewayUri.toString();
 
         try {
-          return await _inner.fetch(options, requestStream, cancelFuture);
+          final body = await _inner.fetch(options, requestStream, cancelFuture);
+          // 连本机网关本身失败（抛错）不算论坛连不上，只看网关回的结果
+          _reportForumTransport(uri, viaGateway: true, body: body);
+          return body;
         } finally {
           // 恢复原始 URL，确保拦截器响应链始终看到原始域名
           options.baseUrl = savedBaseUrl;
@@ -264,7 +270,38 @@ class _GatewayAdapterWrapper implements HttpClientAdapter {
       }
     }
 
-    return _inner.fetch(options, requestStream, cancelFuture);
+    try {
+      final body = await _inner.fetch(options, requestStream, cancelFuture);
+      _reportForumTransport(uri, viaGateway: false, body: body);
+      return body;
+    } catch (e) {
+      _reportForumTransport(uri, viaGateway: false, error: e);
+      rethrow;
+    }
+  }
+
+  /// 论坛请求在连接层的结果交给「VPN 让路」：让路期间一直连不上就恢复加速
+  void _reportForumTransport(
+    Uri uri, {
+    required bool viaGateway,
+    ResponseBody? body,
+    Object? error,
+  }) {
+    if (!isForumHost(uri.host)) return;
+    final reachable = forumReachabilityOf(
+      viaGateway: viaGateway,
+      body: body,
+      error: error,
+    );
+    if (reachable == null) return;
+    VpnAutoToggleService.instance.reportForumTransport(
+      reachable: reachable,
+      detail: reachable
+          ? null
+          : _clipDetail(
+              body != null ? _gatewayErrorText(body) : error.toString(),
+            ),
+    );
   }
 
   @override
@@ -290,6 +327,60 @@ class _GatewayAdapterWrapper implements HttpClientAdapter {
     }
     return requestCanUseWebViewAdapter(options);
   }
+}
+
+/// 论坛（任一站点）的主域或子域
+@visibleForTesting
+bool isForumHost(String host) {
+  final normalized = host.toLowerCase();
+  return ForumSite.values.any(
+    (site) => normalized == site.host || normalized.endsWith('.${site.host}'),
+  );
+}
+
+/// 论坛请求在连接层通没通（给「VPN 让路时一直连不上就恢复加速」用）：
+/// - 拿到任何 HTTP 响应（含挑战 403、源站 5xx）→ 通；
+/// - 本机网关回的 502（带网关错误头）→ 网关连不上论坛；
+/// - 不经网关时连接出错 / 连接超时 / 握手失败 / 证书不对（DNS 被污染）→ 连不上；
+/// 其余（取消、读超时、网关自己的 4xx、连本机网关本身失败）返回 null，不算数
+@visibleForTesting
+bool? forumReachabilityOf({
+  required bool viaGateway,
+  ResponseBody? body,
+  Object? error,
+}) {
+  if (body != null) {
+    if (viaGateway && _gatewayErrorText(body) != null) {
+      return body.statusCode == 502 ? false : null;
+    }
+    return true;
+  }
+  if (viaGateway) return null;
+  if (error is DioException) {
+    return switch (error.type) {
+      DioExceptionType.connectionTimeout ||
+      DioExceptionType.connectionError ||
+      DioExceptionType.badCertificate => false,
+      DioExceptionType.unknown => error.error is IOException ? false : null,
+      _ => null,
+    };
+  }
+  return error is IOException ? false : null;
+}
+
+/// 网关错误头的值（网关自己回的错误才有）
+String? _gatewayErrorText(ResponseBody body) {
+  for (final entry in body.headers.entries) {
+    if (entry.key.toLowerCase() == GatewayError.header) {
+      return entry.value.isEmpty ? '' : entry.value.first;
+    }
+  }
+  return null;
+}
+
+String _clipDetail(String? text) {
+  final value = (text ?? '').trim();
+  return value.length > 200 ? value.substring(0, 200) : value;
 }
 
 /// 判断请求本身是否能由 WebView 适配器承载，不考虑当前兼容模式开关。

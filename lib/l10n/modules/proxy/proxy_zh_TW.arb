@@ -193,10 +193,12 @@
   "vpnToggle_detectionForceInactiveDesc": "忽略自動偵測，適合封包擷取代理等不應觸發自動切換的情境",
   "vpnToggle_disconnected": "VPN 未連線",
   "vpnToggle_lockedHint": "VPN 已連線，由「VPN 自動讓路」接管；這裡決定 VPN 中斷後開不開",
-  "vpnToggle_subtitle": "偵測到 VPN 時暫停連線加速和上游代理，VPN 中斷後自動恢復",
+  "vpnToggle_subtitle": "偵測到 VPN 時暫停連線加速和上游代理，VPN 中斷後自動恢復；VPN 下連不上論壇時自動恢復加速",
   "vpnToggle_title": "VPN 自動讓路",
   "vpnToggle_pausedBoth": "連線加速和上游代理已暫停，VPN 中斷後自動恢復",
   "vpnToggle_pausedAccel": "連線加速已暫停，VPN 中斷後自動恢復",
   "vpnToggle_pausedProxy": "上游代理已暫停，VPN 中斷後自動恢復",
-  "vpnToggle_fingerprintKept": "App 的請求仍經本機閘道按瀏覽器指紋送出（只換握手，DNS 和線路都跟著 VPN）"
+  "vpnToggle_fingerprintKept": "App 的請求仍經本機閘道按瀏覽器指紋送出（只換握手，DNS 和線路都跟著 VPN）",
+  "vpnToggle_accelResumed": "這個 VPN 沒有接管論壇的連線（暫停加速後一直連不上），本次 VPN 期間已恢復連線加速，中斷後照常讓路",
+  "vpnToggle_accelResumedToast": "VPN 下連不上論壇，已恢復連線加速"
 }

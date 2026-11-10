@@ -37,6 +37,7 @@ class DohSettingsCard extends StatelessWidget {
         vpnService.enabledNotifier,
         vpnService.vpnActiveNotifier,
         vpnService.suppressionNotifier,
+        vpnService.accelResumedNotifier,
         WebViewAdapterSettingsService.instance.notifier,
       ]),
       builder: (context, _) {
@@ -80,9 +81,8 @@ class _DohSettingsCardInner extends StatelessWidget {
         service.pendingStart ||
         (settings.dohEnabled && !isRunning && !service.lastStartFailed);
     // VPN 活跃 + 自动切换开启 = 接管期，DOH 开关在此期间一律锁定
-    final vpnLocked =
-        VpnAutoToggleService.instance.enabled &&
-        VpnAutoToggleService.instance.vpnActive;
+    // （本次 VPN 期间因连不上论坛恢复了加速的除外，开关照常生效）
+    final vpnLocked = VpnAutoToggleService.instance.locksAcceleration;
 
     return SegmentedCardGroup(
       children: [
