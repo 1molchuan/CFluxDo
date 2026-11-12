@@ -43,7 +43,7 @@
   "preferences_autoFillLogin": "Auto-fill login",
   "preferences_autoFillLoginDesc": "Remember credentials and auto-fill on login",
   "preferences_homeRefreshButton": "Floating home refresh button",
-  "preferences_homeRefreshButtonDesc": "Show a separate refresh button above the compose button on the home page",
+  "preferences_homeRefreshButtonDesc": "Show a separate refresh button above the compose button on the home page. While it's on, the compose button no longer turns into refresh when you scroll up",
   "preferences_homeFabRefreshOnScrollUp": "Compose button becomes refresh when scrolling up",
   "preferences_homeFabRefreshOnScrollUpDesc": "While scrolling back up the home list, the compose button temporarily turns into a refresh button that jumps to the top and reloads",
   "preferences_clipboardTopicLinkDetection": "Detect clipboard topic links",

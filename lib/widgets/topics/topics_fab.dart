@@ -226,16 +226,20 @@ class _TopicsFabState extends ConsumerState<TopicsFab>
     final hideBarOnScroll = ref.watch(
       preferencesProvider.select((p) => p.hideBarOnScroll),
     );
-    // 上滑切换：只对有创作按钮的登录用户生效；刷新模式下独立刷新钮
-    // 暂隐，避免上下两个刷新图标。
+    // 上滑切换：只对有创作按钮的登录用户生效。开着独立刷新钮时不切换——
+    // 刷新入口已经常驻，再让创作按钮跟着变，上滑时一个隐一个变、回到顶部
+    // 又换回来，等于两个刷新按钮来回倒（佬友反馈）。
     final swapOnScrollUp = ref.watch(
       preferencesProvider.select((p) => p.homeFabRefreshOnScrollUp),
     );
+    final showRefresh = ref.watch(
+      preferencesProvider.select((p) => p.homeRefreshButton),
+    );
     final refreshMode =
-        widget.canCreate && swapOnScrollUp && ref.watch(fabRefreshModeProvider);
-    final showRefresh =
-        ref.watch(preferencesProvider.select((p) => p.homeRefreshButton)) &&
-        !refreshMode;
+        widget.canCreate &&
+        swapOnScrollUp &&
+        !showRefresh &&
+        ref.watch(fabRefreshModeProvider);
     if (refreshMode && _expanded) _queueHiddenMenuClose();
     // 与底栏使用相同规则和同一逐帧进度，不再叠加延迟动画。
     // 宽屏使用 NavigationRail，没有滚动隐藏的底栏，FAB 保持可见。

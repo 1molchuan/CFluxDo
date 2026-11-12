@@ -61,6 +61,9 @@ List<SettingsGroup> buildPreferencesGroups(BuildContext context) {
           title: l10n.preferences_homeFabRefreshOnScrollUp,
           subtitle: l10n.preferences_homeFabRefreshOnScrollUpDesc,
           icon: Symbols.arrow_upward_rounded,
+          // 开着独立刷新钮时创作按钮不再变刷新，这一项没有作用，收起来
+          enabledWhen: (ref) =>
+              !ref.watch(preferencesProvider).homeRefreshButton,
           getValue: (ref) =>
               ref.watch(preferencesProvider).homeFabRefreshOnScrollUp,
           onChanged: (ref, v) => ref
