@@ -42,6 +42,8 @@ import '../providers/ldc_providers.dart';
 import '../widgets/ldc_balance_card.dart';
 import '../providers/cdk_providers.dart';
 import '../widgets/cdk_balance_card.dart';
+import '../widgets/community_score_tile.dart';
+import '../widgets/layout/site_switch_button.dart';
 import '../widgets/profile_stats_card.dart';
 import '../widgets/common/spotlight_overlay.dart';
 import 'profile_stats_edit_page.dart';
@@ -423,32 +425,91 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
       }
     });
 
+    // 手机布局下站点切换放在顶栏左侧（原先在整页上方独占一行）；宽屏在侧栏顶部。
+    final showSiteSwitch = !Responsive.showNavigationRail(context);
+    final showUserTitle =
+        !showWideLayout && _showTitle && displayName.isNotEmpty;
+    final Widget? appBarTitle = showUserTitle
+        ? Padding(
+            key: const ValueKey('profile-title-user'),
+            // titleSpacing 收到 4（给站点切换按钮自带的 12 内边距让位），
+            // 这里补回去，头像仍与正文左缘对齐
+            padding: EdgeInsets.only(left: showSiteSwitch ? 12 : 0),
+            child: GestureDetector(
+              onTap: () {
+                _scrollController.animateTo(
+                  0,
+                  duration: const Duration(milliseconds: 300),
+                  curve: Curves.easeOut,
+                );
+              },
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SmartAvatar(
+                    imageUrl: user?.getAvatarUrl(),
+                    radius: 14,
+                    fallbackText: displayName,
+                  ),
+                  const SizedBox(width: 8),
+                  Flexible(
+                    child: Text(
+                      displayName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 16,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          )
+        : showSiteSwitch
+        // 顶栏标题位默认是 titleLarge 的大字，站名按正文旁的小标题排
+        ? DefaultTextStyle.merge(
+            key: const ValueKey('profile-title-site'),
+            style: theme.textTheme.titleSmall,
+            child: const SiteSwitchButton(extended: true),
+          )
+        : null;
+    // 列表被整体重建（如切换界面风格）时滚动位置回到顶部，但不会触发滚动
+    // 回调，_showTitle 会停在 true：顶栏一直是头像 + 名字，站点切换出不来。
+    // 帧末按实际位置补一次同步。
+    if (_showTitle) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !_showTitle || !_scrollController.hasClients) return;
+        if (_scrollController.offset <= 80) {
+          setState(() => _showTitle = false);
+        }
+      });
+    }
+
     final scaffold = Scaffold(
       appBar: AppBar(
-        title: !showWideLayout && _showTitle && displayName.isNotEmpty
-            ? GestureDetector(
-                onTap: () {
-                  _scrollController.animateTo(
-                    0,
-                    duration: const Duration(milliseconds: 300),
-                    curve: Curves.easeOut,
-                  );
-                },
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    SmartAvatar(
-                      imageUrl: user?.getAvatarUrl(),
-                      radius: 14,
-                      fallbackText: displayName,
-                    ),
-                    const SizedBox(width: 8),
-                    Text(displayName, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 16)),
-                  ],
-                ),
-              )
-            : null,
+        // 回到顶部是站点切换，滚下去换成头像 + 名字
+        title: AnimatedSwitcher(
+          duration: const Duration(milliseconds: 180),
+          switchInCurve: Curves.easeOut,
+          switchOutCurve: Curves.easeIn,
+          layoutBuilder: (currentChild, previousChildren) => Stack(
+            alignment: Alignment.centerLeft,
+            children: [...previousChildren, ?currentChild],
+          ),
+          child: appBarTitle ?? const SizedBox.shrink(),
+        ),
+        titleSpacing: showSiteSwitch ? 4 : null,
         centerTitle: false,
+        // 滚动时顶栏不变色。经典主题没配 appBarTheme，内容滚到顶栏下面时
+        // Material 3 会把顶栏换成 surfaceContainer（浅色下是一条灰带），
+        // 和首页（顶部不变色）不一致；显式给底色后两种状态同色。
+        // 墨笺 / Claude 的 appBarTheme 自带底色，沿用。
+        backgroundColor:
+            theme.appBarTheme.backgroundColor ?? theme.colorScheme.surface,
+        scrolledUnderElevation: 0,
+        surfaceTintColor: Colors.transparent,
         actions: isLoggedIn ? [
           // 状态指示（固定占位，避免后方图标闪烁）
           AnimatedSwitcher(
@@ -633,24 +694,33 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
     );
   }
 
-  /// LDC/CDK 余额卡片（共用组件）
+  /// 社区点数 + LDC/CDK 余额卡片（共用组件）
   Widget _buildBalanceCards() {
-    if (!SiteContext.isLinuxDo) return const SizedBox.shrink();
-    // 仅本页首次成为活跃 tab 后才渲染余额卡片;未激活时返回空,不建 Consumer、
+    // 点数随 current_user 下发，不发额外请求，有就显示（原先在首页工具栏）
+    final hasScore = ref.watch(
+      currentUserProvider.select((u) => u.value?.gamificationScore != null),
+    );
+    // LDC/CDK 仅本页首次成为活跃 tab 后才渲染;未激活时不建卡片、
     // 不 watch provider,从而不触发 cdk/ldc user-info 请求。
-    if (!_balanceEverActive) return const SizedBox.shrink();
+    final serviceCardsReady = SiteContext.isLinuxDo && _balanceEverActive;
+    if (!hasScore && !serviceCardsReady) return const SizedBox.shrink();
     return Consumer(
       builder: (context, ref, _) {
         final prefs = ref.watch(sharedPreferencesProvider);
-        final ldcEnabled = prefs.getBool('ldc_enabled') ?? false;
-        final cdkEnabled = prefs.getBool('cdk_enabled') ?? false;
+        final ldcEnabled =
+            serviceCardsReady && (prefs.getBool('ldc_enabled') ?? false);
+        final cdkEnabled =
+            serviceCardsReady && (prefs.getBool('cdk_enabled') ?? false);
 
-        if (!ldcEnabled && !cdkEnabled) return const SizedBox.shrink();
+        if (!hasScore && !ldcEnabled && !cdkEnabled) {
+          return const SizedBox.shrink();
+        }
 
         return Column(
           children: [
             SegmentedCardGroup(
               children: [
+                if (hasScore) const CommunityScoreTile(),
                 if (ldcEnabled)
                   LdcBalanceCard(
                     inline: true,

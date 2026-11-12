@@ -200,5 +200,6 @@
   "user_trustLevel4": "L4 Leader",
   "user_trustLevelUnknown": "Level {level}",
   "profile_sectionCommunity": "Community",
+  "profile_communityScore": "Community points",
   "profile_sectionTools": "Tools & settings"
 }

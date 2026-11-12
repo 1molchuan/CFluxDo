@@ -270,5 +270,6 @@
     }
   },
   "profile_sectionCommunity": "社群",
+  "profile_communityScore": "社群點數",
   "profile_sectionTools": "工具與設定"
 }

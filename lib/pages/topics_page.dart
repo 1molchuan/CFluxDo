@@ -49,14 +49,12 @@ import '../utils/topic_keyword_filter.dart';
 import '../utils/frame_jank_monitor.dart';
 import '../utils/responsive.dart';
 import '../widgets/layout/master_detail_layout.dart';
+import '../widgets/layout/site_switch_button.dart';
 import '../widgets/common/error_view.dart';
 import '../widgets/common/loading_dialog.dart';
 import '../widgets/common/fading_edge_scroll_view.dart';
 import 'package:common_ui/common_ui.dart';
 import '../widgets/offline_indicator.dart';
-import '../constants.dart';
-import '../utils/number_utils.dart';
-import 'webview_page.dart';
 import '../l10n/s.dart';
 import '../models/shortcut_binding.dart';
 import '../providers/shortcut_provider.dart';
@@ -118,70 +116,6 @@ bool? fabRefreshModeFromScroll(
   }
   if (notification is ScrollUpdateNotification && atTop) return false;
   return null;
-}
-
-/// 首页工具栏的「点数」药丸：当前用户的社区点数（Discourse gamification
-/// 的 gamification_score，随 current_user 一起下发），点开站点排行榜。
-/// 游客或站点没开插件（字段缺失）时不占位。
-class _ScorePill extends ConsumerWidget {
-  const _ScorePill();
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final score = ref.watch(
-      currentUserProvider.select((u) => u.value?.gamificationScore),
-    );
-    if (score == null) return const SizedBox.shrink();
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    final mj = theme.extension<MojianTokens>();
-    final l10n = context.l10n;
-    return Padding(
-      padding: const EdgeInsets.only(right: 4),
-      child: Tooltip(
-        message: l10n.topics_scorePillTooltip,
-        child: Material(
-          key: const ValueKey('topics-score-pill'),
-          color: mj?.paper2 ?? scheme.surfaceContainerHigh,
-          shape: mj != null
-              ? RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(4),
-                  side: BorderSide(color: mj.ruleStrong),
-                )
-              : const StadiumBorder(),
-          clipBehavior: Clip.antiAlias,
-          child: InkWell(
-            onTap: () => WebViewPage.open(
-              context,
-              '${AppConstants.baseUrl}/leaderboard',
-              title: l10n.topics_leaderboard,
-            ),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    Symbols.stars_rounded,
-                    size: 16,
-                    color: mj?.accent ?? scheme.primary,
-                  ),
-                  const SizedBox(width: 4),
-                  Text(
-                    l10n.topics_scorePill(NumberUtils.formatThousands(score)),
-                    style: theme.textTheme.labelMedium?.copyWith(
-                      color: mj?.ink ?? scheme.onSurface,
-                      fontFeatures: const [FontFeature.tabularFigures()],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
 }
 
 /// Header 区域常量。
@@ -1431,13 +1365,15 @@ class _TopicsPageState extends ConsumerState<TopicsPage>
           Expanded(
             child: Align(alignment: Alignment.centerLeft, child: filterMenu),
           ),
+          // 站点切换胶囊（手机布局才有；宽屏在侧栏顶部）。放在搜索落位格
+          // **左边**：落位格的位置是按「右缘 - 🔔」常量推算的（见
+          // _CollapsibleHeader），放右边会被折叠后的搜索图标压住。
+          // 这里原先是「点数」药丸，点数挪到了「我的」页余额卡组。
+          if (!Responsive.showNavigationRail(context))
+            const SiteSwitchButton.capsule(),
           // 搜索落位格：展开态零宽（右簇紧凑无空洞），折叠时随 morph
           // 同曲线张开迎接胶囊缩成的图标（胶囊本体在
           // _CollapsibleHeader 的 overlay 层绘制，这里只占位）
-          // 点数药丸放在搜索落位格**左边**：落位格的位置是按「右缘 - 🔔」
-          // 常量推算的（见 _CollapsibleHeader），放右边会被折叠后的
-          // 搜索图标压住
-          if (isLoggedIn) const _ScorePill(),
           _SearchSlotSpacer(controller: _headerController),
           if (isLoggedIn && !Responsive.showNavigationRail(context))
             const NotificationIconButton(compact: true),

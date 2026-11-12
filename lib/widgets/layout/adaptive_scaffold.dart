@@ -15,7 +15,6 @@ import '../topic/category_tab_manager_sheet.dart';
 import '../topic/category_drawer.dart';
 import '../../utils/platform_utils.dart';
 import '../../theme/mojian_theme.dart';
-import 'site_switch_button.dart';
 
 /// 自适应 Scaffold
 ///
@@ -171,34 +170,12 @@ class AdaptiveScaffold extends ConsumerWidget {
                   color: useAcrylicRail
                       ? Theme.of(context).colorScheme.surface
                       : null,
-                  child: Column(
-                    children: [
-                      if (!showRail && !hideNavigationRail)
-                        SafeArea(
-                          bottom: false,
-                          child: Align(
-                            alignment: Alignment.centerLeft,
-                            child: SiteSwitchButton(extended: true),
-                          ),
-                        ),
-                      Expanded(
-                        // 必须用 body 自己位置上的 context：Scaffold 在
-                        // extendBody 下把底栏高度注进 body 的 MediaQuery
-                        // padding.bottom，外层 context 没有这份 inset——
-                        // 用外层 context 重建 MediaQuery 会把它丢掉，首页
-                        // FAB 的抬高量算成 0、整个被压在底栏后面看不见，
-                        // 列表尾部也会被底栏盖住（1.2.2-beta 安卓实锤）。
-                        // Builder 常驻（不随 showRail 插拔），保持子树链型稳定。
-                        child: Builder(
-                          builder: (bodyContext) => MediaQuery.removePadding(
-                            context: bodyContext,
-                            removeTop: !showRail && !hideNavigationRail,
-                            child: body,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
+                  // 手机上站点切换不再独占 body 上方一行（换站是低频操作，常驻
+                  // 一行白占所有 tab 的顶部高度）：入口收进首页工具栏和「我的」
+                  // 页顶栏，状态栏 inset 原样交给各页自己的顶栏处理。
+                  // body 直接挂在 Scaffold 的 body 槽里，extendBody 注入的
+                  // 底栏 inset 自然带得到（首页 FAB、列表尾部靠它让位）。
+                  child: body,
                 ),
               ),
             ],

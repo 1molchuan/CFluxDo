@@ -277,5 +277,6 @@
     }
   },
   "profile_sectionCommunity": "社区",
+  "profile_communityScore": "社区点数",
   "profile_sectionTools": "工具与设置"
 }

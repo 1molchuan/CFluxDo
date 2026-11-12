@@ -6,6 +6,7 @@ import 'package:fluxdo/pages/topics_page.dart';
 import 'package:fluxdo/providers/theme_provider.dart';
 import 'package:fluxdo/widgets/layout/adaptive_navigation.dart';
 import 'package:fluxdo/widgets/layout/adaptive_scaffold.dart';
+import 'package:fluxdo/widgets/layout/site_switch_button.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
@@ -127,7 +128,7 @@ void main() {
     expect(find.text('平行视界内容'), findsOneWidget);
   });
 
-  testWidgets('手机端 body 保留 Scaffold 注入的底栏 inset（extendBody），顶部 inset 由站点条吃掉', (
+  testWidgets('手机端 body 保留 Scaffold 注入的底栏 inset（extendBody），顶部 inset 原样交给页面，站点切换不占行', (
     tester,
   ) async {
     addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -188,7 +189,10 @@ void main() {
     // 底栏在 body 后面（extendBody），FAB / 列表尾部靠这份 inset 让位；
     // 1.2.2-beta 用外层 context 重建 MediaQuery 把它丢成 0，FAB 整个被底栏盖住
     expect(bodyPadding!.bottom, navHeight);
-    // 状态栏 inset 由站点切换条上方的 SafeArea 消费，body 不再重复让位
-    expect(bodyPadding!.top, 0);
+    // 站点切换不再在 body 上方独占一行：状态栏 inset 留给各页自己的顶栏，
+    // body 顶到屏幕最上沿
+    expect(bodyPadding!.top, 44);
+    expect(tester.getTopLeft(find.text('body')).dy, 0);
+    expect(find.byType(SiteSwitchButton), findsNothing);
   });
 }
