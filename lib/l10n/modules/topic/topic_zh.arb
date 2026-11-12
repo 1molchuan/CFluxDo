@@ -305,5 +305,11 @@
   "topicDetail_likeTopic": "赞这个话题",
   "topicDetail_bookmarkTopic": "书签",
   "topicDetail_like": "赞",
-  "topicDetail_jumpFloor": "跳转楼层"
+  "topicDetail_jumpFloor": "跳转楼层",
+  "topic_vscodeAuthorActions": "当前楼层作者操作",
+  "topic_vscodeHideFloorActions": "收起楼层操作",
+  "topic_vscodeTopicInfo": "话题信息",
+  "topic_vscodeLocating": "正在定位",
+  "topic_vscodeReadingProgress": "阅读 #{number} · {current} / {total}",
+  "@topic_vscodeReadingProgress": {"placeholders": {"number": {"type": "int"}, "current": {"type": "int"}, "total": {"type": "int"}}}
 }

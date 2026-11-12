@@ -304,5 +304,11 @@
   "topicDetail_likeTopic": "按讚這個話題",
   "topicDetail_bookmarkTopic": "書籤",
   "topicDetail_like": "按讚",
-  "topicDetail_jumpFloor": "跳到樓層"
+  "topicDetail_jumpFloor": "跳到樓層",
+  "topic_vscodeAuthorActions": "目前樓層作者操作",
+  "topic_vscodeHideFloorActions": "收起樓層操作",
+  "topic_vscodeTopicInfo": "話題資訊",
+  "topic_vscodeLocating": "正在定位",
+  "topic_vscodeReadingProgress": "閱讀 #{number} · {current} / {total}",
+  "@topic_vscodeReadingProgress": {"placeholders": {"number": {"type": "int"}, "current": {"type": "int"}, "total": {"type": "int"}}}
 }

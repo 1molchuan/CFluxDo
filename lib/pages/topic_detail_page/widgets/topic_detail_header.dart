@@ -362,7 +362,7 @@ class TopicDetailHeader extends ConsumerWidget {
     if (vscode == null) return buildContent();
     return VscodePeekSection(
       key: headerKey,
-      label: '话题信息',
+      label: context.l10n.topic_vscodeTopicInfo,
       summary: category?.name,
       builder: (_) => buildContent(),
     );

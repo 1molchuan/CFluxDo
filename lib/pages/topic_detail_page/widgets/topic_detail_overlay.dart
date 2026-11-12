@@ -238,8 +238,12 @@ class TopicDetailOverlay extends StatelessWidget {
                             valueListenable: currentPostNumberListenable!,
                             builder: (context, number, _) => Text(
                               number == null
-                                  ? '正在定位'
-                                  : '阅读 #$number · $currentIndex / $totalCount',
+                                  ? context.l10n.topic_vscodeLocating
+                                  : context.l10n.topic_vscodeReadingProgress(
+                                      number,
+                                      currentIndex,
+                                      totalCount,
+                                    ),
                             ),
                           ),
                   ),

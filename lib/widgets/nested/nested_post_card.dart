@@ -410,7 +410,9 @@ class _NestedPostCardState extends ConsumerState<NestedPostCard> {
                     shape: const RoundedRectangleBorder(),
                   ),
                   onPressed: _toggleExpanded,
-                  child: Text('+ @${post.username} · $_replyCount 条回复'),
+                  child: Text(
+                    '+ @${post.username} · ${context.l10n.nested_repliesCount(_replyCount)}',
+                  ),
                 )
               : NestedCollapsedBar(
                   username: post.username,
@@ -879,7 +881,9 @@ class _NestedPostCardState extends ConsumerState<NestedPostCard> {
             right: 0,
             top: 0,
             child: IconButton(
-              tooltip: _expanded ? '折叠回复' : '展开回复',
+              tooltip: _expanded
+                  ? context.l10n.post_collapseReplies
+                  : context.l10n.post_vscodeExpandReplies,
               onPressed: _toggleExpanded,
               icon: Icon(_expanded ? Icons.unfold_less : Icons.unfold_more),
               iconSize: 15,

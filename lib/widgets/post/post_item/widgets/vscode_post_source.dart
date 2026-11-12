@@ -154,6 +154,15 @@ class _VscodePostSourceState extends ConsumerState<VscodePostSource> {
     _SourceKind.function => tokens.syntaxFunction,
   };
 
+  /// 图片占位在文档里是固定记号（文档会缓存、也参与行号计算），
+  /// 到显示这一步才换成当前语言的写法。
+  String _displayText(_SourceRun run) => run.image
+      ? run.text.replaceFirst(
+          VscodeSourceDocument.imageToken,
+          context.l10n.post_vscodeImagePlaceholder,
+        )
+      : run.text;
+
   TextSpan _sourceLine(
     List<_SourceRun> runs,
     VscodeSourceDocument document,
@@ -167,7 +176,7 @@ class _VscodePostSourceState extends ConsumerState<VscodePostSource> {
           TextSpan(
             text: comment && identical(run, runs.first)
                 ? document.bodyPrefix.trimLeft()
-                : run.text,
+                : _displayText(run),
             style: TextStyle(
               // 代码式正文已经位于注释中，行内格式和链接不应重新开启语法着色。
               color: comment ? tokens.syntaxComment : _color(run.kind, tokens),
@@ -182,8 +191,8 @@ class _VscodePostSourceState extends ConsumerState<VscodePostSource> {
             semanticsLabel: run.url == null
                 ? null
                 : run.image
-                ? '${run.text}，单击查看大图'
-                : '${run.text}，按住 Ctrl 并单击打开 ${run.url}',
+                ? context.l10n.post_vscodeImageSemantics(_displayText(run))
+                : context.l10n.post_vscodeLinkSemantics(run.text, run.url!),
             recognizer: run.url == null ? null : _link(run),
           ),
       ],
@@ -248,7 +257,9 @@ class _VscodePostSourceState extends ConsumerState<VscodePostSource> {
       );
     }
     return TextSpan(
-      text: line.any((run) => run.url != null) ? '按住 Ctrl 并单击打开链接；拖动可选择文本' : '',
+      text: line.any((run) => run.url != null)
+          ? context.l10n.post_vscodeLinkHint
+          : '',
     );
   }
 
@@ -349,7 +360,7 @@ class _VscodePostSourceState extends ConsumerState<VscodePostSource> {
                                     },
                                   ),
                                 ContextMenuButtonItem(
-                                  label: '查看原文',
+                                  label: context.l10n.post_vscodeViewOriginal,
                                   onPressed: () {
                                     state.hideToolbar();
                                     setState(() => _showRichText = true);
@@ -445,7 +456,9 @@ class _VscodePostSourceState extends ConsumerState<VscodePostSource> {
                   child: child,
                 ),
                 child: IconButton(
-                  tooltip: _showRichText ? '查看源码' : '查看原文',
+                  tooltip: _showRichText
+                      ? context.l10n.post_vscodeViewSource
+                      : context.l10n.post_vscodeViewOriginal,
                   onPressed: () => setState(() {
                     _showRichText = !_showRichText;
                     _selectedText = null;
@@ -484,6 +497,9 @@ class VscodeSourceDocument {
     this.bodyPrefix = '',
     this.generatedLines = const {},
   });
+
+  /// 图片在源码行里的占位记号；显示时由界面换成当前语言
+  static const imageToken = '[图片]';
 
   final List<List<_SourceRun>> _lines;
   final bool preferRichText;
@@ -799,7 +815,7 @@ class VscodeSourceDocument {
           flush();
           append(
             _SourceRun(
-              alt.isEmpty ? '[图片]' : '[图片] $alt',
+              alt.isEmpty ? imageToken : '$imageToken $alt',
               _SourceKind.link,
               url: src,
               image: true,

@@ -291,7 +291,7 @@ class _ReplySheetState extends ConsumerState<ReplySheet> {
         _isLoadingDraft ||
         (_editorKey.currentState?.hasPendingUploads ?? false) ||
         (_richKey.currentState?.hasPendingUploads ?? false)) {
-      if (mounted) ToastService.showInfo('编辑器正在加载或处理内容，请稍后重新追加引用');
+      if (mounted) ToastService.showInfo(context.l10n.post_vscodeQuoteBusy);
       return false;
     }
     if (!_flushRichContent()) return false;
