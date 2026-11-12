@@ -501,31 +501,30 @@ class ClaudeTheme {
         ),
         unselectedLabelTextStyle: TextStyle(color: t.textMuted),
       ),
+      // 只给一个按状态解析的 border，不给 enabledBorder / focusedBorder，也不默认填色：
+      // 主题里的 enabledBorder / focusedBorder / filled 优先于输入框自己写的 border，
+      // 嵌在胶囊、卡片、编辑区里的输入框即使写了 `border: InputBorder.none`，也会被再叠
+      // 一个带橙色描边的填色框（#5，搜索框最明显；子包里的输入框同理，改不到调用处）。
+      // 这样写，页面自己给了 border 就整套覆盖，和墨笺主题的约定一致
       inputDecorationTheme: InputDecorationThemeData(
-        filled: true,
         fillColor: t.surface1,
         contentPadding:
             const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: BorderSide(color: t.border),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: BorderSide(color: t.border),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: BorderSide(color: t.accent, width: 1.5),
-        ),
-        errorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: BorderSide(color: t.error),
-        ),
-        focusedErrorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: BorderSide(color: t.error, width: 1.5),
-        ),
+        border: WidgetStateInputBorder.resolveWith((states) {
+          final focused = states.contains(WidgetState.focused);
+          final Color color;
+          if (states.contains(WidgetState.error)) {
+            color = t.error;
+          } else if (focused) {
+            color = t.accent;
+          } else {
+            color = t.border;
+          }
+          return OutlineInputBorder(
+            borderRadius: BorderRadius.circular(10),
+            borderSide: BorderSide(color: color, width: focused ? 1.5 : 1),
+          );
+        }),
       ),
       dialogTheme: DialogThemeData(
         backgroundColor: t.surface1,

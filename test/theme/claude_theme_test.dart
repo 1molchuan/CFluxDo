@@ -248,4 +248,75 @@ void main() {
       });
     }
   });
+
+  // #5：主题里的 enabledBorder / focusedBorder / filled 优先于输入框自己写的 border，
+  // 嵌在胶囊里的输入框写了 InputBorder.none 也会被叠一个带橙色描边的填色框
+  group('Claude 输入框主题', () {
+    ThemeData claude() => ClaudeTheme.build(
+      scheme: ClaudeTheme.colorScheme(Brightness.light),
+      fontFamily: null,
+      pageTransitionsTheme: const PageTransitionsTheme(),
+      iconTheme: const IconThemeData(),
+      primaryIconTheme: const IconThemeData(),
+    );
+
+    Future<InputDecoration> pumpField(
+      WidgetTester tester,
+      InputDecoration decoration,
+    ) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: claude(),
+          home: Scaffold(
+            body: Center(
+              child: SizedBox(
+                width: 300,
+                child: TextField(autofocus: true, decoration: decoration),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      return tester
+          .widget<InputDecorator>(find.byType(InputDecorator))
+          .decoration;
+    }
+
+    testWidgets('写了 InputBorder.none 的输入框：聚焦也不描边、不填色', (tester) async {
+      final applied = await pumpField(
+        tester,
+        const InputDecoration(border: InputBorder.none, isDense: true),
+      );
+      expect(applied.border, InputBorder.none);
+      expect(applied.enabledBorder, isNull);
+      expect(applied.focusedBorder, isNull);
+      expect(applied.filled, isNot(true));
+      // 聚焦状态下也不画圆角框
+      expect(find.byType(InputDecorator), isNot(paints..rrect()));
+    });
+
+    testWidgets('普通输入框：圆角描边，聚焦变强调色，出错变错误色', (tester) async {
+      final tokens = ClaudeTokens.of(Brightness.light);
+      final applied = await pumpField(tester, const InputDecoration());
+      final border = applied.border;
+      expect(border, isA<WidgetStateProperty<InputBorder>>());
+      OutlineInputBorder resolve(Set<WidgetState> states) =>
+          (border! as WidgetStateProperty<InputBorder>).resolve(states)
+              as OutlineInputBorder;
+
+      final idle = resolve({});
+      expect(idle.borderSide.color, tokens.border);
+      expect(idle.borderRadius, BorderRadius.circular(10));
+      final focused = resolve({WidgetState.focused});
+      expect(focused.borderSide.color, tokens.accent);
+      expect(focused.borderSide.width, 1.5);
+      expect(resolve({WidgetState.error}).borderSide.color, tokens.error);
+      // 聚焦时画的是强调色圆角框
+      expect(
+        find.byType(InputDecorator),
+        paints..rrect(color: tokens.accent, strokeWidth: 1.5),
+      );
+    });
+  });
 }
