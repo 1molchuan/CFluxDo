@@ -94,6 +94,31 @@ void main() {
     expect(reloaded.read(preferencesProvider).exitOnSingleBack, isTrue);
   });
 
+  test('预测性返回默认开启，关闭后持久化并同步给手势探测器', () async {
+    addTearDown(() => PredictiveBackSettings.enabled = true);
+    final container = await _createContainer();
+    addTearDown(container.dispose);
+
+    expect(container.read(preferencesProvider).predictiveBack, isTrue);
+    expect(PredictiveBackSettings.enabled, isTrue);
+
+    await container
+        .read(preferencesProvider.notifier)
+        .setPredictiveBack(false);
+    expect(container.read(preferencesProvider).predictiveBack, isFalse);
+    expect(PredictiveBackSettings.enabled, isFalse);
+
+    // 下次启动：读回关闭，并在建 provider 时就同步给探测器
+    PredictiveBackSettings.enabled = true;
+    final prefs = container.read(sharedPreferencesProvider);
+    final reloaded = ProviderContainer(
+      overrides: [sharedPreferencesProvider.overrideWithValue(prefs)],
+    );
+    addTearDown(reloaded.dispose);
+    expect(reloaded.read(preferencesProvider).predictiveBack, isFalse);
+    expect(PredictiveBackSettings.enabled, isFalse);
+  });
+
   test('书签默认打开方式默认值为 defaultRoute', () async {
     final container = await _createContainer();
     addTearDown(container.dispose);

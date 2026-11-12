@@ -94,6 +94,8 @@
   "preferences_enterUrl": "Enter URL",
   "preferences_fullscreenSwipeBack": "Full-screen swipe back",
   "preferences_fullscreenSwipeBackDesc": "Swipe right anywhere on a page to go back; when off, only the left edge responds",
+  "preferences_predictiveBack": "Predictive back gesture",
+  "preferences_predictiveBackDesc": "Pages and sheets follow your finger while you drag the back gesture; when off, back happens on release with the regular animation",
   "preferences_exitOnSingleBack": "Exit on one back press",
   "preferences_exitOnSingleBackDesc": "Exit immediately from the home screen and use the system predictive exit animation; when off, press back twice to exit",
   "preferences_hideBarOnScroll": "Hide bar on scroll",

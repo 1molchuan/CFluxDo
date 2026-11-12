@@ -162,6 +162,19 @@ List<SettingsGroup> buildPreferencesGroups(BuildContext context) {
           ),
           condition: () => Platform.isIOS || Platform.isAndroid,
         ),
+        // 预测性返回只有 Android 有
+        PlatformConditionalModel(
+          inner: SwitchModel(
+            id: 'predictiveBack',
+            title: l10n.preferences_predictiveBack,
+            subtitle: l10n.preferences_predictiveBackDesc,
+            icon: Symbols.gesture_rounded,
+            getValue: (ref) => ref.watch(preferencesProvider).predictiveBack,
+            onChanged: (ref, v) =>
+                ref.read(preferencesProvider.notifier).setPredictiveBack(v),
+          ),
+          condition: () => Platform.isAndroid,
+        ),
         PlatformConditionalModel(
           inner: SwitchModel(
             id: 'exitOnSingleBack',

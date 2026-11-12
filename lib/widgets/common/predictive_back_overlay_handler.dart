@@ -1,3 +1,4 @@
+import 'package:common_ui/common_ui.dart' show PredictiveBackSettings;
 import 'package:flutter/services.dart' show PredictiveBackEvent;
 import 'package:flutter/widgets.dart';
 
@@ -32,6 +33,8 @@ class PredictiveBackOverlayHandler with WidgetsBindingObserver {
 
   @override
   bool handleStartBackGesture(PredictiveBackEvent backEvent) {
+    // 设置里关了预测性返回：不认领，松手后走普通返回（各浮层本来就有的返回键路径）
+    if (!PredictiveBackSettings.enabled) return false;
     if (backEvent.isButtonEvent || !isEnabled()) return false;
     _gestureActive = true;
     onStart();

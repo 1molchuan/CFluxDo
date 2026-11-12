@@ -94,6 +94,8 @@
   "preferences_enterUrl": "輸入 URL",
   "preferences_fullscreenSwipeBack": "全屏側滑返回",
   "preferences_fullscreenSwipeBackDesc": "喺頁面任意位置右滑即可返回上一頁；關閉時只有屏幕左緣可以側滑",
+  "preferences_predictiveBack": "預測性返回手勢",
+  "preferences_predictiveBackDesc": "返回手勢拖動時，頁面同彈層跟住手指預覽；關閉後放手先返回，用普通嘅返回動畫",
   "preferences_exitOnSingleBack": "單次返回退出應用",
   "preferences_exitOnSingleBackDesc": "喺首頁返回時直接退出並使用系統預測退出動畫；關閉時要連續返回兩次",
   "preferences_hideBarOnScroll": "滾動收起導航欄",

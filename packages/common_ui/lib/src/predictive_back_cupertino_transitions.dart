@@ -72,6 +72,16 @@ import 'package:flutter/foundation.dart'
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+/// 预测返回的全局开关（设置里的「预测性返回手势」，默认开）。
+///
+/// 关掉后，页面转场、弹层（[wrapPredictiveBackForModalRoute]）和 App 里各浮层的手势
+/// 探测器都不再认领系统返回手势：拖动时页面 / 弹层不跟手预览，松手后由框架按普通返回
+/// 处理——和三键导航的返回键是同一条路径，返回与关闭的逻辑不变，只是没有预览。
+/// 系统自己的「返回桌面」预览动画由清单里的 `enableOnBackInvokedCallback` 决定，不受它影响。
+abstract final class PredictiveBackSettings {
+  static bool enabled = true;
+}
+
 /// Android 预测返回手势 + Cupertino 滑动转场。
 ///
 /// 系统预测返回手势(Android U+)的进度直接驱动路由动画,Cupertino 平移
@@ -202,7 +212,10 @@ class _PredictiveBackGestureDetectorState
       return false;
     }
 
-    final bool gestureInProgress = !backEvent.isButtonEvent && _isEnabled;
+    final bool gestureInProgress =
+        PredictiveBackSettings.enabled &&
+        !backEvent.isButtonEvent &&
+        _isEnabled;
     if (!gestureInProgress) {
       return false;
     }

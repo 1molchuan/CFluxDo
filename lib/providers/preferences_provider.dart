@@ -1,7 +1,8 @@
 import 'dart:io';
 
 import 'package:collection/collection.dart';
-import 'package:common_ui/common_ui.dart' show GlassEffectLevel;
+import 'package:common_ui/common_ui.dart'
+    show GlassEffectLevel, PredictiveBackSettings;
 import 'package:flutter/services.dart';
 // ignore: depend_on_referenced_packages
 import 'package:flutter_riverpod/legacy.dart';
@@ -158,6 +159,10 @@ class AppPreferences {
 
   /// 全屏侧滑返回(页面任意位置右滑,默认仅屏幕左缘)
   final bool fullscreenSwipeBack;
+
+  /// Android 预测性返回手势：返回手势拖动时页面 / 弹层跟手预览。关闭后松手才按普通
+  /// 返回处理（见 common_ui 的 PredictiveBackSettings）
+  final bool predictiveBack;
 
   /// Android 首页单次返回直接退出；关闭时需在 2 秒内返回两次
   final bool exitOnSingleBack;
@@ -335,6 +340,7 @@ class AppPreferences {
     required this.renderGlesBackend,
     required this.portraitLock,
     required this.fullscreenSwipeBack,
+    this.predictiveBack = true,
     required this.exitOnSingleBack,
     required this.hideBarOnScroll,
     this.autoLoadTopicUpdates = false,
@@ -405,6 +411,7 @@ class AppPreferences {
     bool? renderGlesBackend,
     bool? portraitLock,
     bool? fullscreenSwipeBack,
+    bool? predictiveBack,
     bool? exitOnSingleBack,
     bool? hideBarOnScroll,
     bool? autoLoadTopicUpdates,
@@ -477,6 +484,7 @@ class AppPreferences {
       renderGlesBackend: renderGlesBackend ?? this.renderGlesBackend,
       portraitLock: portraitLock ?? this.portraitLock,
       fullscreenSwipeBack: fullscreenSwipeBack ?? this.fullscreenSwipeBack,
+      predictiveBack: predictiveBack ?? this.predictiveBack,
       exitOnSingleBack: exitOnSingleBack ?? this.exitOnSingleBack,
       hideBarOnScroll: hideBarOnScroll ?? this.hideBarOnScroll,
       autoLoadTopicUpdates: autoLoadTopicUpdates ?? this.autoLoadTopicUpdates,
@@ -582,6 +590,7 @@ class PreferencesNotifier extends StateNotifier<AppPreferences> {
   static const String _renderGlesBackendKey = 'renderer_gles';
   static const String _portraitLockKey = 'pref_portrait_lock';
   static const String _fullscreenSwipeBackKey = 'pref_fullscreen_swipe_back';
+  static const String _predictiveBackKey = 'pref_predictive_back';
   static const String _exitOnSingleBackKey = 'pref_exit_on_single_back';
   static const String _hideBarOnScrollKey = 'pref_hide_bar_on_scroll';
   static const String _autoLoadTopicUpdatesKey =
@@ -676,6 +685,7 @@ class PreferencesNotifier extends StateNotifier<AppPreferences> {
           renderGlesBackend: _prefs.getBool(_renderGlesBackendKey) ?? false,
           portraitLock: _prefs.getBool(_portraitLockKey) ?? false,
           fullscreenSwipeBack: _prefs.getBool(_fullscreenSwipeBackKey) ?? false,
+          predictiveBack: _prefs.getBool(_predictiveBackKey) ?? true,
           exitOnSingleBack: _prefs.getBool(_exitOnSingleBackKey) ?? false,
           hideBarOnScroll: _prefs.getBool(_hideBarOnScrollKey) ?? true,
           autoLoadTopicUpdates:
@@ -774,6 +784,7 @@ class PreferencesNotifier extends StateNotifier<AppPreferences> {
         ),
       ) {
     isPortraitLocked = state.portraitLock;
+    PredictiveBackSettings.enabled = state.predictiveBack;
     TopicCardStyleScope.current = state.topicCardStyle;
     TopicCreationTimeScope.enabled.value = state.showTopicCreationTime;
     EmojiHandler.setPreference(state.emojiStyle);
@@ -912,6 +923,12 @@ class PreferencesNotifier extends StateNotifier<AppPreferences> {
   Future<void> setFullscreenSwipeBack(bool enabled) async {
     state = state.copyWith(fullscreenSwipeBack: enabled);
     await _prefs.setBool(_fullscreenSwipeBackKey, enabled);
+  }
+
+  Future<void> setPredictiveBack(bool enabled) async {
+    state = state.copyWith(predictiveBack: enabled);
+    PredictiveBackSettings.enabled = enabled;
+    await _prefs.setBool(_predictiveBackKey, enabled);
   }
 
   Future<void> setExitOnSingleBack(bool enabled) async {
