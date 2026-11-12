@@ -202,6 +202,8 @@ class AdaptiveScaffold extends ConsumerWidget {
                   // body 在子树里的位置不变，页面不重建。
                   child: VscodeReaderStatusHost(
                     child: Column(
+                      // 和原来直接放 body 一样给满宽度，不依赖页面自己撑开
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         Expanded(child: body),
                         if (isVscode) const VscodeStatusBar(),

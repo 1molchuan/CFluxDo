@@ -468,8 +468,12 @@ class _TopicsFabState extends ConsumerState<TopicsFab>
     // 最近的 Stack 就是 master 格，不能用整窗宽度让菜单侵入导航栏。
     final pane = this.context.findAncestorRenderObjectOfType<RenderStack>();
     final paneLeft = pane?.localToGlobal(Offset.zero).dx ?? 0;
+    // 资源管理器里的菜单贴边留 8；普通加号菜单照旧留 16。
     final availableWidth =
-        origin.dx + (anchor?.size.width ?? 56) - paneLeft - 8;
+        origin.dx +
+        (anchor?.size.width ?? 56) -
+        paneLeft -
+        (isExplorer ? 8 : 16);
     final availableHeight = isExplorer
         ? media.size.height - origin.dy - (anchor?.size.height ?? 28) - 16
         : origin.dy - media.viewPadding.top - 16;
