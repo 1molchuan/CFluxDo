@@ -6,12 +6,56 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fluxdo/providers/preferences_provider.dart';
 import 'package:fluxdo/providers/theme_provider.dart';
+import 'package:fluxdo/theme/claude_theme.dart';
+import 'package:fluxdo/theme/vscode_theme.dart';
 import 'package:fluxdo/widgets/common/app_glass_settings.dart';
 import 'package:fluxdo/widgets/layout/adaptive_navigation.dart';
 import 'package:fluxdo/widgets/markdown_editor/composer_island.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
+  testWidgets('VS Code 固定实底不更改存储偏好，Claude 仍遵循原玻璃策略', (tester) async {
+    SharedPreferences.setMockInitialValues({
+      'pref_glass_enabled': true,
+      'pref_glass_effect_level': 'basic',
+    });
+    final prefs = await SharedPreferences.getInstance();
+    final container = ProviderContainer(
+      overrides: [sharedPreferencesProvider.overrideWithValue(prefs)],
+    );
+    addTearDown(container.dispose);
+    for (final vscode in [true, false]) {
+      late GlassSettings settings;
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: MaterialApp(
+            theme: ThemeData(
+              extensions: [
+                if (vscode) VscodeTokens.of(Brightness.light)
+                else ClaudeTokens.of(Brightness.light),
+              ],
+            ),
+            home: AppGlassSettings(
+              child: Builder(
+                builder: (context) {
+                  settings = GlassSettingsScope.of(context);
+                  return const SizedBox.shrink();
+                },
+              ),
+            ),
+          ),
+        ),
+      );
+      expect(settings.enabled, !vscode);
+      expect(settings.level, GlassEffectLevel.basic);
+      expect(settings.solid != null, vscode);
+      expect(container.read(preferencesProvider).glassEnabled, isTrue);
+      expect(prefs.getBool('pref_glass_enabled'), isTrue);
+      await tester.pumpWidget(const SizedBox.shrink());
+    }
+  });
+
   testWidgets('一个偏好同时控制真实底栏和编辑工具岛，不改变尺寸', (tester) async {
     SharedPreferences.setMockInitialValues({
       'pref_bottom_nav_floating': true,

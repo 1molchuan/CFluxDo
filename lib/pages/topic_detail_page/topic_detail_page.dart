@@ -1,16 +1,21 @@
 import 'package:ai_model_manager/ai_model_manager.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
+
 import '../../services/app_error_handler.dart';
 import '../../services/notion/notion_bookmark_auto_sync.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show RenderSliver, RenderViewport;
 import 'package:flutter/services.dart';
+
 import '../../utils/idle_task.dart';
+
 import 'package:app_icons/app_icons.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:scroll_to_index/scroll_to_index.dart';
 import 'package:share_plus/share_plus.dart';
+
 import '../../l10n/s.dart';
 import '../../utils/frame_jank_monitor.dart';
 import '../../utils/html_text_mapper.dart';
@@ -19,16 +24,27 @@ import '../../utils/code_selection_context.dart';
 import '../../utils/link_launcher.dart';
 import '../../utils/quote_builder.dart';
 import '../../utils/scroll_jump.dart';
+
 import 'package:fluxdo_render/fluxdo_render.dart'
     show SelectionCoordinator, TocEntry;
 import 'package:uuid/uuid.dart';
+
 import 'dart:async';
 import 'dart:math' as math;
+
 import '../../models/draft.dart';
 import '../../models/nested_topic.dart';
 import '../../models/nested_reading_position.dart';
 import '../../providers/nested_reading_provider.dart';
 import '../../models/topic.dart';
+import '../../widgets/layout/vscode_editor_title_bar.dart';
+import '../../widgets/layout/vscode_reader_status_scope.dart';
+import '../../widgets/layout/vscode_terminal_panel.dart';
+import '../../widgets/topic_detail/vscode_post_jump_dialog.dart';
+import '../../widgets/post/post_item/widgets/post_footer_section/post_footer_section.dart';
+import '../../widgets/user/user_card.dart';
+import '../../widgets/user/avatar_action_menu.dart';
+import '../../utils/time_utils.dart';
 import '../../models/pending_post.dart';
 import '../../utils/blocked_user_filter.dart';
 import '../../utils/responsive.dart';
@@ -36,6 +52,7 @@ import '../../utils/share_utils.dart';
 import '../../providers/preferences_provider.dart';
 import '../../providers/theme_provider.dart';
 import '../../theme/mojian_theme.dart';
+import '../../theme/vscode_theme.dart';
 import '../reading_settings_page.dart';
 import '../../providers/selected_topic_provider.dart';
 import '../../providers/discourse_providers.dart';
@@ -57,8 +74,10 @@ import '../../widgets/post/post_revision/revision_modal.dart';
 import '../../widgets/post/reply_sheet.dart';
 import '../../widgets/topic/topic_progress.dart';
 import '../../widgets/topic/topic_notification_button.dart';
+
 import 'package:common_ui/common_ui.dart';
 import 'package:m3e_ui/m3e_ui.dart';
+
 import '../../widgets/common/emoji_text.dart';
 import '../../widgets/common/error_view.dart';
 import '../../providers/nested_topic_provider.dart';
@@ -68,6 +87,7 @@ import 'widgets/nested_post_list.dart';
 import 'widgets/invite_private_message_dialog.dart';
 import 'widgets/mojian_reader_chrome.dart';
 import 'widgets/topic_bottom_bar.dart';
+import 'widgets/shared_issue_button.dart';
 import 'widgets/topic_detail_overlay.dart';
 import 'widgets/topic_post_list.dart';
 import 'widgets/topic_toc_panel.dart';
@@ -211,6 +231,11 @@ class _TopicDetailPageState extends ConsumerState<TopicDetailPage>
   // UI State
   final GlobalKey _headerKey = GlobalKey();
   final GlobalKey _centerKey = GlobalKey();
+  final _terminalPanelKey = GlobalKey<VscodeTerminalPanelState>();
+  final _terminalReplyController = ReplySheetController();
+  final _vscodeSelectedPost = ValueNotifier<int?>(null);
+  ReplySheet? _terminalReplyComposer;
+  Completer<Post?>? _terminalReplyCompletion;
 
   /// 视口 anchor（center 零点在视口内的位置，0 = 顶部）。
   /// 目标帖下方内容不足一屏时由 _updateBottomAnchorIfNeeded 按真实几何
@@ -698,6 +723,10 @@ class _TopicDetailPageState extends ConsumerState<TopicDetailPage>
 
   void _handleCloseShortcut() {
     if (!mounted) return;
+    if (_terminalReplyComposer != null) {
+      _terminalReplyController.close();
+      return;
+    }
     if (ref.read(topicSearchProvider(widget.topicId)).isSearchMode) {
       _exitSearchMode();
       return;
@@ -855,6 +884,10 @@ class _TopicDetailPageState extends ConsumerState<TopicDetailPage>
 
   @override
   void dispose() {
+    final replyCompletion = _terminalReplyCompletion;
+    if (replyCompletion != null && !replyCompletion.isCompleted) {
+      replyCompletion.complete(null);
+    }
     _idleFlushPosition?.isScrollingNotifier.removeListener(_onScrollIdle);
     _idleFlushPosition = null;
     // 按 identity 注销:叠栈的详情页可能已覆盖注册,只清自己那份
@@ -877,6 +910,7 @@ class _TopicDetailPageState extends ConsumerState<TopicDetailPage>
     _searchFocusNode.dispose();
     _pageController.dispose();
     _currentPageNotifier.dispose();
+    _vscodeSelectedPost.dispose();
     _controller.scrollController.removeListener(_onScroll);
     _screenTrack.stop();
     unawaited(_nestedReadingStore.flush());
@@ -1231,7 +1265,8 @@ class _TopicDetailPageState extends ConsumerState<TopicDetailPage>
 
   /// 在大屏上为内容添加宽度约束
   Widget _wrapWithConstraint(Widget child) {
-    if (Responsive.isMobile(context)) return child;
+    if (VscodeTokens.maybeOf(context) != null || Responsive.isMobile(context))
+      return child;
     return Center(
       child: ConstrainedBox(
         constraints: const BoxConstraints(
@@ -1249,6 +1284,7 @@ class _TopicDetailPageState extends ConsumerState<TopicDetailPage>
     required TopicDetailNotifier notifier,
   }) {
     final searchState = ref.watch(topicSearchProvider(widget.topicId));
+    final vscode = VscodeTokens.maybeOf(context);
 
     // 搜索模式下的 AppBar
     if (searchState.isSearchMode) {
@@ -1276,6 +1312,43 @@ class _TopicDetailPageState extends ConsumerState<TopicDetailPage>
           IconButton(
             icon: const Icon(Symbols.close_rounded),
             onPressed: _exitSearchMode,
+          ),
+        ],
+      );
+    }
+
+    if (vscode != null) {
+      return VscodeEditorTitleBar(
+        title: detail?.title ?? widget.initialTitle ?? '#${widget.topicId}',
+        onClose: widget.embeddedMode
+            ? widget.onEmbeddedBack ?? widget.onEmbeddedClose
+            : () => Navigator.of(context).maybePop(),
+        actions: [
+          if (detail != null)
+            TopicBottomBar(
+              onScrollToTop: _scrollToTop,
+              onShare: _shareTopic,
+              onShareAsImage: _shareAsImage,
+              onExport: _showExportSheet,
+              onOpenInBrowser: _openInBrowser,
+              hasSummary: detail.hasSummary,
+              isPostVoting: detail.isPostVoting,
+              viewMode: notifier.viewMode,
+              isNestedMode: _isNestedView,
+              isLoading: _isSwitchingMode,
+              isPrivateMessage: detail.isPrivateMessage,
+              onShowTopReplies: _handleShowTopReplies,
+              onShowByActivity: _handleShowByActivity,
+              onShowAuthorOnly: _handleShowAuthorOnly,
+              onShowTopLevelReplies: _handleShowTopLevelReplies,
+              onCancelFilter: _handleCancelFilter,
+              onShowNestedView: _toggleNestedView,
+            ),
+          ..._buildAppBarActions(
+            detail: detail,
+            notifier: notifier,
+            shouldShowTitle: true,
+            expandProgress: 0,
           ),
         ],
       );
@@ -1570,9 +1643,8 @@ class _TopicDetailPageState extends ConsumerState<TopicDetailPage>
     final hasAiModel = ref.watch(hasAvailableAiModelProvider);
     final isAiGenerating = hasAiModel
         ? ref.watch(
-            topicAiChatProvider(
-              widget.topicId,
-            ).select((state) => state.isGenerating),
+            topicAiChatProvider(widget.topicId)
+                .select((state) => state.isGenerating),
           )
         : false;
 
@@ -2023,6 +2095,10 @@ class _TopicDetailPageState extends ConsumerState<TopicDetailPage>
   }
 
   void _showTimelineSheet(TopicDetail detail) {
+    if (VscodeTokens.maybeOf(context) != null) {
+      unawaited(_showJumpToPostDialog());
+      return;
+    }
     showTopicTimelineSheet(
       context: context,
       currentIndex: _controller.currentVisibleStreamIndex,
@@ -2107,6 +2183,223 @@ class _TopicDetailPageState extends ConsumerState<TopicDetailPage>
     unawaited(_jumpToPostByIdInTopic(stream[index - 1]));
   }
 
+  Widget _buildVscodePostActions(
+    bool isLoggedIn,
+  ) => ValueListenableBuilder<int?>(
+    valueListenable: _vscodeSelectedPost,
+    builder: (context, number, _) => Consumer(
+      builder: (context, ref, _) {
+        if (number == null) return const SizedBox.shrink();
+        final detail = ref.watch(topicDetailProvider(_params)).value;
+        if (detail == null) return const SizedBox.shrink();
+        Post? post = detail.postStream.posts
+            .where((p) => p.postNumber == number)
+            .firstOrNull;
+        if (_isNestedView) {
+          final nested = ref
+              .watch(
+                nestedTopicProvider(
+                  NestedTopicParams(
+                    instanceId: _instanceId,
+                    topicId: widget.topicId,
+                    targetPostNumber: _nestedTargetPostNumber,
+                  ),
+                ),
+              )
+              .value;
+          Post? findNode(NestedNode node) {
+            if (node.post.postNumber == number) return node.post;
+            for (final child in node.children) {
+              final found = findNode(child);
+              if (found != null) return found;
+            }
+            return null;
+          }
+
+          if (nested?.opPost?.postNumber == number) post = nested?.opPost;
+          for (final node in nested?.roots ?? const <NestedNode>[]) {
+            final found = findNode(node);
+            if (found != null) {
+              post = found;
+              break;
+            }
+          }
+          if (post?.postNumber != number && nested?.contextChain != null) {
+            post = findNode(nested!.contextChain!);
+          }
+          if (post?.postNumber != number) {
+            for (final branch in _nestedReadingSession.branches.values) {
+              for (final child in branch.children) {
+                final found = findNode(child);
+                if (found != null) {
+                  post = found;
+                  break;
+                }
+              }
+              if (post?.postNumber == number) break;
+            }
+          }
+        }
+        // 只操作用户点选且仍存在的楼层，不回退到视口中的其他帖子。
+        final target = post;
+        if (target == null) return const SizedBox.shrink();
+        final canAssign =
+            PreloadedDataService().assignEnabled &&
+            (ref.watch(currentUserProvider).value?.canAssign ?? false) &&
+            !detail.indirectlyAssignedTo.containsKey(target.id);
+        final danmakuPref = ref.watch(
+          preferencesProvider.select((p) => p.boostDanmaku),
+        );
+        final danmakuOff = ref.watch(
+          topicSessionProvider(widget.topicId)
+              .select((s) => s.danmakuOffPostIds.contains(target.id)),
+        );
+        final hasBoosts = BlockedUserFilter.visibleBoosts(
+          target.boosts ?? const <Boost>[],
+          ref.watch(
+            preferencesProvider.select((p) => p.normalizedBlockedUsernames),
+          ),
+        ).isNotEmpty;
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Builder(
+              builder: (anchorContext) => TextButton(
+                key: const ValueKey('vscode-current-post-author'),
+                onPressed: () {
+                  final box = anchorContext.findRenderObject() as RenderBox;
+                  showUserCard(
+                    context: anchorContext,
+                    anchorRect: box.localToGlobal(Offset.zero) & box.size,
+                    username: target.username,
+                    topicId: widget.topicId,
+                    topicTitle: detail.title,
+                    postNumber: target.postNumber,
+                    avatarFallbackUrl: target.getAvatarUrl(size: 144),
+                    nameFallback: target.name,
+                  );
+                },
+                child: Text('#${target.postNumber} · @${target.username}'),
+              ),
+            ),
+            PopupMenuButton<VoidCallback>(
+              tooltip: '当前楼层作者操作',
+              icon: const Icon(Icons.person_outline),
+              onSelected: (action) => action(),
+              itemBuilder: (context) => [
+                for (final item in buildAvatarMenuItems(
+                  context,
+                  username: target.username,
+                  topicId: widget.topicId,
+                  postNumber: target.postNumber,
+                  onMentionUser: isLoggedIn
+                      ? (username) => _handleReply(
+                          target.postNumber == 1 ? null : target,
+                          initialContent: '@$username ',
+                        )
+                      : null,
+                ))
+                  PopupMenuItem(
+                    value: item.onSelected,
+                    enabled: item.enabled,
+                    child: Text(item.label),
+                  ),
+              ],
+            ),
+            Tooltip(
+              message: TimeUtils.formatDetailTime(target.displayDate),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 6),
+                child: Text(TimeUtils.formatRelativeTime(target.displayDate)),
+              ),
+            ),
+            if (target.replyToPostNumber > 0)
+              TextButton(
+                onPressed: () => _jumpToPostInTopic(target.replyToPostNumber),
+                child: Text('↳ #${target.replyToPostNumber}'),
+              ),
+            if (target.showEditsIndicator)
+              IconButton(
+                tooltip: '编辑历史',
+                icon: const Icon(Icons.history),
+                onPressed: () =>
+                    showPostRevisionSheet(context: context, postId: target.id),
+              ),
+            if (danmakuPref && hasBoosts)
+              IconButton(
+                tooltip: danmakuOff ? '显示弹幕' : '关闭弹幕',
+                icon: Icon(danmakuOff ? Icons.subtitles_off : Icons.subtitles),
+                onPressed: () => ref
+                    .read(topicSessionProvider(widget.topicId).notifier)
+                    .setDanmakuOff(target.id, !danmakuOff),
+              ),
+            PostFooterSection(
+              key: ValueKey(('vscode-status-actions', target.id)),
+              post: target,
+              topicId: widget.topicId,
+              topicHasAcceptedAnswer: detail.hasAcceptedAnswer,
+              acceptedAnswers: detail.acceptedAnswers,
+              padding: EdgeInsets.zero,
+              actionsOnly: true,
+              useReplyDialog: true,
+              danmakuActive: danmakuPref && hasBoosts ? !danmakuOff : null,
+              categoryId: detail.categoryId,
+              assignmentInfo: detail.indirectlyAssignedTo[target.id],
+              opTopSlot: target.postNumber == 1 && detail.sharedIssueVisible
+                  ? SharedIssueButton(
+                      topic: detail,
+                      onChanged: _handleSharedIssueChanged,
+                    )
+                  : null,
+              onReply: isLoggedIn
+                  ? ({initialContent}) => _handleReply(
+                      target.postNumber == 1 ? null : target,
+                      initialContent: initialContent,
+                    )
+                  : null,
+              onEdit: isLoggedIn && target.canEdit
+                  ? () => _handleEdit(target)
+                  : null,
+              onShareAsImage: () => _sharePostAsImage(target),
+              onRefreshPost: _handleRefreshPost,
+              onJumpToPost: _jumpToPostInTopic,
+              onSolutionChanged: _handleSolutionChanged,
+              onShowPostDetail: () => showPostRepliesSheet(
+                context: context,
+                post: target,
+                topicId: widget.topicId,
+                topicTitle: detail.title,
+                isPrivateMessageTopic: detail.isPrivateMessage,
+                isPmWithNonHumanUser: detail.pmWithNonHumanUser,
+                onJumpToPost: _jumpToPostInTopic,
+                onComposeReply: VscodeTokens.maybeOf(context) != null
+                    ? _handleReply
+                    : null,
+              ),
+              topicTitle: detail.title,
+              isPrivateMessageTopic: detail.isPrivateMessage,
+              isPmWithNonHumanUser: detail.pmWithNonHumanUser,
+              isPostVotingTopic: detail.isPostVoting,
+              topicClosed: detail.closed || detail.archived,
+              canAssignPost: canAssign,
+              onAssignPost: () => showPostAssignDialog(
+                context,
+                ref,
+                topicId: widget.topicId,
+                postId: target.id,
+              ),
+            ),
+            IconButton(
+              tooltip: '收起楼层操作',
+              onPressed: () => _vscodeSelectedPost.value = null,
+              icon: const Icon(Icons.close),
+            ),
+          ],
+        );
+      },
+    ),
+  );
+
   /// [TopicDetailOverlay] 的实例缓存(输入签名比对):见调用处注释。
   ({Object signature, Widget widget})? _overlayCache;
 
@@ -2120,6 +2413,9 @@ class _TopicDetailPageState extends ConsumerState<TopicDetailPage>
     // 墨笺阅读条/时间轴额外消费:首帖赞、话题书签、首末日期(都是低频);
     // 经典不用,恒为常量,不进签名变化、也不做这两次遍历
     final mojian = Theme.of(context).extension<MojianTokens>() != null;
+    final vscode = VscodeTokens.maybeOf(context) != null;
+    final dockInWorkbench =
+        vscode && VscodeReaderStatusScope.maybeOf(context) != null;
     final firstPostLiked = mojian ? _readerFirstPostLiked(detail) : null;
     final bookmarked =
         mojian && (_bookmarkEditTarget(detail) != null || detail.bookmarked);
@@ -2136,6 +2432,9 @@ class _TopicDetailPageState extends ConsumerState<TopicDetailPage>
       bookmarked: bookmarked,
       createdAt: mojian ? detail.createdAt : null,
       lastPostedAt: mojian ? detail.lastPostedAt : null,
+      readerDetail: vscode ? detail : null,
+      dockInWorkbench: dockInWorkbench,
+      activeReader: _isParentActive,
     );
     final cached = _overlayCache;
     if (cached != null && cached.signature == signature) {
@@ -2169,9 +2468,20 @@ class _TopicDetailPageState extends ConsumerState<TopicDetailPage>
       onLikeFirstPost: _likeFirstPostForCurrent,
       onBookmark: _bookmarkFromReaderChrome,
       onSeekIndex: _seekStreamIndexForCurrent,
+      postActions: vscode ? _buildVscodePostActions(isLoggedIn) : null,
+      dockInWorkbench: dockInWorkbench,
+      currentPostNumberListenable: vscode
+          ? _controller.viewportPostNumberNotifier
+          : null,
     );
-    _overlayCache = (signature: signature, widget: overlay);
-    return overlay;
+    final result = dockInWorkbench
+        ? VscodeReaderStatusBinding(
+            active: _isParentActive,
+            controls: _wrapEmbeddedStack(overlay),
+          )
+        : overlay;
+    _overlayCache = (signature: signature, widget: result);
+    return result;
   }
 
   /// 话题目录(TOC)浮层:宽屏右侧常驻可折叠面板,窄屏右下浮动按钮
@@ -2720,7 +3030,9 @@ class _TopicDetailPageState extends ConsumerState<TopicDetailPage>
     // 高度后,内部随 detail 重建不影响 Scaffold 布局
     final topicScaffold = Scaffold(
       appBar: PreferredSize(
-        preferredSize: const Size.fromHeight(kToolbarHeight),
+        preferredSize: Size.fromHeight(
+          VscodeTokens.maybeOf(context) != null ? 36 : kToolbarHeight,
+        ),
         child: Consumer(
           builder: (context, ref, _) {
             final detail = ref.watch(topicDetailProvider(params)).value;
@@ -2735,12 +3047,31 @@ class _TopicDetailPageState extends ConsumerState<TopicDetailPage>
       body: Consumer(
         builder: (context, ref, _) {
           final detailAsync = ref.watch(topicDetailProvider(params));
-          return _buildBody(
+          final reader = _buildBody(
             context,
             detailAsync,
             detailAsync.value,
             notifier,
             isLoggedIn,
+          );
+          if (VscodeTokens.maybeOf(context) == null &&
+              _terminalReplyComposer == null) {
+            return reader;
+          }
+          final composer = _terminalReplyComposer;
+          final target = composer?.editPost ?? composer?.replyToPost;
+          return VscodeTerminalPanel(
+            key: _terminalPanelKey,
+            reader: reader,
+            composer: composer,
+            targetLabel: target == null
+                ? context.l10n.post_replyToTopic
+                : composer?.editPost != null
+                ? '${context.l10n.post_editPostTitle(target.postNumber)} · @${target.username}'
+                : '${context.l10n.post_replyToUser(target.username)} · #${target.postNumber}',
+            onClose: () {
+              _terminalReplyController.close();
+            },
           );
         },
       ),
@@ -2819,17 +3150,24 @@ class _TopicDetailPageState extends ConsumerState<TopicDetailPage>
                                   duration: const Duration(milliseconds: 300),
                                   curve: Curves.easeOutCubic,
                                 );
-                                showReplySheet(
-                                  context: context,
-                                  topicId: widget.topicId,
-                                  categoryId: detail.categoryId,
-                                  initialContent: '$imageMarkdown\n',
-                                  topicTitle: detail.title,
-                                  isPrivateMessageTopic:
-                                      detail.isPrivateMessage,
-                                  isPmWithNonHumanUser:
-                                      detail.pmWithNonHumanUser,
-                                );
+                                if (VscodeTokens.maybeOf(context) != null) {
+                                  unawaited(
+                                    _handleReply(
+                                      null,
+                                      initialContent: '$imageMarkdown\n',
+                                    ),
+                                  );
+                                } else {
+                                  showReplySheet(
+                                    context: context,
+                                    topicId: widget.topicId,
+                                    categoryId: detail.categoryId,
+                                    initialContent: '$imageMarkdown\n',
+                                    topicTitle: detail.title,
+                                    isPrivateMessageTopic: detail.isPrivateMessage,
+                                    isPmWithNonHumanUser: detail.pmWithNonHumanUser,
+                                  );
+                                }
                               },
                       );
                     },
@@ -2895,15 +3233,19 @@ class _TopicDetailPageState extends ConsumerState<TopicDetailPage>
           // 关闭 AI Sheet（预览页已在内部自行关闭）
           Navigator.pop(sheetContext);
           // 打开回复框，预填上传后的图片 markdown
-          showReplySheet(
-            context: context,
-            topicId: widget.topicId,
-            categoryId: detail.categoryId,
-            initialContent: '$imageMarkdown\n',
-            topicTitle: detail.title,
-            isPrivateMessageTopic: detail.isPrivateMessage,
-            isPmWithNonHumanUser: detail.pmWithNonHumanUser,
-          );
+          if (VscodeTokens.maybeOf(context) != null) {
+            unawaited(_handleReply(null, initialContent: '$imageMarkdown\n'));
+          } else {
+            showReplySheet(
+              context: context,
+              topicId: widget.topicId,
+              categoryId: detail.categoryId,
+              initialContent: '$imageMarkdown\n',
+              topicTitle: detail.title,
+              isPrivateMessageTopic: detail.isPrivateMessage,
+              isPmWithNonHumanUser: detail.pmWithNonHumanUser,
+            );
+          }
         },
       ),
     ).then((_) => _isAiSheetOpen = false);
@@ -2990,7 +3332,13 @@ class _TopicDetailPageState extends ConsumerState<TopicDetailPage>
     return Stack(
       children: [
         // 使用 Offstage 保持帖子列表存在但在搜索模式下隐藏，保留滚动位置
-        Offstage(offstage: isSearchMode, child: content),
+        Offstage(
+          offstage: isSearchMode,
+          child: VscodeReaderFlowScope(
+            selectedPost: _vscodeSelectedPost,
+            child: content,
+          ),
+        ),
 
         // 搜索视图
         if (isSearchMode)
@@ -3284,7 +3632,9 @@ class _TopicDetailPageState extends ConsumerState<TopicDetailPage>
           topicId: widget.topicId,
           scrollController: _controller.scrollController,
           headerKey: _headerKey,
-          hideHeaderTitle: widget.hideInlineHeaderTitle,
+          hideHeaderTitle:
+              widget.hideInlineHeaderTitle ||
+              VscodeTokens.maybeOf(context) != null,
           isLoggedIn: isLoggedIn,
           removingPrivateMessageParticipantId:
               _removingPrivateMessageParticipantId,
@@ -3336,7 +3686,9 @@ class _TopicDetailPageState extends ConsumerState<TopicDetailPage>
               centerKey: _centerKey,
               viewportAnchor: _viewportAnchor,
               headerKey: _headerKey,
-              hideHeaderTitle: widget.hideInlineHeaderTitle,
+              hideHeaderTitle:
+                  widget.hideInlineHeaderTitle ||
+                  VscodeTokens.maybeOf(context) != null,
               canAssignPost:
                   PreloadedDataService().assignEnabled &&
                   (ref.read(currentUserProvider).value?.canAssign ?? false),
@@ -3390,6 +3742,7 @@ class _TopicDetailPageState extends ConsumerState<TopicDetailPage>
               onQuoteSelection: isLoggedIn ? _handleQuoteSelection : null,
               onQuoteImage: isLoggedIn ? _handleImageQuote : null,
               onScrollNotification: _controller.handleScrollNotification,
+              onLayout: _onPostListLayout,
               onPointerScroll: _controller.handlePointerScroll,
               onFillGapBefore: (postId) => notifier.fillGapBefore(postId),
               onFillGapAfter: (postId) => notifier.fillGapAfter(postId),
@@ -3403,6 +3756,9 @@ class _TopicDetailPageState extends ConsumerState<TopicDetailPage>
                 isPrivateMessageTopic: detail.isPrivateMessage,
                 isPmWithNonHumanUser: detail.pmWithNonHumanUser,
                 onJumpToPost: _jumpToPostInTopic,
+                onComposeReply: VscodeTokens.maybeOf(context) != null
+                    ? _handleReply
+                    : null,
               ),
               onWithdrawPendingPost: isLoggedIn ? _handleWithdrawPending : null,
               onWithdrawAndEditPendingPost: isLoggedIn

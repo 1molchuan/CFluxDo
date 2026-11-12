@@ -95,6 +95,7 @@ import 'widgets/post/post_item/render_parse_cache.dart';
 import 'utils/scroll_busy_signal.dart';
 import 'theme/mojian_theme.dart';
 import 'theme/claude_theme.dart';
+import 'theme/vscode_theme.dart';
 import 'utils/responsive.dart';
 import 'theme/theme_resolver.dart';
 import 'widgets/common/app_background_layer.dart';
@@ -714,6 +715,17 @@ ThemeData _buildThemeForStyle(
         primaryIconTheme: _appIconTheme(scheme.onPrimary),
         extensions: const [M3eFlags(enabled: false)],
       );
+    case UiStyle.vscode:
+      return VscodeTheme.build(
+        scheme: scheme,
+        fontFamily: themeState.fontFamilyName,
+        pageTransitionsTheme: fullscreenSwipeBack
+            ? _fullscreenSwipePageTransitionsTheme
+            : _pageTransitionsTheme,
+        iconTheme: _appIconTheme(scheme.onSurface),
+        primaryIconTheme: _appIconTheme(scheme.onPrimary),
+        extensions: const [M3eFlags(enabled: false)],
+      );
     case UiStyle.classic:
       return _buildAppTheme(
         scheme,
@@ -820,6 +832,7 @@ class MainApp extends ConsumerWidget {
               themeState.mode,
               black: themeState.blackEnabled,
             ),
+          UiStyle.vscode => VscodeTheme.resolve(themeState.mode),
           UiStyle.classic => ThemeResolver.resolve(
               mode: themeState.mode,
               neutral: themeState.neutralEnabled,

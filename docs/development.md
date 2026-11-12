@@ -88,6 +88,39 @@ just release -- patch --dry-run
 - 修改 ARB 后，执行 `just sync` 或 `just l10n`
 - 日常运行/构建入口会自动处理 l10n，不需要额外手写 pre-run hook
 
+## VS Code 正文显示
+
+- 「设置 → 外观 → VS Code 正文」独立保存紧凑阅读／编程语言模式；语言模式支持 Java、Python，不改变其他界面风格，也不改论坛数据。
+- 编程语言模式将首帖显示为类、回复显示为方法或函数，正文保留为带注释前缀的可选择文本。长帖只在首末分块生成声明与结尾；平铺及树形阅读的连续行号使用同一文档转换统计，切换语言后重新计算。
+- 编程语言模式直接读取 cooked 的可见区块，保留粗体、斜体、删除线、链接标签、列表和代码空白；图片以可读引用显示，悬停预览。作者、楼层和时间仅保留在可操作的作者条，不再生成重复文档注释和导入语句；段落间不插入空注释行。作者条、正文及楼层操作共享代码区起点，长句续行保留正文缩进；引用头像和分类装饰图标不混入正文，原生内容回退也保留代码区边距。
+- 剧透、隐藏区和互动内容继续使用原文组件，不提供绕过门禁的代码入口。生成的结构只用于显示，不参与发帖或执行。
+- 正文结构参考 [linuxdo-vscode-ui 的 topic-editor.js](https://github.com/Twelveeee/linuxdo-vscode-ui/blob/main/src/features/topic-editor.js)，按 Flutter 数据与渲染链路重写；Java/Python 模板来源的 MIT 授权如下，项目整体授权仍见根目录 `LICENSE`。
+
+```text
+The MIT License (MIT)
+
+Copyright (c) 2026 Twelveeee
+Copyright (c) 2026 czm15053
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
 ## IDE 集成
 
 - Android Studio / IntelliJ 的共享运行配置提交在 [`.run/`](</D:/teng/Documents/i/ldx/.run/>)，不放进被忽略的 `.idea/`

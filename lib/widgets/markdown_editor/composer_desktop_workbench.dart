@@ -71,6 +71,7 @@ class _ComposerDesktopWorkbenchState extends State<ComposerDesktopWorkbench>
   void didChangeDependencies() {
     super.didChangeDependencies();
     _reduced =
+        ComposerTerminalScope.maybeOf(context) != null ||
         MediaQuery.disableAnimationsOf(context) ||
         !M3eFlags.of(context).enabled;
     if (_presenting && !TickerMode.valuesOf(context).enabled) {
@@ -208,6 +209,7 @@ class _ComposerDesktopWorkbenchState extends State<ComposerDesktopWorkbench>
   @override
   Widget build(BuildContext context) {
     final viewport = ComposerDesktopViewport.maybeOf(context)!;
+    final terminal = ComposerTerminalScope.maybeOf(context) != null;
     final rail = viewport.useRail;
     final height = viewport.availableHeight;
     final showHistory = !viewport.compact;
@@ -226,15 +228,17 @@ class _ComposerDesktopWorkbenchState extends State<ComposerDesktopWorkbench>
           18.0,
     );
     final barWidth = math.min(
-      viewport.size.width - 32,
-      16 +
-          (history.length +
-                  widget.tools.length +
-                  widget.controls.length +
-                  1 +
-                  (widget.onExpandTools == null ? 0 : 1)) *
-              48 +
-          18.0,
+      terminal ? viewport.size.width : viewport.size.width - 32,
+      terminal
+          ? viewport.size.width
+          : 16 +
+                (history.length +
+                        widget.tools.length +
+                        widget.controls.length +
+                        1 +
+                        (widget.onExpandTools == null ? 0 : 1)) *
+                    48 +
+                18.0,
     );
     final panelWidth = math.min(
       rail ? 440.0 : 560.0,
@@ -242,7 +246,15 @@ class _ComposerDesktopWorkbenchState extends State<ComposerDesktopWorkbench>
     );
     final panelHeight = math.max(
       0.0,
-      math.min(rail ? 560.0 : 360.0, height - (rail ? 48 : 112)),
+      math.min(
+        rail ? 560.0 : 360.0,
+        height -
+            (terminal
+                ? 56
+                : rail
+                ? 48
+                : 112),
+      ),
     );
     final panelTop = viewport.topInset + (height - panelHeight) / 2;
 
@@ -266,9 +278,17 @@ class _ComposerDesktopWorkbenchState extends State<ComposerDesktopWorkbench>
         Positioned(
           right: rail ? 24 : (viewport.size.width - barWidth) / 2,
           top: rail ? viewport.topInset + (height - normalHeight) / 2 : null,
-          bottom: rail ? null : 16,
+          bottom: rail
+              ? null
+              : terminal
+              ? 0
+              : 16,
           width: rail ? 56 : barWidth,
-          height: rail ? normalHeight : 56,
+          height: rail
+              ? normalHeight
+              : terminal
+              ? 40
+              : 56,
           child: _surface(
             anchor: widget.anchor,
             child: rail
@@ -290,6 +310,20 @@ class _ComposerDesktopWorkbenchState extends State<ComposerDesktopWorkbench>
                       ...widget.controls,
                       if (widget.onExpandTools != null) _expand,
                     ],
+                  )
+                : terminal
+                ? SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      key: const ValueKey('composer-format-row'),
+                      children: [
+                        ...history,
+                        widget.emoji,
+                        ...widget.tools,
+                        ...widget.controls,
+                        if (widget.onExpandTools != null) _expand,
+                      ],
+                    ),
                   )
                 : Row(
                     key: const ValueKey('composer-format-row'),
@@ -322,7 +356,11 @@ class _ComposerDesktopWorkbenchState extends State<ComposerDesktopWorkbench>
             key: _panelKey,
             right: rail ? 92 : (viewport.size.width - panelWidth) / 2,
             top: rail ? panelTop : null,
-            bottom: rail ? null : 84,
+            bottom: rail
+                ? null
+                : terminal
+                ? 48
+                : 84,
             width: panelWidth,
             height: panelHeight,
             child: FadeTransition(

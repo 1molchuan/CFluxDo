@@ -337,6 +337,16 @@ class TopicDetailController extends ChangeNotifier {
         !isLoadingMore;
   }
 
+  /// 布局后复查尾部，定位收尾前不使用临时的 center 坐标请求分页。
+  void loadMoreAfterLayout({
+    required bool hasMoreAfter,
+    required bool isLoadingMore,
+    required VoidCallback loadMore,
+  }) {
+    if (!isPositioned) return;
+    if (shouldLoadMore(hasMoreAfter, isLoadingMore)) loadMore();
+  }
+
   /// 准备跳转到帖子（重新加载数据）
   void prepareJumpToPost(int postNumber) {
     _updateScrollState(

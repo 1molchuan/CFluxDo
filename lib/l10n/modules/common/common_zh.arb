@@ -1,5 +1,8 @@
 {
   "@@locale": "zh",
+  "common_explorer": "资源管理器",
+  "common_collapse": "折叠",
+  "common_expand": "展开",
   "common_switchSite": "切换站点",
   "common_switchingSite": "正在切换站点…",
   "common_switchSiteFailed": "切换站点失败，请重试。原站登录状态已保留。",

@@ -12,11 +12,11 @@ import 'composer_draft_status.dart';
 import 'composer_page_chrome.dart';
 import 'composer_view_mode_switcher.dart';
 import 'composer_submit_button.dart';
+import 'composer_island.dart';
 
-typedef ComposerReviewBuilder =
-    Widget Function(
-      Widget Function(bool reviewing, VoidCallback? trigger) builder,
-    );
+typedef ComposerReviewBuilder = Widget Function(
+  Widget Function(bool reviewing, VoidCallback? trigger) builder,
+);
 
 enum _HeaderAction { preview, review, discard, draft }
 
@@ -61,6 +61,7 @@ class ComposerHeaderActions extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scaler = MediaQuery.textScalerOf(context);
+    final terminal = ComposerTerminalScope.maybeOf(context) != null;
     const submitWidth = 48.0;
     final actions = [
       _HeaderAction.preview,
@@ -69,17 +70,19 @@ class ComposerHeaderActions extends StatelessWidget {
     ];
     // 保留导航和默认标题间距，标题至少容纳常规页面名称。
     final titleWidth = minimumTitleWidth ?? 120 * scaler.scale(22) / 22;
-    final slots = math.max(
-      1,
-      ((availableWidth -
-                  56 -
-                  NavigationToolbar.kMiddleSpacing * 2 -
-                  titleWidth -
-                  16 -
-                  submitWidth) /
-              52)
-          .floor(),
-    );
+    final slots = terminal
+        ? math.max(1, ((availableWidth - 112) / 36).floor())
+        : math.max(
+            1,
+            ((availableWidth -
+                        56 -
+                        NavigationToolbar.kMiddleSpacing * 2 -
+                        titleWidth -
+                        16 -
+                        submitWidth) /
+                    52)
+                .floor(),
+          );
     final inlineCount = draftStatus != null
         ? math.min(actions.length, slots - 1)
         : actions.length <= slots
@@ -143,7 +146,7 @@ class ComposerHeaderActions extends StatelessWidget {
               status: draftStatus!,
               child: const Icon(Symbols.more_horiz_rounded, size: 21),
             ),
-      style: ComposerActionButton.buttonStyle,
+      style: ComposerActionButton.styleOf(context),
       onSelected: (action) => callback(action, onReview)?.call(),
       itemBuilder: (_) => [
         for (final action in overflow) ...[
@@ -213,10 +216,10 @@ class ComposerHeaderActions extends StatelessWidget {
 
     return TextFieldTapRegion(
       child: Padding(
-        padding: const EdgeInsets.only(right: 16),
+        padding: EdgeInsets.only(right: terminal ? 0 : 16),
         child: Row(
           mainAxisSize: MainAxisSize.min,
-          spacing: 8,
+          spacing: terminal ? 2 : 8,
           children: [
             for (final action in inline)
               switch (action) {

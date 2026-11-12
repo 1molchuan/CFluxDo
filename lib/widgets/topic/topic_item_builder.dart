@@ -17,6 +17,8 @@ import 'topic_card.dart';
 import 'topic_card_layout.dart';
 import 'topic_expandable_excerpt.dart';
 import 'topic_preview_dialog.dart';
+import '../../theme/vscode_theme.dart';
+import 'vscode_topic_row.dart';
 
 /// 话题卡排版宽:与 [buildTopicItem] 的壳层约束同源(移动 = 视口宽
 /// - 页边距 24;桌面 = 同口径再封顶 [Breakpoints.maxContentWidth])。
@@ -90,9 +92,14 @@ Widget buildTopicItem({
   // 一镜到底锚点底色:与各分支卡片外壳底色一致(置顶紧凑卡是半透明
   // surfaceContainerLow,普通卡是 cardTheme.color;落地高亮瞬时值优先)
   final theme = Theme.of(context);
+  final vscode = topWidget == null && middleWidget == null
+      ? VscodeTokens.maybeOf(context)
+      : null;
   final anchorColor =
       highlightColor ??
-      (topic.pinned
+      (vscode != null
+          ? (isSelected ? vscode.selection : vscode.sidebar)
+          : topic.pinned
           ? theme.colorScheme.surfaceContainerLow.withValues(alpha: 0.5)
           : theme.cardTheme.color ?? theme.colorScheme.surfaceContainerLow);
 
@@ -121,6 +128,22 @@ Widget buildTopicItem({
           topic.id,
         )
       : null;
+  if (vscode != null) {
+    return MorphingDialogAnchor(
+      enabled: enableLongPress,
+      bottomGap: 0,
+      builder: (cardContext) => VscodeTopicRow(
+        topic: topic,
+        isSelected: isSelected,
+        onTap: onTap,
+        onMiddleClick: onMiddleClick,
+        onLongPress: longPressFor(cardContext),
+        onPreviewIntent: previewIntent,
+        highlightColor: highlightColor,
+        category: categoryMap?[int.tryParse(topic.categoryId)],
+      ),
+    );
+  }
 
   // 检查是否启用了正文摘要展示（类 X/推特信息流风格）
   final currentStyle = messageStyle

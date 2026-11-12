@@ -1,5 +1,8 @@
 {
   "@@locale": "zh_TW",
+  "common_explorer": "檔案總管",
+  "common_collapse": "摺疊",
+  "common_expand": "展開",
   "common_switchSite": "切換站點",
   "common_switchingSite": "正在切換站點…",
   "common_switchSiteFailed": "切換站點失敗，請重試。原站登入狀態已保留。",

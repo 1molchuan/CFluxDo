@@ -2,6 +2,8 @@ import 'package:app_icons/app_icons.dart';
 import 'package:flutter/material.dart';
 import 'package:m3e_ui/m3e_ui.dart';
 
+import 'composer_island.dart';
+
 /// 正圆提交按钮。进入提交状态后起飞，不等待动效才发请求。
 class ComposerSubmitButton extends StatefulWidget {
   const ComposerSubmitButton({
@@ -44,6 +46,7 @@ class _ComposerSubmitButtonState extends State<ComposerSubmitButton>
   void didChangeDependencies() {
     super.didChangeDependencies();
     _animate =
+        ComposerTerminalScope.maybeOf(context) == null &&
         !MediaQuery.disableAnimationsOf(context) &&
         M3eFlags.of(context).enabled;
     if (!_animate) _flight.value = widget.busy ? 1 : 0;
@@ -74,6 +77,40 @@ class _ComposerSubmitButtonState extends State<ComposerSubmitButton>
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
+    final terminal = ComposerTerminalScope.maybeOf(context);
+    if (terminal != null) {
+      return Tooltip(
+        message: widget.label,
+        child: SizedBox.square(
+          dimension: 32,
+          child: FilledButton(
+            key: const ValueKey('composer-header-submit'),
+            onPressed: widget.busy ? null : widget.onPressed,
+            style: FilledButton.styleFrom(
+              minimumSize: const Size.square(32),
+              padding: EdgeInsets.zero,
+              shape: const RoundedRectangleBorder(),
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              backgroundColor: terminal.accent,
+              disabledBackgroundColor: widget.busy ? terminal.accent : null,
+              disabledForegroundColor: widget.busy ? colors.onPrimary : null,
+            ),
+            child: Semantics(
+              label: widget.label,
+              child: widget.busy
+                  ? SizedBox.square(
+                      dimension: 16,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: colors.onPrimary,
+                      ),
+                    )
+                  : AppIcon(widget.icon ?? AppIcons.paperPlane, size: 18),
+            ),
+          ),
+        ),
+      );
+    }
     final size = widget.compact ? 36.0 : 40.0;
     return Tooltip(
       message: widget.label,

@@ -1,5 +1,11 @@
 {
   "@@locale": "zh",
+  "post_terminalTitle": "终端",
+  "post_terminalExpand": "展开回复面板",
+  "post_terminalCollapse": "收起回复面板",
+  "post_terminalRestore": "还原回复面板",
+  "post_terminalMaximize": "最大化回复面板",
+  "post_terminalClose": "关闭回复面板",
   "boost_authorProfile": "主页",
   "boost_created": "Boost 已发送",
   "boost_danmaku": "弹幕",

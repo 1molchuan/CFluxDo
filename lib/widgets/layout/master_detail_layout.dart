@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:app_icons/app_icons.dart';
+
 import '../../l10n/s.dart';
 import '../../utils/nav_chrome_metrics.dart';
 import '../../utils/responsive.dart';
@@ -7,6 +8,7 @@ import '../../utils/layout_lock.dart';
 import 'draggable_divider.dart';
 import 'pane_filmstrip.dart';
 import '../../theme/mojian_theme.dart';
+import '../../theme/vscode_theme.dart';
 
 /// Master-Detail 双栏布局
 /// 平板/桌面上显示双栏，手机上只显示 master 或 detail
@@ -404,6 +406,32 @@ class MasterDetailEmptyState extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final mj = theme.extension<MojianTokens>();
+    final vscode = VscodeTokens.maybeOf(context);
+    if (vscode != null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.code, size: 76, color: vscode.border),
+              const SizedBox(height: 20),
+              Text(
+                '// $message',
+                textAlign: TextAlign.center,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: vscode.syntaxComment,
+                  fontFamily: VscodeTheme.codeFontFamily,
+                  fontFamilyFallback: VscodeTheme.codeFontFallback(
+                    theme.textTheme.bodyMedium?.fontFamily,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
     if (mj != null) {
       // 墨笺:一团洇开的淡墨托着淡墨色图标,文案用宋体、字距拉开
       return Center(

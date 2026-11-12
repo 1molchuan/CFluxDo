@@ -1,7 +1,9 @@
 import 'package:app_icons/app_icons.dart';
 import 'package:flutter/material.dart';
+
 import '../../l10n/s.dart';
 import '../../providers/topic_list/filter_provider.dart';
+import '../../theme/vscode_theme.dart';
 
 class TopicListUpdateBanner extends StatelessWidget {
   const TopicListUpdateBanner({
@@ -28,6 +30,41 @@ class TopicListUpdateBanner extends StatelessWidget {
         context.l10n.topics_viewNewOnlyTopics(count),
       _ => context.l10n.topics_viewNewTopics(count),
     };
+    final vscode = VscodeTokens.maybeOf(context);
+    if (vscode != null) {
+      return Material(
+        color: vscode.sidebar,
+        child: InkWell(
+          onTap: loading ? null : onTap,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(36, 5, 12, 5),
+            child: Row(
+              children: [
+                if (loading)
+                  SizedBox.square(
+                    dimension: 12,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 1.5,
+                      color: vscode.accent,
+                    ),
+                  )
+                else
+                  Icon(Icons.sync, size: 14, color: vscode.accent),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 11, color: vscode.accent),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       child: Material(

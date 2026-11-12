@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:fluxdo_render/fluxdo_render.dart';
 import 'package:html/dom.dart' as dom;
 import 'package:html/parser.dart' as html_parser;
+
 import '../../../l10n/s.dart';
 import '../../../models/topic.dart';
 import '../../../providers/preferences_provider.dart';
@@ -21,6 +22,7 @@ import 'render_parse_cache.dart';
 import 'widgets/post_footer_section/post_footer_section.dart';
 import 'widgets/post_header_section.dart';
 import 'widgets/post_segment_frame.dart';
+import 'widgets/vscode_post_source.dart';
 import '../../../theme/mojian_theme.dart';
 
 /// 新引擎长帖分段数据(chunk 切分 eager,单 chunk 解析 lazy)。
@@ -54,22 +56,7 @@ class NewEngineLongPostData {
     int? topicId,
     void Function(String quote, Post post)? onQuoteImage,
   }) {
-    final parseData = RenderParseCache.longPost(post, () {
-      final preprocessed = FluxdoRenderCallbacks.preprocessCookedForRender(
-        post,
-      );
-      if (preprocessed.length <= HtmlChunker.chunkThreshold) return null;
-      // 先按顶层切,再把「大 blockquote」装饰下放拆成多片(让容器内部也跟随
-      // sliver 虚拟化,见子包 BlockquoteChunkPos)。拆分后再判 chunk 数 → 单个
-      // 超大引用块的帖子也能拆开,不会退回整段渲染。
-      final chunks = _splitLargeBlockquotes(HtmlChunker.chunk(preprocessed));
-      if (chunks.length <= 1) return null;
-      return LongPostParseData(
-        preprocessed: preprocessed,
-        chunks: chunks,
-        footnotesHtml: _extractFootnotesSection(preprocessed),
-      );
-    });
+    final parseData = _parseDataFor(post);
     if (parseData == null) return null;
 
     final data = NewEngineLongPostData._(parseData);
@@ -83,6 +70,21 @@ class NewEngineLongPostData {
     );
     return data;
   }
+
+  static LongPostParseData? _parseDataFor(Post post) =>
+      RenderParseCache.longPost(post, () {
+        final preprocessed = FluxdoRenderCallbacks.preprocessCookedForRender(
+          post,
+        );
+        if (preprocessed.length <= HtmlChunker.chunkThreshold) return null;
+        final chunks = _splitLargeBlockquotes(HtmlChunker.chunk(preprocessed));
+        if (chunks.length <= 1) return null;
+        return LongPostParseData(
+          preprocessed: preprocessed,
+          chunks: chunks,
+          footnotesHtml: _extractFootnotesSection(preprocessed),
+        );
+      });
 
   // 大引用块拆分阈值:内部块数或字符数超过即拆(都不超 → 小引用块不拆,零开销)。
   static const _bqSplitMinBlocks = 6;
@@ -137,9 +139,8 @@ class NewEngineLongPostData {
     final attrs = _attrsString(root); // 保留原 class 等属性
 
     // callout 识别:首行 [!type]([+-] = 可折叠 → 不拆)。
-    final callout = RegExp(
-      r'^\[!([^\]]+)\]([+-])?',
-    ).firstMatch(root.text.trimLeft());
+    final callout = RegExp(r'^\[!([^\]]+)\]([+-])?')
+        .firstMatch(root.text.trimLeft());
     if (callout != null) {
       if (callout.group(2) != null) return [whole()]; // 可折叠不拆
       final kind = callout.group(1)!.trim().toLowerCase();
@@ -206,6 +207,10 @@ class NewEngineLongPostData {
 class NewEngineChunkSegment extends ConsumerWidget {
   final Post post;
   final int topicId;
+
+  /// 已叠加楼层起点与 chunk 相对偏移的绝对行号。
+  final int sourceFirstLine;
+  final bool sourceLastUnit;
   final bool selected;
   final bool highlight;
 
@@ -224,6 +229,8 @@ class NewEngineChunkSegment extends ConsumerWidget {
     super.key,
     required this.post,
     required this.topicId,
+    this.sourceFirstLine = 1,
+    this.sourceLastUnit = true,
     required this.selected,
     required this.highlight,
     required this.unit,
@@ -242,60 +249,77 @@ class NewEngineChunkSegment extends ConsumerWidget {
       '${(unit.cookedHtml.length / 1000).toStringAsFixed(1)}k',
     );
     Widget content = FluxdoRender(
-          cookedHtml: unit.cookedHtml,
-          parsedNodes: unit.nodes,
-          // 正文字号注入 contentFontScale(与 PostItem 短帖路径一致):
-          // 不传时 NodeFactory 回退 theme.bodyMedium,长帖 chunk 的字号设置失效。
-          baseTextStyle: MojianTheme.postBodyStyle(
-            theme,
-            ref.watch(preferencesProvider).contentFontScale,
+      cookedHtml: unit.cookedHtml,
+      parsedNodes: unit.nodes,
+      // 正文字号注入 contentFontScale(与 PostItem 短帖路径一致):
+      // 不传时 NodeFactory 回退 theme.bodyMedium,长帖 chunk 的字号设置失效。
+      baseTextStyle: MojianTheme.postBodyStyle(
+        theme,
+        ref.watch(preferencesProvider).contentFontScale,
+      ),
+      imageIndexOffset: unit.imageIndexOffset,
+      footnotesHtml: unit.footnotesHtml,
+      // 同 post 各 chunk 共享一个选区作用域 → 选区可跨 chunk。
+      selectionScopeId: post.id,
+      // chunk 文档序号 → 跨 chunk 选区按 (chunkIndex, docOrder) 逻辑序排序。
+      chunkIndex: chunkIndex,
+      // 被分块切断的单段落接缝:裁掉接缝侧外边距 → 与连续渲染无缝拼接。
+      trimTopMargin: unit.trimTopMargin,
+      trimBottomMargin: unit.trimBottomMargin,
+      linkHandler: callbacks.linkHandler,
+      emojiImageBuilder: callbacks.emojiImageBuilder,
+      mentionTapHandler: callbacks.mentionTapHandler,
+      imageContentBuilder: callbacks.imageContentBuilder,
+      codeBlockHighlighter: callbacks.codeBlockHighlighter,
+      codeBlockBuilder: callbacks.codeBlockBuilder,
+      quoteAvatarBuilder: callbacks.quoteAvatarBuilder,
+      footnoteTapHandler: callbacks.footnoteTapHandler,
+      lazyVideoBuilder: callbacks.lazyVideoBuilder,
+      iframeBuilder: callbacks.iframeBuilder,
+      localDateBuilder: callbacks.localDateBuilder,
+      mathBlockBuilder: callbacks.mathBlockBuilder,
+      mathInlineBuilder: callbacks.mathInlineBuilder,
+      oneboxBuilder: callbacks.oneboxBuilder,
+      imageGridBuilder: callbacks.imageGridBuilder,
+      policyBuilder: callbacks.policyBuilder,
+      pollBuilder: callbacks.pollBuilder,
+      chatTranscriptBuilder: callbacks.chatTranscriptBuilder,
+      svgBuilder: callbacks.svgBuilder,
+      videoBuilder: callbacks.videoBuilder,
+      audioBuilder: callbacks.audioBuilder,
+      onDownloadAttachment: callbacks.onDownloadAttachment,
+      // 自研选区恒开(外层系统 SelectionArea 已拆):未登录时
+      // onQuoteRequest 为 null,toolbar 自动降级只留「复制/复制引用」。
+      selectionEnabled: true,
+      onQuoteRequest: onQuoteSelection == null
+          ? null
+          : (plainText) => onQuoteSelection!(plainText, post),
+      onCopyQuoteRequest: (plainText) =>
+          QuoteSelectionHelper.copyQuoteToClipboard(
+            selectedText: plainText,
+            post: post,
+            topicId: topicId,
           ),
-          imageIndexOffset: unit.imageIndexOffset,
-          footnotesHtml: unit.footnotesHtml,
-          // 同 post 各 chunk 共享一个选区作用域 → 选区可跨 chunk。
-          selectionScopeId: post.id,
-          // chunk 文档序号 → 跨 chunk 选区按 (chunkIndex, docOrder) 逻辑序排序。
-          chunkIndex: chunkIndex,
-          // 被分块切断的单段落接缝:裁掉接缝侧外边距 → 与连续渲染无缝拼接。
-          trimTopMargin: unit.trimTopMargin,
-          trimBottomMargin: unit.trimBottomMargin,
-          linkHandler: callbacks.linkHandler,
-          emojiImageBuilder: callbacks.emojiImageBuilder,
-          mentionTapHandler: callbacks.mentionTapHandler,
-          imageContentBuilder: callbacks.imageContentBuilder,
-          codeBlockHighlighter: callbacks.codeBlockHighlighter,
-          codeBlockBuilder: callbacks.codeBlockBuilder,
-          quoteAvatarBuilder: callbacks.quoteAvatarBuilder,
-          footnoteTapHandler: callbacks.footnoteTapHandler,
-          lazyVideoBuilder: callbacks.lazyVideoBuilder,
-          iframeBuilder: callbacks.iframeBuilder,
-          localDateBuilder: callbacks.localDateBuilder,
-          mathBlockBuilder: callbacks.mathBlockBuilder,
-          mathInlineBuilder: callbacks.mathInlineBuilder,
-          oneboxBuilder: callbacks.oneboxBuilder,
-          imageGridBuilder: callbacks.imageGridBuilder,
-          policyBuilder: callbacks.policyBuilder,
-          pollBuilder: callbacks.pollBuilder,
-          chatTranscriptBuilder: callbacks.chatTranscriptBuilder,
-          svgBuilder: callbacks.svgBuilder,
-          videoBuilder: callbacks.videoBuilder,
-          audioBuilder: callbacks.audioBuilder,
-          onDownloadAttachment: callbacks.onDownloadAttachment,
-          // 自研选区恒开(外层系统 SelectionArea 已拆):未登录时
-          // onQuoteRequest 为 null,toolbar 自动降级只留「复制/复制引用」。
-          selectionEnabled: true,
-          onQuoteRequest: onQuoteSelection == null
-              ? null
-              : (plainText) => onQuoteSelection!(plainText, post),
-          onCopyQuoteRequest: (plainText) =>
-              QuoteSelectionHelper.copyQuoteToClipboard(
-                selectedText: plainText,
-                post: post,
-                topicId: topicId,
-              ),
-          onCopyToast: () =>
-              ToastService.showSuccess(context.l10n.common_copiedToClipboard),
-        );
+      onCopyToast: () =>
+          ToastService.showSuccess(context.l10n.common_copiedToClipboard),
+    );
+
+    if (VscodePostSource.enabled(context)) {
+      final richText = content;
+      content = VscodePostSource(
+        key: ValueKey('source-${post.id}-$chunkIndex'),
+        post: post,
+        topicId: topicId,
+        topicTitle: topicTitle,
+        onQuoteSelection: onQuoteSelection,
+        document: VscodeSourceDocument.forHtml(unit.cookedHtml),
+        firstLine: sourceFirstLine,
+        firstUnit: chunkIndex == 0,
+        lastUnit: sourceLastUnit,
+        fontScale: ref.watch(preferencesProvider).contentFontScale,
+        richTextBuilder: (_) => richText,
+      );
+    }
 
     // 首 chunk 弹幕层(与 PostItem 的短帖路径同一套开关判定)
     if (chunkIndex == 0) {
@@ -343,7 +367,9 @@ class NewEngineChunkSegment extends ConsumerWidget {
         highlight: highlight,
         showBottomBorder: false,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
+          padding: VscodePostSource.enabled(context)
+              ? EdgeInsets.zero
+              : const EdgeInsets.symmetric(horizontal: 16),
           child: content,
         ),
       ),
@@ -358,9 +384,8 @@ class NewEngineChunkSegment extends ConsumerWidget {
     );
     if (!danmakuPref) return null;
     final danmakuOff = ref.watch(
-      topicSessionProvider(
-        topicId,
-      ).select((s) => s.danmakuOffPostIds.contains(post.id)),
+      topicSessionProvider(topicId)
+          .select((s) => s.danmakuOffPostIds.contains(post.id)),
     );
     if (danmakuOff) return null;
     final blockedUsernames = ref.watch(
@@ -419,9 +444,8 @@ class LongPostHeaderSegment extends ConsumerWidget {
       ).isNotEmpty;
       if (hasBoosts) {
         final danmakuOff = ref.watch(
-          topicSessionProvider(
-            topicId,
-          ).select((s) => s.danmakuOffPostIds.contains(post.id)),
+          topicSessionProvider(topicId)
+              .select((s) => s.danmakuOffPostIds.contains(post.id)),
         );
         danmakuActive = !danmakuOff;
         onToggleDanmaku = () => ref
@@ -442,7 +466,9 @@ class LongPostHeaderSegment extends ConsumerWidget {
         topicId: topicId,
         isTopicOwner: isTopicOwner,
         showStamp: post.acceptedAnswer,
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+        padding: VscodePostSource.enabled(context)
+            ? EdgeInsets.zero
+            : const EdgeInsets.fromLTRB(16, 16, 16, 12),
         onJumpToPost: onJumpToPost,
         onMentionUser: onMentionUser,
         danmakuActive: danmakuActive,
@@ -531,9 +557,8 @@ class LongPostFooterSegment extends ConsumerWidget {
       ).isNotEmpty;
       if (hasBoosts) {
         danmakuActive = !ref.watch(
-          topicSessionProvider(
-            topicId,
-          ).select((s) => s.danmakuOffPostIds.contains(post.id)),
+          topicSessionProvider(topicId)
+              .select((s) => s.danmakuOffPostIds.contains(post.id)),
         );
       }
     }
@@ -544,13 +569,16 @@ class LongPostFooterSegment extends ConsumerWidget {
       showBottomDateSeparator: bottomDateSeparatorLabel != null,
       bottomDateSeparatorLabel: bottomDateSeparatorLabel,
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: VscodePostSource.enabled(context)
+            ? CrossAxisAlignment.stretch
+            : CrossAxisAlignment.start,
         children: [
-          if (PostSignatureBlock.shouldRender(
-            ref,
-            post,
-            categoryId: categoryId,
-          ))
+          if (!VscodePostSource.enabled(context) &&
+              PostSignatureBlock.shouldRender(
+                ref,
+                post,
+                categoryId: categoryId,
+              ))
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: PostSignatureBlock(post: post, categoryId: categoryId),
@@ -560,7 +588,9 @@ class LongPostFooterSegment extends ConsumerWidget {
             topicId: topicId,
             topicHasAcceptedAnswer: topicHasAcceptedAnswer,
             acceptedAnswers: acceptedAnswers,
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+            padding: VscodePostSource.enabled(context)
+                ? EdgeInsets.zero
+                : const EdgeInsets.fromLTRB(16, 12, 16, 16),
             highlightBoostUsername: highlightBoostUsername,
             danmakuActive: danmakuActive,
             onReply: onReply,
