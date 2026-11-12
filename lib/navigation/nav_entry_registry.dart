@@ -8,6 +8,7 @@ import '../pages/bookmarks_page.dart';
 import '../pages/browsing_history_page.dart';
 import '../pages/chat/chat_list_page.dart';
 import '../pages/drafts_page.dart';
+import '../pages/my_browser_page.dart';
 import '../pages/private_messages_page.dart';
 import '../pages/profile_page.dart';
 import '../pages/seeking_page.dart';
@@ -113,6 +114,16 @@ class NavEntryRegistry {
         label: (ctx) => ctx.l10n.seeking_title,
         pageBuilder: (ctx, isActive) => SeekingPage(isActive: isActive),
         requiresLogin: true,
+      ),
+      // 内置浏览器主页（地址栏 + 收藏 / 历史 / 下载）：常用它开公益站
+      // 签到的佬友希望一步直达，不必每次从「我的」里点进去。不要求登录。
+      NavEntry(
+        id: NavEntryIds.browser,
+        kind: NavEntryKind.page,
+        iconData: Symbols.language_rounded,
+        selectedIconData: Symbols.language_rounded,
+        label: (ctx) => ctx.l10n.myBrowser_title,
+        pageBuilder: (ctx, isActive) => const MyBrowserPage(),
       ),
       NavEntry(
         id: NavEntryIds.notifications,

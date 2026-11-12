@@ -33,7 +33,13 @@ class MyBrowserPage extends ConsumerWidget {
         title: Text(context.l10n.myBrowser_title),
       ),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        // 作为底栏页时底栏盖在 body 上（extendBody），底部让出它的高度
+        padding: EdgeInsets.fromLTRB(
+          16,
+          16,
+          16,
+          16 + MediaQuery.paddingOf(context).bottom,
+        ),
         children: [
           // 地址栏
           _AddressBar(
