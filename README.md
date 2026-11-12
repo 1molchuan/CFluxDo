@@ -37,7 +37,7 @@ CFluxDo 源自 FluxDO 0.2.28，已脱离 fork 关系独立维护，并持续同�
 
 - **连接方式**：上面的本地优选替代了对加速服务端的依赖；原有的 DoH 加速线路降为兜底。
 - **弹盾与掉登录**：针对 Cloudflare 验证页、`cf_clearance` 与登录 Cookie `_t` 的轮换做了一系列修复，详见各版本的 Release 说明。
-- **界面**：默认「墨笺」阅读风格（纸色底、宋体标题、细线分隔）；原来的界面保留为「经典」，在「我的 → 应用设置 → 外观 → 界面风格」切换。
+- **界面**：默认「墨笺」阅读风格（纸色底、宋体标题、细线分隔）；原来的界面保留为「经典」，另有「Claude」风格，Windows 上还有「VS Code」风格（活动栏、资源管理器式话题列表、带行号的源码式正文）。在「我的 → 应用设置 → 外观 → 界面风格」切换。
 - **平台**：以 Android 为主；Windows、Linux 桌面端为预览版，和 Android 共用同一套连接层，视频楼层播放等功能还不完整。移除了 iOS、macOS、Web 的平台代码，以及 Cronet、rhttp 两个网络引擎和 Firebase 崩溃上报，崩溃排查依靠应用内的日志导出。App 的请求只有一条出路：经本地网关（`core/doh_proxy`）发出；登录或验证反复失败时，可以在「高级网络设置 → 兼容模式」把主站接口请求交给内置浏览器发送。
 - **上游补丁**：挑选上游尚未合并的 PR 一并接入，保留原作者署名。
 
@@ -63,9 +63,9 @@ cd CFluxDo
 dart run melos bootstrap                 # 初始化 workspace
 dart run tool/project_prep.dart app      # pub get、l10n 生成、代理证书同步，等价于 just sync
 dart tool/flutterw.dart build apk --release --target-platform android-arm64 \
-  --build-name 1.3.2 --build-number 2026111213
+  --build-name 1.3.3 --build-number 2026111222
 dart tool/flutterw.dart build apk --release --target-platform android-arm \
-  --build-name 1.3.2 --build-number 2026111213
+  --build-name 1.3.3 --build-number 2026111222
 ```
 
 `flutterw` 会在构建前用 `cargo ndk` 编译对应架构的 Rust 库并放进 `android/app/src/main/jniLibs/`。两个架构各出一个 APK，不出合并包。
