@@ -2586,14 +2586,20 @@ class _UiStyleSection extends ConsumerWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 820),
+          constraints: BoxConstraints(
+            maxWidth: ThemeState.supportsVscode ? 820 : 620,
+          ),
           child: LayoutBuilder(
             builder: (context, constraints) {
               final count = ThemeState.supportsVscode ? 4 : 3;
-              final columns = math.min(
-                count,
-                math.max(1, ((constraints.maxWidth + 12) / 172).floor()),
-              );
+              // 三张卡（没有 VS Code 的平台）照旧排成一行，手机上不折成 2 + 1；
+              // 四张卡才按可用宽度换行。
+              final columns = ThemeState.supportsVscode
+                  ? math.min(
+                      count,
+                      math.max(1, ((constraints.maxWidth + 12) / 172).floor()),
+                    )
+                  : count;
               final width =
                   (constraints.maxWidth - 12 * (columns - 1)) / columns;
               return Wrap(
