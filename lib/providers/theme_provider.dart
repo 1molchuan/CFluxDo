@@ -155,7 +155,12 @@ class ThemeState {
   bool get isVscode => uiStyle == UiStyle.vscode;
 
   /// VS Code 只支持原生 Windows；读取备份和程序写入时使用同一限制。
-  static bool get supportsVscode => !kIsWeb && Platform.isWindows;
+  static bool get supportsVscode =>
+      debugSupportsVscodeOverride ?? (!kIsWeb && Platform.isWindows);
+
+  /// 测试用：在非 Windows 主机上跑 VS Code 风格的用例（用完置回 null）
+  @visibleForTesting
+  static bool? debugSupportsVscodeOverride;
 
   static UiStyle supportedUiStyle(UiStyle style) =>
       style == UiStyle.vscode && !supportsVscode ? UiStyle.mojian : style;

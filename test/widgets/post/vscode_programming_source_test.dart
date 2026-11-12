@@ -197,6 +197,9 @@ void main() {
   });
 
   testWidgets('设置仅在 VS Code 下显示，语言按需出现且重新创建后保留', (tester) async {
+    // VS Code 风格只在 Windows 上提供；这条用例要在任何主机上都能跑
+    ThemeState.debugSupportsVscodeOverride = true;
+    addTearDown(() => ThemeState.debugSupportsVscodeOverride = null);
     SharedPreferences.setMockInitialValues({'ui_style': 'vscode'});
     final prefs = await SharedPreferences.getInstance();
     var container = await _pump(tester, prefs: prefs, settings: true);
