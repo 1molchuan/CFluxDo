@@ -30,6 +30,7 @@ import 'accel_doh_auth_service.dart';
 import 'accel_doh_nodes.dart';
 import 'cfhub_api.dart';
 import 'cfhub_probe_auth_service.dart';
+import 'custom_node_input.dart';
 import 'doh_resolver.dart';
 import 'webview_mitm_policy.dart';
 import '../doh_proxy/proxy_leaf_trust.dart';
@@ -95,6 +96,7 @@ class NetworkSettings {
     this.browserTls = false,
     this.selectMode = CfSelectMode.localAtlas,
     this.shareMeasurements = false,
+    this.customNodes = const [],
   });
 
   final bool dohEnabled;
@@ -137,6 +139,10 @@ class NetworkSettings {
   /// 「帮助优选」：把本地竞速的测量结果上报 cfhub（默认关，需 Connect 授权拿探针令牌）
   final bool shareMeasurements;
 
+  /// 自定义节点：用户自己填的 Cloudflare IP / 优选域名（已规范化）。有能连上的就优先用
+  /// 它们里最快的，都连不上再按平常的规则优选
+  final List<String> customNodes;
+
   NetworkSettings copyWith({
     bool? dohEnabled,
     String? selectedServerUrl,
@@ -150,6 +156,7 @@ class NetworkSettings {
     bool? browserTls,
     CfSelectMode? selectMode,
     bool? shareMeasurements,
+    List<String>? customNodes,
   }) {
     return NetworkSettings(
       dohEnabled: dohEnabled ?? this.dohEnabled,
@@ -164,6 +171,7 @@ class NetworkSettings {
       browserTls: browserTls ?? this.browserTls,
       selectMode: selectMode ?? this.selectMode,
       shareMeasurements: shareMeasurements ?? this.shareMeasurements,
+      customNodes: customNodes ?? this.customNodes,
     );
   }
 }
@@ -238,6 +246,9 @@ class NetworkSettingsService {
 
   /// 「帮助优选」开关
   static const _selectShareKey = 'doh_select_share';
+
+  /// 自定义节点清单（规范化后的 IP / 域名，见 [CustomNodeInput]）
+  static const _customNodesKey = 'doh_custom_nodes';
 
   /// Rust 的优选状态 JSON（赢家 + ECH 钥匙），启动时回灌给 Rust
   static const _selectStateKey = 'doh_select_state';
@@ -497,6 +508,9 @@ class NetworkSettingsService {
     final dohEnabled = prefs.getBool(_dohEnabledKey) ?? true;
     final selectMode = CfSelectMode.fromWire(prefs.getString(_selectModeKey));
     final shareMeasurements = prefs.getBool(_selectShareKey) ?? false;
+    final customNodes = CustomNodeInput.sanitize(
+      prefs.getStringList(_customNodesKey) ?? const [],
+    );
     final selected = prefs.getString(_dohSelectedKey) ?? _defaultServerUrl;
     final customRaw = prefs.getString(_dohCustomKey);
     final custom = _decodeServers(customRaw);
@@ -527,6 +541,7 @@ class NetworkSettingsService {
       browserTls: browserTls,
       selectMode: selectMode,
       shareMeasurements: shareMeasurements,
+      customNodes: customNodes,
     );
     final activeUrl = _activeServerUrl;
     _resolver = DohResolver(
@@ -753,6 +768,23 @@ class NetworkSettingsService {
     if (current.selectMode == mode) return;
     notifier.value = notifier.value.copyWith(selectMode: mode);
     await prefs.setString(_selectModeKey, mode.wire);
+    _scheduleApplyProxyState();
+    _touch();
+  }
+
+  /// 改自定义节点清单；网关按新清单重启，重启后引擎先照常用着上次的节点，
+  /// 后台把清单测一遍再换过去（见 Rust 侧 `custom_rerace_due`）
+  Future<void> setCustomNodes(List<String> nodes) async {
+    final prefs = _prefs;
+    if (prefs == null) return;
+    final next = CustomNodeInput.sanitize(nodes);
+    if (listEquals(next, current.customNodes)) return;
+    notifier.value = notifier.value.copyWith(customNodes: next);
+    if (next.isEmpty) {
+      await prefs.remove(_customNodesKey);
+    } else {
+      await prefs.setStringList(_customNodesKey, next);
+    }
     _scheduleApplyProxyState();
     _touch();
   }
@@ -986,6 +1018,7 @@ class NetworkSettingsService {
         // 本地动态优选：只在 Android / Linux / Windows 网关模式下开；上次的赢家状态回灌给 Rust
         selectMode: selectorEligible ? current.selectMode.wire : 'off',
         selectStateJson: prefsForSeed?.getString(_selectStateKey),
+        customNodes: selectorEligible ? current.customNodes : const [],
         shareMeasurements:
             current.shareMeasurements &&
             CfhubProbeAuthService.instance.token != null,

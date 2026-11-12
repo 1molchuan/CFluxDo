@@ -31,6 +31,8 @@ CFluxDo 源自 FluxDO 0.2.28，已脱离 fork 关系独立维护，并持续同�
 
 当前线路显示在「应用设置 → 网络设置」最上方；「高级网络设置 → 节点优选」可以改为「只用 atlas 池」。两种方式都拿不到候选时，自动回退到原有的 DoH 加速线路，仍然连不上则回退系统 DNS，不会因此打不开 App。
 
+**自定义节点**：自己测出过更快的 Cloudflare IP 或优选域名，可以填到「高级网络设置 → 节点优选 → 自定义节点」（最多 8 个）。只要其中有能连上的，就优先用里面最快的那个，池里的候选再快也不抢；都连不上时照常按上面的规则优选。只接受 Cloudflare 网段内的地址，第三方中转请用上游代理；域名经公共 DNS 解析，同样做投毒检查。
+
 ## 与 FluxDO 的差异
 
 - **连接方式**：上面的本地优选替代了对加速服务端的依赖；原有的 DoH 加速线路降为兜底。
@@ -43,6 +45,7 @@ CFluxDo 源自 FluxDO 0.2.28，已脱离 fork 关系独立维护，并持续同�
 
 - 本地优选向公共 DNS 发出的只是域名查询本身，不附带 Cookie、令牌等任何账号信息，也不查询 `linux.do`。
 - **「帮助优选」默认关闭**。打开后 App 会把本来就做的握手测量结果（候选节点地址、握手耗时、是否成功）分享给社区节点站 [cfhub](https://github.com/1molchuan/cfhub)，帮同运营商的其他用户更快找到节点。开启需要用 linux.do 账号通过 Connect 授权 cfhub（与在 cfhub 网页上加入相同，需信任等级 1 以上）；分享内容不含 Cookie、令牌、设备标识或浏览记录；cfhub 记录你的 linux.do 用户名、信任等级和上报归属的运营商与地区，不保存你的完整 IP 地址；随时可关，关闭即作废授权。
+- 自定义节点只存在本机；它们的测速结果不随「帮助优选」分享。
 - 首次启动 1.1 会弹一次说明，列出以上内容。
 - 没有崩溃上报、统计或任何遥测 SDK。论坛流量由手机直接连接 linux.do。
 
@@ -73,7 +76,7 @@ dart tool/flutterw.dart build apk --release --target-platform android-arm \
 
 子模块：
 
-- `core/doh_proxy`：Rust 实现的本地优选、ECH、DoH 代理与本地网关，来自 [1molchuan/fluxdo_doh](https://github.com/1molchuan/fluxdo_doh) 的 `cfluxdo` 分支。`cargo run --example race --features ech` 可以在电脑上跑一轮竞速看结果。
+- `core/doh_proxy`：Rust 实现的本地优选、ECH、DoH 代理与本地网关，来自 [1molchuan/fluxdo_doh](https://github.com/1molchuan/fluxdo_doh) 的 `cfluxdo` 分支。`cargo run --example race --features ech` 可以在电脑上跑一轮竞速看结果（加 `-- --custom <IP或域名,...>` 带上自定义节点）。
 - `packages/fluxdo_render`：帖子渲染包，来自 [1molchuan/fluxdo_render](https://github.com/1molchuan/fluxdo_render) 的 `cfluxdo` 分支（上游渲染包的 fork）
 
 更多开发细节见 [docs/development.md](docs/development.md)。部分文档仍是上游多平台时期的内容，正在整理。

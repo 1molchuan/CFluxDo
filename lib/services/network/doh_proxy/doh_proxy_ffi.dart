@@ -125,6 +125,71 @@ class DohPublicDohStat {
   String get summary => '$label $accepted/$rejected/$negative';
 }
 
+/// 自定义节点清单里一条的现状（优选状态 `custom.nodes` 的一项）
+class DohCustomNodeStatus {
+  const DohCustomNodeStatus({
+    required this.entry,
+    required this.state,
+    this.ip,
+    this.latencyMs,
+    this.detail,
+    this.active = false,
+  });
+
+  /// 清单里的原文（IP 或域名）
+  final String entry;
+
+  /// `ok` / `failed` / `not_cloudflare` / `no_family` / `demoted` /
+  /// `unresolved` / `invalid` / `pending`
+  final String state;
+
+  /// 通过的（域名取最快的那个）或探过的地址
+  final String? ip;
+  final int? latencyMs;
+
+  /// 没通过时的失败类型（如 `tcp_timeout`）
+  final String? detail;
+
+  /// 现在用的就是这一条
+  final bool active;
+
+  bool get isOk => state == 'ok';
+
+  static List<DohCustomNodeStatus> listFromJson(Object? raw) {
+    if (raw is! Map) return const [];
+    final nodes = raw['nodes'];
+    if (nodes is! List) return const [];
+    final out = <DohCustomNodeStatus>[];
+    for (final item in nodes) {
+      if (item is! Map) continue;
+      final entry = item['entry']?.toString() ?? '';
+      if (entry.isEmpty) continue;
+      final ip = item['ip']?.toString();
+      final detail = item['detail']?.toString();
+      out.add(
+        DohCustomNodeStatus(
+          entry: entry,
+          state: item['state']?.toString() ?? 'pending',
+          ip: ip != null && ip.isNotEmpty ? ip : null,
+          latencyMs: (item['latency_ms'] as num?)?.toInt(),
+          detail: detail != null && detail.isNotEmpty ? detail : null,
+          active: item['active'] == true,
+        ),
+      );
+    }
+    return out;
+  }
+
+  Map<String, dynamic> toJson() => {
+    'entry': entry,
+    'state': state,
+    'ip': ip,
+    'latency_ms': latencyMs,
+    'detail': detail,
+    'active': active,
+  };
+}
+
 /// 本地动态优选的运行状态（`doh_proxy_select_status` 的解析结果）
 class DohSelectStatus {
   const DohSelectStatus({
@@ -141,6 +206,8 @@ class DohSelectStatus {
     this.share = false,
     this.publicDoh = const [],
     this.family,
+    this.customNodes = const [],
+    this.busy = false,
   });
 
   /// 优选模式（如 `off` / `local_atlas`）
@@ -183,6 +250,15 @@ class DohSelectStatus {
   /// `affinity`、这个网络上的 IPv6 竞速结论 `check`（旧版原生库没有，为 null）
   final Map<String, dynamic>? family;
 
+  /// 自定义节点清单每一条的现状（没配或旧版原生库为空）
+  final List<DohCustomNodeStatus> customNodes;
+
+  /// 正在竞速或校验（含不改阶段的后台竞速）
+  final bool busy;
+
+  /// 现在的节点是用户自己填的
+  bool get winnerIsCustom => source == 'custom';
+
   /// 有过答案的端点（诊断导出只列这些）
   List<DohPublicDohStat> get activePublicDoh =>
       publicDoh.where((stat) => !stat.isEmpty).toList(growable: false);
@@ -210,6 +286,8 @@ class DohSelectStatus {
       family: map['family'] is Map
           ? Map<String, dynamic>.from(map['family'] as Map)
           : null,
+      customNodes: DohCustomNodeStatus.listFromJson(map['custom']),
+      busy: map['busy'] == true,
     );
   }
 
@@ -231,6 +309,11 @@ class DohSelectStatus {
     'share': share,
     'public_doh': [for (final stat in publicDoh) stat.toJson()],
     if (family != null) 'family': family,
+    if (customNodes.isNotEmpty)
+      'custom': {
+        'nodes': [for (final node in customNodes) node.toJson()],
+      },
+    if (busy) 'busy': true,
   };
 }
 
@@ -737,6 +820,7 @@ class DohProxyFfi {
     String? dohNodeListJson,
     String selectMode = 'off',
     String? selectStateJson,
+    List<String> customNodes = const [],
     bool shareMeasurements = false,
     String? atlasRoutesUrl,
     List<Map<String, Object>> publicDoh = const [],
@@ -810,6 +894,8 @@ class DohProxyFfi {
       'select_mode': selectMode,
       if (selectStateJson != null && selectStateJson.isNotEmpty)
         'select_state_json': selectStateJson,
+      // 用户自己填的节点：有能用的优先用它们
+      if (customNodes.isNotEmpty) 'custom_nodes': customNodes,
       'share_measurements': shareMeasurements,
       if (atlasRoutesUrl != null && atlasRoutesUrl.isNotEmpty)
         'atlas_routes_url': atlasRoutesUrl,

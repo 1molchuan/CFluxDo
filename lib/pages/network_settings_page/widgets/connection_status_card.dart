@@ -263,6 +263,8 @@ class _ConnectionStatusCardState extends State<ConnectionStatusCard> {
               l10n.netStatus_node(ip),
               family,
               if (latency != null && latency > 0) '$latency ms',
+              // 用的是用户自己填的节点
+              if (status?.winnerIsCustom ?? false) l10n.customNodes_title,
             ].join(' · '),
           );
         }
