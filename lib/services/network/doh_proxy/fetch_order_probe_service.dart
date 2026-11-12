@@ -110,7 +110,7 @@ class FetchOrderProbeService {
   static bool _defaultEligible() {
     if (!Platform.isAndroid) return false;
     final settings = NetworkSettingsService.instance;
-    return settings.isGatewayMode &&
+    return settings.relaysWebViewThroughGateway &&
         settings.current.h2Mitm &&
         settings.current.browserTls;
   }

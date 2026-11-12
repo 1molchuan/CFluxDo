@@ -100,7 +100,8 @@ class WebViewSettings {
       final host = challenge.protectionSpace.host;
       final der =
           challenge.protectionSpace.sslCertificate?.x509Certificate?.encoded;
-      final trusted = NetworkSettingsService.instance.isGatewayMode &&
+      final trusted =
+          NetworkSettingsService.instance.relaysWebViewThroughGateway &&
           ProxyLeafTrust.isProxyLeaf(host, der);
       return ServerTrustAuthResponse(
         action: trusted
@@ -108,9 +109,9 @@ class WebViewSettings {
             : ServerTrustAuthResponseAction.CANCEL,
       );
     }
-    // Android/macOS: gateway MITM 模式下放行代理 CA 证书。
-    // iOS: 使用隧道模式（非 MITM），不会触发代理 CA 信任问题。
-    if (NetworkSettingsService.instance.isGatewayMode) {
+    // Android/macOS: 网关中转内置网页（MITM）时放行代理 CA 证书（含 VPN 让路时只为
+    // 浏览器指纹起的网关）。iOS: 使用隧道模式（非 MITM），不会触发代理 CA 信任问题。
+    if (NetworkSettingsService.instance.relaysWebViewThroughGateway) {
       return ServerTrustAuthResponse(
         action: ServerTrustAuthResponseAction.PROCEED,
       );

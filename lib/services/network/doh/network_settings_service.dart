@@ -321,15 +321,16 @@ class NetworkSettingsService {
   NetworkSettings get current => notifier.value;
 
   /// 当前是否使用 gateway（反向代理）模式
-  /// Gateway 模式：DOH 开启 + 用户开关开启 + 代理运行中。内置网页也经它中转（MITM），
-  /// WebView 的证书放行以此为准
+  /// Gateway 模式：DOH 开启 + 用户开关开启 + 代理运行中（加速网关）
   bool get isGatewayMode =>
       current.dohEnabled &&
       current.gatewayEnabled &&
       _rustProxyService.isRunning;
 
   /// 加速关着（含 VPN 自动让路）、也没有上游代理时，安卓仍为浏览器指纹起本地网关：
-  /// 系统 DNS（开着 VPN 就是 VPN 的）、不做 ECH 和优选，内置网页不经它。
+  /// 系统 DNS（开着 VPN 就是 VPN 的）、不做 ECH 和优选。内置网页也经它中转（MITM），
+  /// 和原生请求按同一份采自 WebView 的指纹出去，采样（握手、h2 前言、头顺序、Client
+  /// Hints）也照常进行。
   ///
   /// CF 对原生连接收紧的站点（2026-11-10 实测 IDC Flare）认握手不认 cf_clearance：
   /// 同一枚值浏览器指纹的连接 200，Dart 自己握手的连接（含关掉指纹的网关）验证多少轮
@@ -345,6 +346,10 @@ class NetworkSettingsService {
   bool get routesAppThroughGateway =>
       isGatewayMode ||
       (fingerprintOnlyGateway && _rustProxyService.isRunning);
+
+  /// 内置网页经本地网关中转（MITM）：两种网关都中转，WebView 的证书放行以此为准，
+  /// WebView 主动采样也只在这时能跑
+  bool get relaysWebViewThroughGateway => routesAppThroughGateway;
 
   /// 本地动态优选只在 Android / Linux / Windows 网关模式下跑：DoH 开着、没有上游代理、网关开关开着
   /// （网关/上游的判断和 [_applyProxyState] 里启动代理时用的一致）
@@ -441,11 +446,12 @@ class NetworkSettingsService {
   }
 
   // Rust 代理同时服务 App 自己的请求（网关）和 WebView（MITM 代理）
-  /// 需要本地代理中转（内置网页也经它）：加速或上游代理开着
+  /// 加速或上游代理开着，需要本地代理
   bool get shouldRunLocalProxy =>
       current.dohEnabled || _proxyService.current.isValid;
 
-  /// 本地网关要不要跑：中转之外，还有只为浏览器指纹的情形（见 [fingerprintOnlyGateway]）
+  /// 本地网关要不要跑：加速或上游代理之外，还有只为浏览器指纹起的情形（见 [fingerprintOnlyGateway]）。
+  /// 跑着的时候内置网页都经它
   bool get _shouldRunProxyProcess =>
       shouldRunLocalProxy || fingerprintOnlyGateway;
 
@@ -888,16 +894,14 @@ class NetworkSettingsService {
             ? SystemProxyService.instance.effectiveProxyUrl
             : null,
       );
-      // 只为浏览器指纹起的网关不中转内置网页，也就没有 MITM
-      final fingerprintOnly = fingerprintOnlyGateway;
-      final mitmConnect =
-          !fingerprintOnly &&
-          WebViewMitmPolicy.useMitmConnect(
-            isWindows: Platform.isWindows,
-            webViewAdapterEnabled: webViewAdapterEnabled,
-          );
+      // 只为浏览器指纹起的网关同样中转内置网页（MITM）：WebView 的握手、h2 前言、头顺序
+      // 只有这样才采得到，内置网页和原生请求按同一个指纹出去
+      final mitmConnect = WebViewMitmPolicy.useMitmConnect(
+        isWindows: Platform.isWindows,
+        webViewAdapterEnabled: webViewAdapterEnabled,
+      );
       final useGateway =
-          fingerprintOnly ||
+          fingerprintOnlyGateway ||
           WebViewMitmPolicy.useGatewayMode(
             isWindows: Platform.isWindows,
             dohEnabled: current.dohEnabled,
@@ -1173,8 +1177,7 @@ class NetworkSettingsService {
   }
 
   Future<void> _applyWebViewProxy() async {
-    if (!shouldRunLocalProxy) {
-      // 只为浏览器指纹起的网关：内置网页照常直连（VPN 开着就走 VPN），之前设过的代理要撤掉
+    if (!_shouldRunProxyProcess) {
       await _clearWebViewProxy();
       return;
     }

@@ -198,7 +198,7 @@
   "vpnToggle_pausedBoth": "連接加速和上游代理已暫停，VPN 斷開後自動恢復",
   "vpnToggle_pausedAccel": "連接加速已暫停，VPN 斷開後自動恢復",
   "vpnToggle_pausedProxy": "上游代理已暫停，VPN 斷開後自動恢復",
-  "vpnToggle_fingerprintKept": "App 的請求仍經本機網關按瀏覽器指紋發出（只換握手，DNS 和線路都隨 VPN）",
+  "vpnToggle_fingerprintKept": "App 和內置網頁的請求仍經本機網關按瀏覽器指紋發出（只換握手，DNS 和線路都隨 VPN）",
   "vpnToggle_accelResumed": "這個 VPN 沒有接管論壇的連接（暫停加速後一直連不上），本次 VPN 期間已恢復連接加速，斷開後照常讓路",
   "vpnToggle_accelResumedToast": "VPN 下連不上論壇，已恢復連接加速"
 }
