@@ -622,7 +622,11 @@ class _ReplySheetState extends ConsumerState<ReplySheet> {
             centerTitle: false,
             automaticallyImplyLeading: false,
             leading: CloseButton(
-              onPressed: () => _closeWithCurrentContent(null),
+              // 弹层照旧走 maybePop（表情面板开着时先收面板，再点才关）；
+              // 嵌入式面板没有自己的路由，直接收尾。
+              onPressed: widget.embedded
+                  ? () => _closeWithCurrentContent(null)
+                  : () => Navigator.of(context).maybePop(),
             ),
             title: separateTarget
                 ? Text(context.l10n.common_reply)
