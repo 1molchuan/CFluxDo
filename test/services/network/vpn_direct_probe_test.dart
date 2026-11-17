@@ -55,7 +55,13 @@ void main() {
     // 没有缓存：初值按 VPN 网卡（旧行为）
     expect(NetworkSettingsService.storedDohEnabled(prefs), isFalse);
     await settle();
-    expect(probed.single.path, '/srv/status');
+    // 论坛主域 + linux.do 的 ldstatic 消息推送域与 CDN 域
+    expect(probed.map((u) => u.host).toSet(), {
+      'linux.do',
+      'ping.ldstatic.com',
+      'cdn.ldstatic.com',
+    });
+    expect(probed.firstWhere((u) => u.host == 'linux.do').path, '/srv/status');
     expect(toggle.directReachableNotifier.value, isFalse);
     expect(NetworkSettingsService.storedDohEnabled(prefs), isTrue);
     expect(toggle.isDohSuppressed, isFalse);
@@ -110,10 +116,35 @@ void main() {
     answer = () async => true;
     await toggle.syncInitialState(wifi);
     await settle();
+    final once = probed.length;
     toggle.handleConnectivityChanged(wifi);
     toggle.handleConnectivityChanged(wifi);
     await settle();
-    expect(probed, hasLength(1));
+    expect(probed, hasLength(once));
+  });
+
+  test('主域通但消息推送域不通 → 不让路（规则模式漏了 ldstatic 子域）', () async {
+    VpnAutoToggleService.directProber = (url) async {
+      probed.add(url);
+      return url.host != 'ping.ldstatic.com';
+    };
+    await toggle.syncInitialState(wifiVpn);
+    await settle();
+    expect(toggle.directReachableNotifier.value, isFalse);
+    expect(NetworkSettingsService.storedDohEnabled(prefs), isTrue);
+  });
+
+  test('探测目标：站点设置里的推送域、CDN 域去重并入', () {
+    final targets = VpnAutoToggleService.probeTargets(
+      forumHost: 'idcflare.com',
+      isLinuxDo: false,
+      longPollingBaseUrl: 'https://ping.example.com/',
+      cdnUrl: 'https://idcflare.com',
+    );
+    expect(targets.map((u) => u.toString()), [
+      'https://idcflare.com/srv/status',
+      'https://ping.example.com/',
+    ]);
   });
 
   test('实测能直连但实际一直连不上 → 恢复加速，并把这个网络记成不能直连', () async {

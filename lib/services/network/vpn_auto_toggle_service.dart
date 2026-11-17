@@ -9,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../l10n/s.dart';
 import '../app_logger.dart';
 import '../connectivity_service.dart';
+import '../preloaded_data_service.dart';
 import '../local_notification_service.dart';
 import '../site_context.dart';
 import '../toast_service.dart';
@@ -620,6 +621,29 @@ class VpnAutoToggleService {
 
   String get _probeKey => '$_networkSig@${SiteContext.current.host}';
 
+  /// 要测的地址：论坛主域，加上站点设置里的消息推送域（long_polling_base_url）和
+  /// CDN 域。只测主域不够：规则模式的梯子可能放行 linux.do 和图片 CDN、却漏了
+  /// ping.ldstatic.com（2026-11-17 模拟器经 Mac 出口实测，让路后实时消息全部超时）。
+  /// 启动早期站点设置还没加载，linux.do 先按已知的 ldstatic 域补上
+  @visibleForTesting
+  static List<Uri> probeTargets({
+    required String forumHost,
+    required bool isLinuxDo,
+    String? longPollingBaseUrl,
+    String? cdnUrl,
+  }) {
+    final hosts = <String>{forumHost.toLowerCase()};
+    for (final url in [longPollingBaseUrl, cdnUrl]) {
+      final host = url == null ? null : Uri.tryParse(url)?.host.toLowerCase();
+      if (host != null && host.isNotEmpty) hosts.add(host);
+    }
+    if (isLinuxDo) hosts.addAll(const ['ping.ldstatic.com', 'cdn.ldstatic.com']);
+    return [
+      for (final host in hosts)
+        Uri.https(host, host == forumHost.toLowerCase() ? '/srv/status' : '/'),
+    ];
+  }
+
   Map<String, dynamic> _readProbeCache() {
     if (!_prefsReady) return {};
     try {
@@ -678,16 +702,35 @@ class VpnAutoToggleService {
     final generation = ++_probeGeneration;
     final sig = _networkSig;
     final host = SiteContext.current.host;
+    final preloaded = PreloadedDataService();
+    final targets = probeTargets(
+      forumHost: host,
+      isLinuxDo: SiteContext.isLinuxDo,
+      longPollingBaseUrl: preloaded.longPollingBaseUrl,
+      cdnUrl: preloaded.cdnUrl,
+    );
     probingNotifier.value = true;
     final watch = Stopwatch()..start();
-    final ok = await directProber(Uri.https(host, '/srv/status'));
+    // 并行测，全部能直连才算：任何一个连不上，让路后那部分功能就坏了
+    final results = await Future.wait([
+      for (final uri in targets) directProber(uri),
+    ]);
+    final failed = [
+      for (var i = 0; i < targets.length; i++)
+        if (!results[i]) targets[i].host,
+    ];
+    final ok = failed.isEmpty;
     if (generation != _probeGeneration || sig != _networkSig) return;
     probingNotifier.value = false;
     _probedAt = DateTime.now();
     directReachableNotifier.value = ok;
     await _storeProbe(ok);
     AppLogger.info(
-      '实测系统网络${ok ? '能' : '不能'}直连 $host（${watch.elapsedMilliseconds} ms，网络 $sig）',
+      ok
+          ? '实测系统网络能直连 ${targets.map((u) => u.host).join('、')}'
+                '（${watch.elapsedMilliseconds} ms，网络 $sig）'
+          : '实测系统网络不能直连：${failed.join('、')} 连不上'
+                '（共测 ${targets.length} 个，${watch.elapsedMilliseconds} ms，网络 $sig）',
       tag: 'VpnAutoToggle',
     );
     _recomputeYield();
