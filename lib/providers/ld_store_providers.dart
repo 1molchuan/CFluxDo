@@ -2,10 +2,21 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../services/ld_store/ld_store_models.dart';
 import '../services/ld_store/ld_store_service.dart';
+import '../services/ld_store/ld_store_shop_models.dart';
+import '../services/ld_store/ld_store_shop_service.dart';
 import '../services/site_context.dart';
 import 'core_providers.dart';
 
 final ldStoreServiceProvider = Provider((ref) => LdStoreService());
+
+/// 商城浏览 / 下单 / 订单接口。
+final ldShopServiceProvider = Provider((ref) => LdShopService());
+
+/// 商品分类（公开，不需要授权）。
+final ldShopCategoriesProvider =
+    FutureProvider.autoDispose<List<LdShopCategory>>((ref) {
+      return ref.read(ldShopServiceProvider).fetchCategories();
+    });
 
 /// 商城公开统计（在售、今日成交、小店数），不需要授权。
 final ldStoreStatsProvider = FutureProvider.autoDispose<LdStoreStats?>((
@@ -76,6 +87,28 @@ class LdStoreSessionNotifier extends AsyncNotifier<LdStoreSession?> {
 
   /// 授权成功（凭据已存好）后重新读取。
   Future<void> adopt() => refresh();
+
+  /// 当前可用的凭据（未授权、已失效或还没读出来时为 null）。
+  ///
+  /// 正在读取时会等它读完，不会因为页面刚打开就当成未授权。
+  Future<LdStoreToken?> currentToken() async {
+    try {
+      final token = (await future)?.token;
+      return token == null || token.isExpired() ? null : token;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 商城接口说凭据无效（401 / 认证错误码）：丢掉凭据，入口卡显示「授权已过期」。
+  Future<void> markExpired() async {
+    _lastAccount = null;
+    final username = ref.read(currentUserProvider).value?.username;
+    if (username != null) {
+      await ref.read(ldStoreServiceProvider).discardToken(username);
+    }
+    state = AsyncError(const LdStoreAuthExpiredException(), StackTrace.current);
+  }
 
   Future<void> signOut() async {
     final username = ref.read(currentUserProvider).value?.username;

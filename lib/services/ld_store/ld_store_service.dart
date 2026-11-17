@@ -68,7 +68,7 @@ class LdStoreService {
     SecretStore? secretStore,
     LdStoreGap? gap,
     DateTime Function()? clock,
-  }) : _storeDio = storeDio ?? _createStoreDio(),
+  }) : _storeDio = storeDio ?? createStoreDio(),
        _forumDioOverride = forumDio,
        _secretStore = secretStore ?? SystemSecretStore.instance,
        _gap = gap ?? OAuthFlowHelper.humanGap,
@@ -111,7 +111,8 @@ class LdStoreService {
 
   Dio get _forum => _forumDioOverride ?? (_forumDio ??= DiscourseDio.create());
 
-  static Dio _createStoreDio() {
+  /// 商城接口专用的 Dio（商城浏览 / 下单的 [LdShopService] 也用它）。
+  static Dio createStoreDio() {
     final dio = DiscourseDio.create(
       kind: DiscourseDioKind.external,
       enableCookies: false,
@@ -334,6 +335,9 @@ class LdStoreService {
     if (_isAuthError(body)) throw const LdStoreAuthExpiredException();
     throw const FormatException('LD士多接口响应格式不对');
   }
+
+  /// 商城返回的是「未登录 / 凭据无效」一类的错误码。
+  static bool isAuthError(Object? body) => _isAuthError(body);
 
   static bool _isAuthError(Object? body) {
     if (body is! Map) return false;

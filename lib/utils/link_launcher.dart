@@ -11,6 +11,7 @@ import '../pages/cdk/cdk_home_page.dart';
 import '../pages/cdk/cdk_project_page.dart';
 import '../pages/chat/channel/chat_channel_page.dart';
 import '../pages/image_viewer_page.dart';
+import '../pages/ld_store/ld_store_links.dart';
 import '../pages/mini_app/mini_app_directory_page.dart';
 import '../pages/mini_app/mini_app_page.dart';
 import '../pages/webview_page.dart';
@@ -333,7 +334,11 @@ Future<void> launchContentLink(
     return;
   }
 
-  // 8. 外部链接 → 根据用户偏好决定
+  // 8. LD士多（ldcstore.com）的商品、订单、优惠券等走原生页；原生没做的照旧
+  final storeUri = Uri.tryParse(url);
+  if (storeUri != null && openLdStoreLink(context, storeUri)) return;
+
+  // 9. 外部链接 → 根据用户偏好决定
   await launchExternalLink(context, url);
 }
 

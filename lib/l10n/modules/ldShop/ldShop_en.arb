@@ -1,0 +1,470 @@
+{
+  "@@locale": "en",
+  "ldShop_amountChanged": "The price or coupon just changed and the total has been updated. Please review and confirm again.",
+  "ldShop_amountPaid": "Paid",
+  "ldShop_authRequired": "Authorize LD士多 to view your orders and coupons",
+  "ldShop_autoDelivering": "Payment confirmed, delivering automatically…",
+  "ldShop_buyAgain": "Buy again",
+  "ldShop_buyNow": "Redeem now",
+  "ldShop_cancelConfirm": "Cancel the order \"{name}\"?",
+  "@ldShop_cancelConfirm": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "ldShop_cancelFailed": "Cancel failed: {error}",
+  "@ldShop_cancelFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "ldShop_cancelOrder": "Cancel order",
+  "ldShop_cancelledAt": "Cancelled",
+  "ldShop_checkFailed": "Failed to check payment: {error}",
+  "@ldShop_checkFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "ldShop_checkPayment": "Check payment",
+  "ldShop_checkResult": "Check this order",
+  "ldShop_chooseCoupon": "Choose a coupon",
+  "ldShop_completedAt": "Completed",
+  "ldShop_confirmExchange": "Confirm",
+  "ldShop_confirmExchangeAmount": "Confirm · {amount}",
+  "@ldShop_confirmExchangeAmount": {
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
+  "ldShop_confirmOrder": "Confirm order",
+  "ldShop_copiedAll": "All delivery content copied",
+  "ldShop_copyAll": "Copy all",
+  "ldShop_coupon": "Coupon",
+  "ldShop_couponActualDiscount": "Saved",
+  "ldShop_couponApplied": "Coupon applied, total updated.",
+  "ldShop_couponAutoSelected": "Auto-selected \"{name}\"",
+  "@ldShop_couponAutoSelected": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "ldShop_couponAvailableUnused": "{count} available, not used",
+  "@ldShop_couponAvailableUnused": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "ldShop_couponChanged": "The selected coupon changed. Please choose again.",
+  "ldShop_couponDiscount": "Coupon",
+  "ldShop_couponDontUse": "Don't use a coupon",
+  "ldShop_couponExpired": "Expired",
+  "ldShop_couponExpiresAt": "Valid until {time}",
+  "@ldShop_couponExpiresAt": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "ldShop_couponFixed": "{amount} LDC off",
+  "@ldShop_couponFixed": {
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
+  "ldShop_couponGeneric": "Coupon",
+  "ldShop_couponGoneNone": "The selected coupon is no longer available and there is no other coupon.",
+  "ldShop_couponGoneReplaced": "The selected coupon is no longer available; switched to the best one.",
+  "ldShop_couponIneligible": "Not applicable",
+  "ldShop_couponInvalidReason": "Reason",
+  "ldShop_couponMinSpend": "Min. {amount} LDC",
+  "@ldShop_couponMinSpend": {
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
+  "ldShop_couponNamed": "Coupon \"{name}\"",
+  "@ldShop_couponNamed": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "ldShop_couponNoThreshold": "No minimum",
+  "ldShop_couponNone": "No coupon available",
+  "ldShop_couponNoneChosen": "No coupon will be used.",
+  "ldShop_couponNotApplicable": "Not applicable now",
+  "ldShop_couponPercent": "{value}/10 price · 1 item",
+  "@ldShop_couponPercent": {
+    "placeholders": {
+      "value": {
+        "type": "String"
+      }
+    }
+  },
+  "ldShop_couponProductScope": "Item coupon",
+  "ldShop_couponReserved": "Held by an order",
+  "ldShop_couponScheduled": "Not started",
+  "ldShop_couponSelected": "Selected \"{name}\"",
+  "@ldShop_couponSelected": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "ldShop_couponShopProducts": "Platform items in the shop",
+  "ldShop_couponShopScope": "Shop coupon",
+  "ldShop_couponThreshold": "Minimum",
+  "ldShop_couponUnavailable": "Shown after pricing",
+  "ldShop_couponUnused": "Unused",
+  "ldShop_couponUsed": "Used",
+  "ldShop_couponUsedAt": "Used",
+  "ldShop_couponValidUntil": "Valid until",
+  "ldShop_createdAt": "Created",
+  "ldShop_deliveredAt": "Delivered",
+  "ldShop_deliveryAutoNotice": "After payment is confirmed, the code is delivered to the order automatically. Do not order twice.",
+  "ldShop_deliveryContent": "Delivery ({count})",
+  "@ldShop_deliveryContent": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "ldShop_deliveryManualNotice": "Regular items are delivered by the seller manually. Watch the order and contact the seller after paying.",
+  "ldShop_deliveryType": "Delivery",
+  "ldShop_description": "Details",
+  "ldShop_discount": "{value}/10",
+  "@ldShop_discount": {
+    "placeholders": {
+      "value": {
+        "type": "String"
+      }
+    }
+  },
+  "ldShop_empty": "No items yet",
+  "ldShop_errorBadRequest": "Invalid request",
+  "ldShop_errorConflict": "Conflict, please refresh and retry",
+  "ldShop_errorForbidden": "Not allowed",
+  "ldShop_errorFormat": "Unexpected response from LD士多",
+  "ldShop_errorNotFound": "Item or order not found",
+  "ldShop_errorRequestFailed": "Request failed, please retry later",
+  "ldShop_errorServer": "LD士多 is unavailable, please retry later",
+  "ldShop_errorTooFrequent": "Too many requests, please wait",
+  "ldShop_fulfillment": "Fulfillment: {status}",
+  "@ldShop_fulfillment": {
+    "placeholders": {
+      "status": {
+        "type": "String"
+      }
+    }
+  },
+  "ldShop_goExternal": "Open",
+  "ldShop_hide": "Hide",
+  "ldShop_inStockOnly": "In stock",
+  "ldShop_keepOrder": "Keep",
+  "ldShop_limitPerOrder": "Up to {count} per order",
+  "@ldShop_limitPerOrder": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "ldShop_limitPeriod": "Up to {count} per person every {days} days",
+  "@ldShop_limitPeriod": {
+    "placeholders": {
+      "days": {
+        "type": "int"
+      },
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "ldShop_limitReached": "Limit reached",
+  "ldShop_limitReachedDetail": "Limit reached ({rule})",
+  "@ldShop_limitReachedDetail": {
+    "placeholders": {
+      "rule": {
+        "type": "String"
+      }
+    }
+  },
+  "ldShop_limitRemaining": "{rule} · {count} left",
+  "@ldShop_limitRemaining": {
+    "placeholders": {
+      "rule": {
+        "type": "String"
+      },
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "ldShop_limitTotal": "Up to {count} per person",
+  "@ldShop_limitTotal": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "ldShop_listedAt": "Listed {date}",
+  "@ldShop_listedAt": {
+    "placeholders": {
+      "date": {
+        "type": "String"
+      }
+    }
+  },
+  "ldShop_logAdminComplete": "Closed by admin",
+  "ldShop_logCancel": "Cancelled",
+  "ldShop_logComplete": "Receipt confirmed",
+  "ldShop_logCreate": "Created",
+  "ldShop_logDeliver": "Delivered",
+  "ldShop_logExpire": "Expired",
+  "ldShop_logLockCdk": "Code locked",
+  "ldShop_logPay": "Paid",
+  "ldShop_logRefund": "Refunded",
+  "ldShop_logRefundReject": "Refund rejected",
+  "ldShop_logRefundRequest": "Refund requested",
+  "ldShop_logRepay": "Payment restarted",
+  "ldShop_logUnlockCdk": "Code released",
+  "ldShop_maintenance": "LD士多 is under maintenance",
+  "ldShop_myCoupons": "My coupons",
+  "ldShop_myOrders": "My orders",
+  "ldShop_needTrustLevel": "Requires TL{level}",
+  "@ldShop_needTrustLevel": {
+    "placeholders": {
+      "level": {
+        "type": "int"
+      }
+    }
+  },
+  "ldShop_noCoupons": "Nothing here",
+  "ldShop_noCouponsUnused": "No coupons. Get one from a link shared by a seller.",
+  "ldShop_noDeliveryContent": "No delivery content",
+  "ldShop_noDescription": "No description",
+  "ldShop_noMatches": "No matching items",
+  "ldShop_noOrders": "No orders",
+  "ldShop_noPaymentUrl": "No payment link available",
+  "ldShop_notForSale": "Unavailable",
+  "ldShop_notPaidYet": "Not paid yet",
+  "ldShop_openInBrowser": "Open in browser",
+  "ldShop_openLinkFailed": "Failed to open link: {error}",
+  "@ldShop_openLinkFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "ldShop_orderCancelled": "Order cancelled",
+  "ldShop_orderExpired": "Order expired, please order again",
+  "ldShop_orderNo": "Order {orderNo}",
+  "@ldShop_orderNo": {
+    "placeholders": {
+      "orderNo": {
+        "type": "String"
+      }
+    }
+  },
+  "ldShop_orderTitle": "Order",
+  "ldShop_originalSubtotal": "Subtotal",
+  "ldShop_ownProduct": "This is your own item",
+  "ldShop_paidAt": "Paid",
+  "ldShop_paidContactSeller": "Paid. Please wait for the seller to deliver",
+  "ldShop_paidDelivered": "Paid and delivered",
+  "ldShop_paidSellerDelivered": "Paid. The seller has delivered",
+  "ldShop_paidUpdated": "Paid. Order updated",
+  "ldShop_payBefore": "Pay by {time}",
+  "@ldShop_payBefore": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "ldShop_payBeforeDetail": "Pay before {time}; the order is cancelled after that.",
+  "@ldShop_payBeforeDetail": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "ldShop_payNow": "Pay",
+  "ldShop_payable": "Total ({count})",
+  "@ldShop_payable": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "ldShop_paymentConfirming": "Confirming payment. Do not order again.",
+  "ldShop_paymentCreating": "Creating payment, please wait.",
+  "ldShop_paymentNotice": " Payment is confirmed on the LINUX DO Credit page.",
+  "ldShop_paymentResolveBy": "Expected to resolve around {time}; unpaid orders are cancelled.",
+  "@ldShop_paymentResolveBy": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "ldShop_paymentTitle": "LINUX DO Credit",
+  "ldShop_paymentUrlFailed": "Failed to get payment link: {error}",
+  "@ldShop_paymentUrlFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "ldShop_paymentUrlInvalid": "Suspicious payment link blocked",
+  "ldShop_pendingBody": "The last submission was interrupted and the order may already exist. Check it first to avoid ordering twice.",
+  "ldShop_pendingTitle": "Confirming the last order",
+  "ldShop_previousOrderBody": "The last submission created order {orderNo}. Open it to view or pay.",
+  "@ldShop_previousOrderBody": {
+    "placeholders": {
+      "orderNo": {
+        "type": "String"
+      }
+    }
+  },
+  "ldShop_previousOrderCancelled": "The previous order was cancelled; you can order again",
+  "ldShop_previousOrderTitle": "Order created",
+  "ldShop_productCount": "{count} items",
+  "@ldShop_productCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "ldShop_productDiscount": "Item discount",
+  "ldShop_productTitle": "Item",
+  "ldShop_quantity": "Quantity",
+  "ldShop_quantityAdjusted": "Quantity adjusted to {count}",
+  "@ldShop_quantityAdjusted": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "ldShop_quantityMax": "Up to {count}",
+  "@ldShop_quantityMax": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "ldShop_refundedAt": "Refunded",
+  "ldShop_requote": "Retry",
+  "ldShop_reveal": "Show",
+  "ldShop_searchHint": "Search items",
+  "ldShop_seller": "Seller",
+  "ldShop_sold": "{count} sold",
+  "@ldShop_sold": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "ldShop_soldOut": "Sold out",
+  "ldShop_sort": "Sort",
+  "ldShop_sortDefault": "Default",
+  "ldShop_sortNewest": "Newest",
+  "ldShop_sortPriceAsc": "Price: low to high",
+  "ldShop_sortPriceDesc": "Price: high to low",
+  "ldShop_sortSales": "Best selling",
+  "ldShop_statusCancelled": "Cancelled",
+  "ldShop_statusCompleted": "Completed",
+  "ldShop_statusConfirming": "Confirming payment",
+  "ldShop_statusCreating": "Creating payment",
+  "ldShop_statusDelivered": "Delivered",
+  "ldShop_statusDispute": "Escalated to Credit",
+  "ldShop_statusExpired": "Expired",
+  "ldShop_statusPaid": "Awaiting delivery",
+  "ldShop_statusPaying": "Paying",
+  "ldShop_statusPending": "Awaiting payment",
+  "ldShop_statusRefundFailed": "Refund failed",
+  "ldShop_statusRefundPending": "Refunding",
+  "ldShop_statusRefunded": "Refunded",
+  "ldShop_stock": "{count} in stock",
+  "@ldShop_stock": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "ldShop_stockUnlimited": "In stock",
+  "ldShop_submitInFlight": "This item is being submitted, please wait.",
+  "ldShop_submitUncertain": "Could not confirm whether the order was created. Tap \"Check this order\" or look in My orders to avoid ordering twice.",
+  "ldShop_submitting": "Creating order…",
+  "ldShop_tabCancelled": "Cancelled",
+  "ldShop_tabPaid": "To deliver",
+  "ldShop_tabPending": "To pay",
+  "ldShop_tabRefund": "Refunds",
+  "ldShop_testMode": "Testing",
+  "ldShop_testModeOnly": "Testing: seller only",
+  "ldShop_timeline": "Activity",
+  "ldShop_tradeNo": "Credit trade no.",
+  "ldShop_trustRequirement": "Requires TL{level} (you are TL{current})",
+  "@ldShop_trustRequirement": {
+    "placeholders": {
+      "level": {
+        "type": "int"
+      },
+      "current": {
+        "type": "int"
+      }
+    }
+  },
+  "ldShop_typeAuto": "Auto delivery",
+  "ldShop_typeCdk": "Auto code",
+  "ldShop_typeLink": "External link",
+  "ldShop_typeManual": "Manual delivery",
+  "ldShop_typeStore": "Shop",
+  "ldShop_unitPrice": "Unit price",
+  "ldShop_unnamedProduct": "Untitled item",
+  "ldShop_usage": "How to use",
+  "ldShop_useCoupon": "Use",
+  "ldShop_viewOrder": "View order",
+  "ldShop_viewProduct": "View item",
+  "ldShop_viewReservedOrder": "View holding order",
+  "ldShop_views": "{count} views",
+  "@ldShop_views": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "ldShop_waitSeller": "Paid. Waiting for the seller to deliver."
+}

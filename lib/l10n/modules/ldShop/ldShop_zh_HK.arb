@@ -1,0 +1,470 @@
+{
+  "@@locale": "zh_HK",
+  "ldShop_amountChanged": "物品價格或優惠券剛剛發生變化，已為你更新本單金額，請確認後再次兌換。",
+  "ldShop_amountPaid": "實付",
+  "ldShop_authRequired": "授權 LD士多後才能查看訂單和優惠券",
+  "ldShop_autoDelivering": "付款已確認，正在自動發貨…",
+  "ldShop_buyAgain": "重新兌換",
+  "ldShop_buyNow": "立即兌換",
+  "ldShop_cancelConfirm": "確定要取消訂單「{name}」嗎？",
+  "@ldShop_cancelConfirm": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "ldShop_cancelFailed": "取消失敗：{error}",
+  "@ldShop_cancelFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "ldShop_cancelOrder": "取消訂單",
+  "ldShop_cancelledAt": "取消時間",
+  "ldShop_checkFailed": "檢查付款狀態失敗：{error}",
+  "@ldShop_checkFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "ldShop_checkPayment": "檢查付款狀態",
+  "ldShop_checkResult": "核對本次結果",
+  "ldShop_chooseCoupon": "選擇優惠券",
+  "ldShop_completedAt": "完成時間",
+  "ldShop_confirmExchange": "確認兌換",
+  "ldShop_confirmExchangeAmount": "確認兌換 · {amount}",
+  "@ldShop_confirmExchangeAmount": {
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
+  "ldShop_confirmOrder": "確認訂單",
+  "ldShop_copiedAll": "已複製全部發貨內容",
+  "ldShop_copyAll": "全部複製",
+  "ldShop_coupon": "優惠券",
+  "ldShop_couponActualDiscount": "實際優惠",
+  "ldShop_couponApplied": "優惠券已套用，金額已更新。",
+  "ldShop_couponAutoSelected": "已自動選擇「{name}」",
+  "@ldShop_couponAutoSelected": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "ldShop_couponAvailableUnused": "{count} 張可用，目前不使用",
+  "@ldShop_couponAvailableUnused": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "ldShop_couponChanged": "所選優惠券狀態已變化，請重新選擇。",
+  "ldShop_couponDiscount": "優惠券",
+  "ldShop_couponDontUse": "不使用優惠券",
+  "ldShop_couponExpired": "已過期",
+  "ldShop_couponExpiresAt": "有效期至 {time}",
+  "@ldShop_couponExpiresAt": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "ldShop_couponFixed": "減 {amount} LDC",
+  "@ldShop_couponFixed": {
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
+  "ldShop_couponGeneric": "優惠券",
+  "ldShop_couponGoneNone": "之前選擇的優惠券已不可用，目前沒有其他可用券。",
+  "ldShop_couponGoneReplaced": "之前選擇的優惠券已不可用，已為你改用目前最優惠的券。",
+  "ldShop_couponIneligible": "不可用",
+  "ldShop_couponInvalidReason": "失效原因",
+  "ldShop_couponMinSpend": "滿 {amount} LDC",
+  "@ldShop_couponMinSpend": {
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
+  "ldShop_couponNamed": "優惠券「{name}」",
+  "@ldShop_couponNamed": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "ldShop_couponNoThreshold": "無門檻",
+  "ldShop_couponNone": "暫無可用券",
+  "ldShop_couponNoneChosen": "已選擇不使用優惠券。",
+  "ldShop_couponNotApplicable": "目前不可使用",
+  "ldShop_couponPercent": "{value} 折 · 僅優惠 1 件",
+  "@ldShop_couponPercent": {
+    "placeholders": {
+      "value": {
+        "type": "String"
+      }
+    }
+  },
+  "ldShop_couponProductScope": "物品券",
+  "ldShop_couponReserved": "訂單佔用中",
+  "ldShop_couponScheduled": "待生效",
+  "ldShop_couponSelected": "已選擇「{name}」",
+  "@ldShop_couponSelected": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "ldShop_couponShopProducts": "店鋪內平台物品",
+  "ldShop_couponShopScope": "店鋪券",
+  "ldShop_couponThreshold": "使用門檻",
+  "ldShop_couponUnavailable": "核價後顯示",
+  "ldShop_couponUnused": "未使用",
+  "ldShop_couponUsed": "已使用",
+  "ldShop_couponUsedAt": "使用時間",
+  "ldShop_couponValidUntil": "有效期至",
+  "ldShop_createdAt": "建立時間",
+  "ldShop_deliveredAt": "發貨時間",
+  "ldShop_deliveryAutoNotice": "付款確認後，系統會自動把卡密發到訂單詳情，請勿重複兌換。",
+  "ldShop_deliveryContent": "發貨內容（{count} 條）",
+  "@ldShop_deliveryContent": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "ldShop_deliveryManualNotice": "普通物品由賣家手動發貨，付款後請留意訂單並聯絡賣家。",
+  "ldShop_deliveryType": "發貨方式",
+  "ldShop_description": "物品詳情",
+  "ldShop_discount": "{value} 折",
+  "@ldShop_discount": {
+    "placeholders": {
+      "value": {
+        "type": "String"
+      }
+    }
+  },
+  "ldShop_empty": "還沒有物品",
+  "ldShop_errorBadRequest": "請求參數錯誤",
+  "ldShop_errorConflict": "操作衝突，請重新整理後重試",
+  "ldShop_errorForbidden": "沒有權限執行此操作",
+  "ldShop_errorFormat": "LD士多回傳的資料格式不對",
+  "ldShop_errorNotFound": "物品或訂單不存在",
+  "ldShop_errorRequestFailed": "請求失敗，請稍後重試",
+  "ldShop_errorServer": "LD士多暫時無法使用，請稍後重試",
+  "ldShop_errorTooFrequent": "操作太頻繁，請稍後再試",
+  "ldShop_fulfillment": "履約：{status}",
+  "@ldShop_fulfillment": {
+    "placeholders": {
+      "status": {
+        "type": "String"
+      }
+    }
+  },
+  "ldShop_goExternal": "前往",
+  "ldShop_hide": "隱藏",
+  "ldShop_inStockOnly": "只看有貨",
+  "ldShop_keepOrder": "再想想",
+  "ldShop_limitPerOrder": "每單最多 {count} 件",
+  "@ldShop_limitPerOrder": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "ldShop_limitPeriod": "每人最近 {days} 天限購 {count} 件",
+  "@ldShop_limitPeriod": {
+    "placeholders": {
+      "days": {
+        "type": "int"
+      },
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "ldShop_limitReached": "已達限購",
+  "ldShop_limitReachedDetail": "已達限購（{rule}）",
+  "@ldShop_limitReachedDetail": {
+    "placeholders": {
+      "rule": {
+        "type": "String"
+      }
+    }
+  },
+  "ldShop_limitRemaining": "{rule} · 還可兌換 {count} 件",
+  "@ldShop_limitRemaining": {
+    "placeholders": {
+      "rule": {
+        "type": "String"
+      },
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "ldShop_limitTotal": "每人累計限購 {count} 件",
+  "@ldShop_limitTotal": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "ldShop_listedAt": "{date} 上架",
+  "@ldShop_listedAt": {
+    "placeholders": {
+      "date": {
+        "type": "String"
+      }
+    }
+  },
+  "ldShop_logAdminComplete": "管理員完結",
+  "ldShop_logCancel": "取消訂單",
+  "ldShop_logComplete": "買家確認收貨",
+  "ldShop_logCreate": "建立訂單",
+  "ldShop_logDeliver": "發貨完成",
+  "ldShop_logExpire": "訂單過期",
+  "ldShop_logLockCdk": "鎖定卡密",
+  "ldShop_logPay": "付款成功",
+  "ldShop_logRefund": "訂單退款",
+  "ldShop_logRefundReject": "賣家拒絕退款",
+  "ldShop_logRefundRequest": "買家申請退款",
+  "ldShop_logRepay": "重新發起付款",
+  "ldShop_logUnlockCdk": "釋放卡密",
+  "ldShop_maintenance": "LD士多正在維護，請稍後再試",
+  "ldShop_myCoupons": "我的優惠券",
+  "ldShop_myOrders": "我的訂單",
+  "ldShop_needTrustLevel": "需要信任等級 TL{level}",
+  "@ldShop_needTrustLevel": {
+    "placeholders": {
+      "level": {
+        "type": "int"
+      }
+    }
+  },
+  "ldShop_noCoupons": "暫無紀錄",
+  "ldShop_noCouponsUnused": "暫無可用的優惠券，可以從賣家分享的領取連結取得",
+  "ldShop_noDeliveryContent": "沒有發貨內容",
+  "ldShop_noDescription": "暫無描述",
+  "ldShop_noMatches": "沒有符合條件的物品",
+  "ldShop_noOrders": "暫無訂單",
+  "ldShop_noPaymentUrl": "暫時取不到付款連結",
+  "ldShop_notForSale": "暫停兌換",
+  "ldShop_notPaidYet": "訂單尚未付款",
+  "ldShop_openInBrowser": "在瀏覽器中開啟",
+  "ldShop_openLinkFailed": "開啟外部連結失敗：{error}",
+  "@ldShop_openLinkFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "ldShop_orderCancelled": "訂單已取消",
+  "ldShop_orderExpired": "訂單已過期，請重新下單",
+  "ldShop_orderNo": "訂單號 {orderNo}",
+  "@ldShop_orderNo": {
+    "placeholders": {
+      "orderNo": {
+        "type": "String"
+      }
+    }
+  },
+  "ldShop_orderTitle": "訂單詳情",
+  "ldShop_originalSubtotal": "原價小計",
+  "ldShop_ownProduct": "不能兌換自己的物品",
+  "ldShop_paidAt": "付款時間",
+  "ldShop_paidContactSeller": "付款成功，請留意賣家發貨",
+  "ldShop_paidDelivered": "付款成功，已自動發貨",
+  "ldShop_paidSellerDelivered": "付款成功，賣家已完成交付",
+  "ldShop_paidUpdated": "付款成功，訂單狀態已更新",
+  "ldShop_payBefore": "{time} 前付款",
+  "@ldShop_payBefore": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "ldShop_payBeforeDetail": "請在 {time} 前完成付款，過期訂單會自動取消。",
+  "@ldShop_payBeforeDetail": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "ldShop_payNow": "繼續付款",
+  "ldShop_payable": "應付（{count} 件）",
+  "@ldShop_payable": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "ldShop_paymentConfirming": "付款結果確認中，請勿重複兌換。",
+  "ldShop_paymentCreating": "正在建立付款，請稍候。",
+  "ldShop_paymentNotice": "付款需要在 LINUX DO Credit 頁面確認。",
+  "ldShop_paymentResolveBy": "預計在 {time} 前後完成核查，未確認付款的訂單會自動取消。",
+  "@ldShop_paymentResolveBy": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "ldShop_paymentTitle": "LINUX DO Credit 付款",
+  "ldShop_paymentUrlFailed": "取得付款連結失敗：{error}",
+  "@ldShop_paymentUrlFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "ldShop_paymentUrlInvalid": "付款連結異常，已攔截",
+  "ldShop_pendingBody": "上次提交時網路中斷，訂單可能已經建立。請先核對本次結果，避免重複兌換。",
+  "ldShop_pendingTitle": "正在確認上次的兌換結果",
+  "ldShop_previousOrderBody": "上次提交已產生訂單 {orderNo}，可以進入訂單查看或繼續付款。",
+  "@ldShop_previousOrderBody": {
+    "placeholders": {
+      "orderNo": {
+        "type": "String"
+      }
+    }
+  },
+  "ldShop_previousOrderCancelled": "上次提交的訂單已取消，可以重新兌換",
+  "ldShop_previousOrderTitle": "訂單已建立",
+  "ldShop_productCount": "共 {count} 件物品",
+  "@ldShop_productCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "ldShop_productDiscount": "物品優惠",
+  "ldShop_productTitle": "物品詳情",
+  "ldShop_quantity": "數量",
+  "ldShop_quantityAdjusted": "兌換數量已調整為 {count}",
+  "@ldShop_quantityAdjusted": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "ldShop_quantityMax": "最多 {count} 件",
+  "@ldShop_quantityMax": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "ldShop_refundedAt": "退款時間",
+  "ldShop_requote": "重新核價",
+  "ldShop_reveal": "顯示",
+  "ldShop_searchHint": "搜尋物品",
+  "ldShop_seller": "賣家",
+  "ldShop_sold": "已售 {count}",
+  "@ldShop_sold": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "ldShop_soldOut": "已售罄",
+  "ldShop_sort": "排序",
+  "ldShop_sortDefault": "預設排序",
+  "ldShop_sortNewest": "最新上架",
+  "ldShop_sortPriceAsc": "價格從低到高",
+  "ldShop_sortPriceDesc": "價格從高到低",
+  "ldShop_sortSales": "銷量最高",
+  "ldShop_statusCancelled": "已取消",
+  "ldShop_statusCompleted": "已完成",
+  "ldShop_statusConfirming": "付款確認中",
+  "ldShop_statusCreating": "正在建立付款",
+  "ldShop_statusDelivered": "已發貨",
+  "ldShop_statusDispute": "已轉 Credit 處理",
+  "ldShop_statusExpired": "已過期",
+  "ldShop_statusPaid": "待發貨",
+  "ldShop_statusPaying": "付款中",
+  "ldShop_statusPending": "待付款",
+  "ldShop_statusRefundFailed": "退款失敗",
+  "ldShop_statusRefundPending": "退款中",
+  "ldShop_statusRefunded": "已退款",
+  "ldShop_stock": "庫存 {count}",
+  "@ldShop_stock": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "ldShop_stockUnlimited": "庫存充足",
+  "ldShop_submitInFlight": "這件物品正在提交中，請稍候。",
+  "ldShop_submitUncertain": "暫時無法確認訂單是否建立。請點「核對本次結果」或到「我的訂單」查看，避免重複兌換。",
+  "ldShop_submitting": "正在建立訂單…",
+  "ldShop_tabCancelled": "已取消",
+  "ldShop_tabPaid": "待發貨",
+  "ldShop_tabPending": "待付款",
+  "ldShop_tabRefund": "退款",
+  "ldShop_testMode": "測試中",
+  "ldShop_testModeOnly": "測試中，僅賣家可兌換",
+  "ldShop_timeline": "訂單動態",
+  "ldShop_tradeNo": "Credit 交易號",
+  "ldShop_trustRequirement": "需要信任等級 TL{level}（你是 TL{current}）",
+  "@ldShop_trustRequirement": {
+    "placeholders": {
+      "level": {
+        "type": "int"
+      },
+      "current": {
+        "type": "int"
+      }
+    }
+  },
+  "ldShop_typeAuto": "自動發貨",
+  "ldShop_typeCdk": "自動發卡",
+  "ldShop_typeLink": "外部連結物品",
+  "ldShop_typeManual": "手動發貨",
+  "ldShop_typeStore": "小店",
+  "ldShop_unitPrice": "單價",
+  "ldShop_unnamedProduct": "未命名物品",
+  "ldShop_usage": "使用說明",
+  "ldShop_useCoupon": "去使用",
+  "ldShop_viewOrder": "查看訂單",
+  "ldShop_viewProduct": "查看物品",
+  "ldShop_viewReservedOrder": "查看佔用訂單",
+  "ldShop_views": "瀏覽 {count}",
+  "@ldShop_views": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "ldShop_waitSeller": "已付款，等待賣家發貨，請留意訂單動態。"
+}
