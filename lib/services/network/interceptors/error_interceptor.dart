@@ -54,10 +54,16 @@ class ErrorInterceptor extends Interceptor {
     String? errorMessage;
     final data = err.response?.data;
     if (data is Map<String, dynamic>) {
-      // Discourse API 错误格式
+      // Discourse API 错误格式是 `error: "…"` / `errors: […]`；第三方接口（LD士多
+      // 等）常是 `error: {code, message}`——以前直接 `as String?` 会在拦截器里
+      // 抛类型错误，把真实状态码和服务端文案一起盖掉
+      final error = data['error'];
+      final errors = data['errors'];
+      final nested = error is Map ? error['message'] : null;
       errorMessage =
-          data['error'] as String? ??
-          (data['errors'] as List?)?.firstOrNull?.toString();
+          (error is String ? error : null) ??
+          (nested is String ? nested : null) ??
+          (errors is List ? errors.firstOrNull?.toString() : null);
     }
 
     // 转成类型化异常供 UI 层处理。

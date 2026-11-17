@@ -43,6 +43,36 @@ void main() {
     expect(rateLimit.response?.statusCode, 429);
   });
 
+  test('第三方接口的 error 是对象（LD士多）：不在拦截器里抛类型错误，状态码与响应保留', () async {
+    final downstream = _CaptureInterceptor();
+    final dio = _buildDio(
+      statusCode: 400,
+      body:
+          '{"success":false,"error":{"code":"BAD_RETURN_URL","message":"回调地址不被允许"}}',
+      headers: {
+        Headers.contentTypeHeader: ['application/json'],
+      },
+      downstream: downstream,
+    );
+
+    int? callerStatus;
+    DioExceptionType? callerType;
+    Object? callerData;
+    try {
+      await dio.get('/api/auth/init');
+    } on DioException catch (e) {
+      callerStatus = e.response?.statusCode;
+      callerType = e.type;
+      callerData = e.response?.data;
+    }
+
+    // 以前 `data['error'] as String?` 抛 TypeError，被包成 unknown、statusCode=null
+    expect(callerType, DioExceptionType.badResponse);
+    expect(callerStatus, 400);
+    expect(downstream.seenStatusCode, 400);
+    expect((callerData as Map)['error'], isA<Map>());
+  });
+
   test('503 转 ServerException 后仍可见原始 response', () async {
     final downstream = _CaptureInterceptor();
     final dio = _buildDio(
