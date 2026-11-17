@@ -41,6 +41,11 @@ class WebViewPage extends ConsumerStatefulWidget {
   /// 回传结果）。默认关，与以前一样在当前页打开或忽略。
   final bool allowPopups;
 
+  /// 主框架将要去 / 开始加载的地址满足它时自动关页（[Navigator.maybePop]）。
+  /// 付款页用：LDC 付完会跳回商家的结果页（LD士多 `/pay/signal`、CDK 领取页），
+  /// 到这一步就回原生页对账，不用用户手动返回
+  final bool Function(Uri url)? closeWhen;
+
   /// 由 [allowPopups] 开出的新窗口：WebView 由网页创建，不再自己加载 [url]。
   final int? windowId;
 
@@ -52,6 +57,7 @@ class WebViewPage extends ConsumerStatefulWidget {
     this.extraUserScripts = const [],
     this.allowPopups = false,
     this.windowId,
+    this.closeWhen,
   });
 
   /// 打开浏览器，url 为空字符串时显示空白页
@@ -62,6 +68,7 @@ class WebViewPage extends ConsumerStatefulWidget {
     String? injectCss,
     List<UserScript> extraUserScripts = const [],
     bool allowPopups = false,
+    bool Function(Uri url)? closeWhen,
   }) {
     return Navigator.push<T>(
       context,
@@ -72,6 +79,7 @@ class WebViewPage extends ConsumerStatefulWidget {
           injectCss: injectCss,
           extraUserScripts: extraUserScripts,
           allowPopups: allowPopups,
+          closeWhen: closeWhen,
         ),
       ),
     );
@@ -420,6 +428,7 @@ class _WebViewPageState extends ConsumerState<WebViewPage>
                               }
                             },
                             onLoadStart: (controller, url) {
+                              if (url != null && _closeIfDone(url)) return;
                               setState(() {
                                 _navigationRevision += 1;
                                 _historyStateSettled = false;
@@ -531,12 +540,28 @@ class _WebViewPageState extends ConsumerState<WebViewPage>
   static const _allowedSchemes = {'http', 'https', 'about', 'data', 'blob'};
 
   /// 拦截 URL 加载：对非 HTTP(S) 的应用链接弹出确认对话框
+  bool _closingForDone = false;
+
+  /// 到了 [WebViewPage.closeWhen] 指定的地址：关页（只关一次）
+  bool _closeIfDone(Uri url) {
+    final closeWhen = widget.closeWhen;
+    if (closeWhen == null || !closeWhen(url)) return false;
+    if (!_closingForDone && mounted) {
+      _closingForDone = true;
+      unawaited(Navigator.of(context).maybePop());
+    }
+    return true;
+  }
+
   Future<NavigationActionPolicy> _shouldOverrideUrlLoading(
     InAppWebViewController controller,
     NavigationAction navigationAction,
   ) async {
     final url = navigationAction.request.url;
     if (url == null) return NavigationActionPolicy.ALLOW;
+    if (navigationAction.isForMainFrame && _closeIfDone(url)) {
+      return NavigationActionPolicy.CANCEL;
+    }
 
     final scheme = url.scheme.toLowerCase();
 

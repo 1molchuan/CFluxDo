@@ -201,7 +201,13 @@ class _ProjectViewState extends ConsumerState<_ProjectView> {
       ToastService.showError(S.current.cdkPage_payUrlInvalid);
       return;
     }
-    await WebViewPage.open<void>(context, payUrl, title: 'LINUX DO Credit');
+    // 付完 LDC 会跳回 cdk.linux.do/receive/<id>（或 /received）：到这一步自动关页
+    await WebViewPage.open<void>(
+      context,
+      payUrl,
+      title: 'LINUX DO Credit',
+      closeWhen: (url) => url.host == 'cdk.linux.do',
+    );
     if (!mounted) return;
     // 付完回来：重新读项目，到账的话 is_received 会变真
     await _load();
