@@ -297,5 +297,7 @@
   "customNodes_reasonConnect": "connection failed",
   "customNodes_reasonHandshake": "handshake failed",
   "customNodes_reasonResponse": "no valid response",
-  "customNodes_footer": "Only addresses inside Cloudflare's ranges are accepted; use the upstream proxy for third-party relays. The IP protocol preference also applies to custom nodes. Measurements of custom nodes are never shared by \"Help selection\"."
+  "customNodes_footer": "Only addresses inside Cloudflare's ranges are accepted; use the upstream proxy for third-party relays. The IP protocol preference also applies to custom nodes. Measurements of custom nodes are never shared by \"Help selection\".",
+  "dohSettings_suppressedByProbe": "Paused because the system network reaches the forum directly; comes back when it can't",
+  "dohSettings_lockedByProbe": "The system network reaches the forum directly, so auto step-aside is in charge; this decides whether it's on when it can't"
 }

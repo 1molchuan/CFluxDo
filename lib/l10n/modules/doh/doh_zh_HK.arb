@@ -304,5 +304,7 @@
   "customNodes_reasonConnect": "連線失敗",
   "customNodes_reasonHandshake": "加密握手失敗",
   "customNodes_reasonResponse": "沒有正常回應",
-  "customNodes_footer": "只接受 Cloudflare 網段內的地址；第三方中轉請用上游代理。「IP 協議」的偏好同樣作用於自訂節點。自訂節點的測速結果不會隨「幫助優選」分享。"
+  "customNodes_footer": "只接受 Cloudflare 網段內的地址；第三方中轉請用上游代理。「IP 協議」的偏好同樣作用於自訂節點。自訂節點的測速結果不會隨「幫助優選」分享。",
+  "dohSettings_suppressedByProbe": "系統網絡能直連論壇，已暫停；網絡不能直連時自動恢復",
+  "dohSettings_lockedByProbe": "系統網絡能直連論壇，由「VPN 自動讓路」接管；這裡決定網絡不能直連時開不開"
 }

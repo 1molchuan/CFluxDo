@@ -304,5 +304,7 @@
   "customNodes_reasonConnect": "连接失败",
   "customNodes_reasonHandshake": "加密握手失败",
   "customNodes_reasonResponse": "没有正常响应",
-  "customNodes_footer": "只接受 Cloudflare 网段内的地址；第三方中转请用上游代理。「IP 协议」的偏好同样作用于自定义节点。自定义节点的测速结果不会随「帮助优选」分享。"
+  "customNodes_footer": "只接受 Cloudflare 网段内的地址；第三方中转请用上游代理。「IP 协议」的偏好同样作用于自定义节点。自定义节点的测速结果不会随「帮助优选」分享。",
+  "dohSettings_suppressedByProbe": "系统网络能直连论坛，已暂停；网络不能直连时自动恢复",
+  "dohSettings_lockedByProbe": "系统网络能直连论坛，由「VPN 自动让路」接管；这里决定网络不能直连时开不开"
 }

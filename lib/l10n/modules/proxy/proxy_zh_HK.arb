@@ -200,5 +200,11 @@
   "vpnToggle_pausedProxy": "上游代理已暫停，VPN 斷開後自動恢復",
   "vpnToggle_fingerprintKept": "App 和內置網頁的請求仍經本機網關按瀏覽器指紋發出（只換握手，DNS 和線路都隨 VPN）",
   "vpnToggle_accelResumed": "這個 VPN 沒有接管論壇的連接（暫停加速後一直連不上），本次 VPN 期間已恢復連接加速，斷開後照常讓路",
-  "vpnToggle_accelResumedToast": "VPN 下連不上論壇，已恢復連接加速"
+  "vpnToggle_accelResumedToast": "VPN 下連不上論壇，已恢復連接加速",
+  "vpnToggle_subtitleProbe": "實測系統網絡能直連論壇時（開著梯子、路由器分流、海外網絡）暫停連線加速，不能直連就保持加速；偵測到 VPN 時暫停上游代理",
+  "vpnToggle_probeReachable": "實測：系統網絡能直連論壇，已暫停連線加速",
+  "vpnToggle_probeUnreachable": "實測：系統網絡連不上論壇，保持連線加速",
+  "vpnToggle_probing": "正在檢測系統網絡能否直連論壇…",
+  "vpnToggle_recheck": "重新檢測",
+  "vpnToggle_pausedAccelProbe": "連線加速已暫停，網絡不能直連論壇時自動恢復"
 }

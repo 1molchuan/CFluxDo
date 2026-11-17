@@ -121,5 +121,11 @@
   "vpnToggle_pausedProxy": "The upstream proxy is paused and resumes when the VPN disconnects",
   "vpnToggle_fingerprintKept": "App and built-in browser requests still go out through the local gateway with the browser fingerprint (only the handshake changes; DNS and routing follow the VPN)",
   "vpnToggle_accelResumed": "This VPN isn't carrying the forum's connections (they kept failing with acceleration paused), so acceleration is back on for this VPN session; stepping aside resumes after it disconnects",
-  "vpnToggle_accelResumedToast": "Couldn't reach the forum over the VPN, acceleration resumed"
+  "vpnToggle_accelResumedToast": "Couldn't reach the forum over the VPN, acceleration resumed",
+  "vpnToggle_subtitleProbe": "Pauses acceleration when the system network can reach the forum directly (VPN, router proxy, outside China) and keeps it otherwise; pauses the upstream proxy while a VPN is on",
+  "vpnToggle_probeReachable": "Tested: the system network reaches the forum directly, so acceleration is paused",
+  "vpnToggle_probeUnreachable": "Tested: the system network can't reach the forum, so acceleration stays on",
+  "vpnToggle_probing": "Checking whether the system network reaches the forum…",
+  "vpnToggle_recheck": "Check again",
+  "vpnToggle_pausedAccelProbe": "Acceleration is paused and comes back when the network can't reach the forum directly"
 }

@@ -22,6 +22,9 @@ class VpnAutoToggleCard extends StatelessWidget {
         service.vpnActiveNotifier,
         service.detectionModeNotifier,
         service.accelResumedNotifier,
+        service.directReachableNotifier,
+        service.probingNotifier,
+        service.suppressionNotifier,
         NetworkSettingsService.instance.notifier,
       ]),
       builder: (context, _) {
@@ -30,13 +33,19 @@ class VpnAutoToggleCard extends StatelessWidget {
         final dohSuppressed = enabled && service.isDohSuppressed;
         final proxySuppressed = enabled && service.isProxySuppressed;
         final hasSuppressed = dohSuppressed || proxySuppressed;
-        final accelResumed = enabled && vpnActive && service.accelResumed;
+        final accelResumed = enabled && service.accelResumed;
+        final probeDriven = enabled && service.probeDriven;
 
         return SegmentedCardGroup(
           children: [
             SwitchListTile(
               title: Text(context.l10n.vpnToggle_title),
-              subtitle: Text(context.l10n.vpnToggle_subtitle),
+              // 安卓按实测决定加速让不让路，桌面仍按 VPN 网卡
+              subtitle: Text(
+                VpnAutoToggleService.probeCapable
+                    ? context.l10n.vpnToggle_subtitleProbe
+                    : context.l10n.vpnToggle_subtitle,
+              ),
               secondary: Icon(
                 Symbols.swap_horiz_rounded,
                 fill: enabled ? 1 : 0,
@@ -126,16 +135,67 @@ class VpnAutoToggleCard extends StatelessWidget {
                   ],
                 ),
               ),
+            if (probeDriven) _probeRow(context, theme, service),
             if (enabled && hasSuppressed)
               _hintRow(
                 theme,
-                _buildSuppressedText(dohSuppressed, proxySuppressed),
+                _buildSuppressedText(
+                  dohSuppressed,
+                  proxySuppressed,
+                  probeDriven: probeDriven,
+                ),
               ),
             if (accelResumed)
               _hintRow(theme, context.l10n.vpnToggle_accelResumed),
           ],
         );
       },
+    );
+  }
+
+  /// 实测结果：能直连（已让路）/ 连不上（保持加速）/ 检测中，可点「重新检测」
+  Widget _probeRow(
+    BuildContext context,
+    ThemeData theme,
+    VpnAutoToggleService service,
+  ) {
+    final probing = service.probingNotifier.value;
+    final direct = service.directReachableNotifier.value;
+    final (icon, text, color) = probing || direct == null
+        ? (
+            Symbols.network_check_rounded,
+            context.l10n.vpnToggle_probing,
+            theme.colorScheme.onSurfaceVariant,
+          )
+        : direct
+        ? (
+            Symbols.public_rounded,
+            context.l10n.vpnToggle_probeReachable,
+            theme.colorScheme.tertiary,
+          )
+        : (
+            Symbols.bolt_rounded,
+            context.l10n.vpnToggle_probeUnreachable,
+            theme.colorScheme.primary,
+          );
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 4, 8, 4),
+      child: Row(
+        children: [
+          Icon(icon, size: 16, color: color),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              text,
+              style: theme.textTheme.bodySmall?.copyWith(color: color),
+            ),
+          ),
+          TextButton(
+            onPressed: probing ? null : service.recheck,
+            child: Text(context.l10n.vpnToggle_recheck),
+          ),
+        ],
+      ),
     );
   }
 
@@ -184,11 +244,17 @@ class VpnAutoToggleCard extends StatelessWidget {
     };
   }
 
-  String _buildSuppressedText(bool dohSuppressed, bool proxySuppressed) {
+  String _buildSuppressedText(
+    bool dohSuppressed,
+    bool proxySuppressed, {
+    required bool probeDriven,
+  }) {
     final paused = dohSuppressed && proxySuppressed
         ? S.current.vpnToggle_pausedBoth
         : dohSuppressed
-        ? S.current.vpnToggle_pausedAccel
+        ? (probeDriven
+              ? S.current.vpnToggle_pausedAccelProbe
+              : S.current.vpnToggle_pausedAccel)
         : S.current.vpnToggle_pausedProxy;
     // 加速让路后安卓仍为浏览器指纹起本机网关，说一声，免得以为 App 完全不经网关
     if (NetworkSettingsService.instance.fingerprintOnlyGateway) {
