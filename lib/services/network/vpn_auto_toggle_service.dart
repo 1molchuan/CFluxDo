@@ -46,6 +46,9 @@ class ForumUnreachableStreak {
   int _count = 0;
   DateTime? _since;
 
+  /// 这一串里已记的失败次数
+  int get count => _count;
+
   void reset() {
     _count = 0;
     _since = null;
@@ -152,6 +155,42 @@ class VpnAutoToggleService {
 
   void _bumpSuppression() => suppressionNotifier.value++;
 
+  /// 上一次写进日志的网络形态，网络事件常成串重复，只在变化时记一条
+  String? _lastLoggedNetworkState;
+
+  /// 分享日志 / 网络健康快照里的 VPN 让路状态。2026-11 佬友报「开梯子要全局才连得上」，
+  /// 当时日志里看不出 App 有没有识别到 VPN、有没有让路，所以把这些都带上
+  Map<String, Object?> diagnostics() => {
+    'autoToggle': enabled,
+    'detection': detectionMode.name,
+    'vpnActive': vpnActive,
+    'shouldSuppress': _shouldSuppress,
+    'dohSuppressed': _prefsReady ? isDohSuppressed : null,
+    'proxySuppressed': _prefsReady ? isProxySuppressed : null,
+    'accelResumed': accelResumed,
+    'connectivity': [for (final r in _lastConnectivityResults) r.name],
+    if (Platform.isWindows) 'windowsVpnAdapter': _lastHasWindowsVpnAdapter,
+  };
+
+  bool _prefsReady = false;
+
+  /// 网络形态或让路判断变了才写一条（connectivity 事件、启动同步都会走到这里）
+  void _logNetworkState(String source) {
+    final state =
+        '${_lastConnectivityResults.map((r) => r.name).join(',')}'
+        '|vpn=$vpnActive|suppress=$_shouldSuppress|on=$enabled'
+        '|mode=${detectionMode.name}';
+    if (state == _lastLoggedNetworkState) return;
+    _lastLoggedNetworkState = state;
+    AppLogger.info(
+      '网络形态：${_lastConnectivityResults.map((r) => r.name).join('+')}，'
+      '${vpnActive ? '判定为 VPN' : '未判定为 VPN'}'
+      '${enabled ? (_shouldSuppress ? '，让路' : '') : '（自动让路已关）'}',
+      tag: 'VpnAutoToggle',
+      fields: {'source': source, ...diagnostics()},
+    );
+  }
+
   bool get enabled => enabledNotifier.value;
   bool get vpnActive => vpnActiveNotifier.value;
   VpnDetectionMode get detectionMode => detectionModeNotifier.value;
@@ -203,6 +242,7 @@ class VpnAutoToggleService {
 
   void initialize(SharedPreferences prefs) {
     _prefs = prefs;
+    _prefsReady = true;
     // 默认开启:per-device CA/DoH 网关在 VPN 活跃时容易拖慢连接,VPN 用户
     // 不该还得手动来这页找开关。
     enabledNotifier.value = prefs.getBool(_keyEnabled) ?? true;
@@ -288,6 +328,7 @@ class VpnAutoToggleService {
     );
     vpnActiveNotifier.value = effectiveVpnActive;
     _shouldSuppress = effectiveShouldSuppress;
+    _logNetworkState('connectivity');
 
     if (!enabled) return;
 
@@ -303,7 +344,8 @@ class VpnAutoToggleService {
       resolveVpnActive(
         connectivityResults: _lastConnectivityResults,
         hasWindowsVpnAdapter: _lastHasWindowsVpnAdapter,
-        systemProxyEnabled: Platform.isWindows &&
+        systemProxyEnabled:
+            Platform.isWindows &&
             SystemProxyService.instance.effectiveProxyUrl != null,
       ),
       shouldSuppress: shouldAutoSuppress(_lastConnectivityResults),
@@ -321,7 +363,8 @@ class VpnAutoToggleService {
     final hasVpn = resolveVpnActive(
       connectivityResults: results,
       hasWindowsVpnAdapter: hasWindowsVpnAdapter,
-      systemProxyEnabled: Platform.isWindows &&
+      systemProxyEnabled:
+          Platform.isWindows &&
           SystemProxyService.instance.effectiveProxyUrl != null,
     );
     final mode = detectionMode;
@@ -333,6 +376,7 @@ class VpnAutoToggleService {
       automaticValue: shouldAutoSuppress(results),
       mode: mode,
     );
+    _logNetworkState('startup');
 
     if (!enabled) return;
     if (_shouldSuppress) {
@@ -365,14 +409,14 @@ class VpnAutoToggleService {
         } else {
           await NetworkSettingsService.storeDohEnabled(_prefs, false);
         }
-        debugPrint('[VpnAutoToggle] 压制 DOH');
+        AppLogger.info('VPN 让路：暂停连接加速', tag: 'VpnAutoToggle');
       }
 
       // 检查代理是否开启，开启则压制
       if (proxyService.notifier.value.enabled) {
         await _prefs.setBool(_keySuppressedProxy, true);
         await proxyService.setEnabled(false);
-        debugPrint('[VpnAutoToggle] 压制上游代理');
+        AppLogger.info('VPN 让路：暂停上游代理', tag: 'VpnAutoToggle');
       }
     } finally {
       _isSuppressing = false;
@@ -403,14 +447,14 @@ class VpnAutoToggleService {
         } else {
           await NetworkSettingsService.storeDohEnabled(_prefs, true);
         }
-        debugPrint('[VpnAutoToggle] 恢复 DOH');
+        AppLogger.info('VPN 断开或不再让路：恢复连接加速', tag: 'VpnAutoToggle');
       }
 
       // 恢复代理
       if (isProxySuppressed) {
         await _prefs.remove(_keySuppressedProxy);
         await ProxySettingsService.instance.setEnabled(true);
-        debugPrint('[VpnAutoToggle] 恢复上游代理');
+        AppLogger.info('VPN 断开或不再让路：恢复上游代理', tag: 'VpnAutoToggle');
       }
     } finally {
       _isSuppressing = false;
@@ -431,6 +475,12 @@ class VpnAutoToggleService {
       return;
     }
     final wait = unreachableStreak.recordFailure();
+    if (unreachableStreak.count == 1) {
+      AppLogger.warning(
+        'VPN 让路期间论坛连不上（${detail ?? 'unreachable'}）',
+        tag: 'VpnAutoToggle',
+      );
+    }
     if (wait == null) return;
     _unreachableConfirmTimer?.cancel();
     _unreachableConfirmTimer = Timer(wait, () {

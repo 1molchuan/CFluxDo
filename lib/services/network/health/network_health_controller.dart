@@ -11,6 +11,7 @@ import '../doh/network_settings_service.dart';
 import '../doh_proxy/doh_proxy_ffi.dart' show DohPublicDohStat;
 import '../doh_proxy/doh_proxy_service.dart';
 import '../request_scheduler_config.dart';
+import '../vpn_auto_toggle_service.dart';
 import '../webview/webview_adapter_settings_service.dart';
 
 /// 网络通道健康度的**只读聚合**。
@@ -80,6 +81,7 @@ class NetworkHealthController {
       'reason': reason,
       'message': snapshot.summary(),
       ...snapshot.toJson(),
+      'vpn': VpnAutoToggleService.instance.diagnostics(),
       'netStats': ?netStats,
     });
   }

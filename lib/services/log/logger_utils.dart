@@ -11,6 +11,7 @@ import '../network/doh/network_settings_service.dart';
 import '../network/doh_proxy/doh_proxy_service.dart';
 import '../network/health/network_health_controller.dart';
 import '../network/proxy/proxy_settings_service.dart';
+import '../network/vpn_auto_toggle_service.dart';
 import '../../l10n/s.dart';
 import 'log_writer.dart';
 
@@ -297,6 +298,9 @@ class LoggerUtils {
     if (netStats != null) {
       map['netStats'] = netStats;
     }
+
+    // VPN 让路：识别到没有、让没让、让路后有没有因连不上恢复加速
+    map['vpn'] = VpnAutoToggleService.instance.diagnostics();
 
     final proxy = ProxySettingsService.instance.current;
     map['proxyEnabled'] = proxy.isValid;
