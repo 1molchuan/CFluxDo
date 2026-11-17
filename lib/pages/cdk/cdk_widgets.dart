@@ -83,6 +83,9 @@ class CdkContentBox extends StatelessWidget {
           Expanded(
             child: SelectableText(
               content,
+              // 只给 maxLines 时 SelectableText 按最大行数预留高度，一行的码也撑成
+              // 一大块（2026-11-17 模拟器上实看），要配 minLines: 1 按内容撑开
+              minLines: 1,
               maxLines: maxLines,
               style: theme.textTheme.bodyMedium?.copyWith(
                 fontFamily: 'monospace',
