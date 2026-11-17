@@ -7,6 +7,8 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../config/site_customization.dart';
 import '../constants.dart';
+import '../pages/cdk/cdk_home_page.dart';
+import '../pages/cdk/cdk_project_page.dart';
 import '../pages/chat/channel/chat_channel_page.dart';
 import '../pages/image_viewer_page.dart';
 import '../pages/mini_app/mini_app_directory_page.dart';
@@ -313,15 +315,46 @@ Future<void> launchContentLink(
     return;
   }
 
-  // 6. 站点内部链接（主域名或子域名、相对路径）→ 内置浏览器
+  // 6. LINUX DO CDK：分发链接和首页走原生页面（以前进内置浏览器，佬友反馈要开梯子）
+  final cdkTarget = cdkLinkTarget(url);
+  if (cdkTarget != null) {
+    if (cdkTarget.projectId != null) {
+      await CdkProjectPage.open(context, cdkTarget.projectId!);
+    } else {
+      await CdkHomePage.open(context);
+    }
+    return;
+  }
+
+  // 7. 站点内部链接（主域名或子域名、相对路径）→ 内置浏览器
   if (isInternalUrlString(url)) {
     final fullUrl = UrlHelper.resolveUrl(url);
     WebViewPage.open(context, fullUrl);
     return;
   }
 
-  // 7. 外部链接 → 根据用户偏好决定
+  // 8. 外部链接 → 根据用户偏好决定
   await launchExternalLink(context, url);
+}
+
+/// cdk.linux.do 链接要去的原生页面：`/receive/<id>` 是某个分发项目，
+/// 首页 / dashboard / received 去 CDK 首页；别的路径（创建项目、后台）不接，仍进浏览器。
+/// 只在 LINUX DO 站（CDK 授权只认 linux.do）。帖子里点链接和外部传入的链接共用
+({String? projectId})? cdkLinkTarget(String url) {
+  if (!SiteContext.isLinuxDo) return null;
+  final uri = Uri.tryParse(url);
+  if (uri == null || uri.host != 'cdk.linux.do') return null;
+  if (uri.scheme != 'https' && uri.scheme != 'http') return null;
+  final segments = uri.pathSegments.where((s) => s.isNotEmpty).toList();
+  if (segments.isEmpty) return (projectId: null);
+  if (segments.length == 2 && segments[0] == 'receive') {
+    return (projectId: segments[1]);
+  }
+  if (segments.length == 1 &&
+      (segments[0] == 'dashboard' || segments[0] == 'received')) {
+    return (projectId: null);
+  }
+  return null;
 }
 
 /// 强制在外部浏览器打开链接，绕过 App Links

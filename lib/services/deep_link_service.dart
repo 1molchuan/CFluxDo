@@ -6,6 +6,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../config/forum_site.dart';
 import 'site_context.dart';
 import 'site_switch_service.dart';
+import '../pages/cdk/cdk_home_page.dart';
+import '../pages/cdk/cdk_project_page.dart';
 import '../pages/mini_app/mini_app_directory_page.dart';
 import '../pages/mini_app/mini_app_page.dart';
 import '../pages/topic_detail_page/topic_detail_page.dart';
@@ -14,6 +16,7 @@ import '../pages/webview_login_page.dart';
 import '../pages/webview_page.dart';
 import '../constants.dart';
 import '../utils/discourse_url_parser.dart';
+import '../utils/link_launcher.dart' show cdkLinkTarget;
 import 'discourse/discourse_service.dart';
 import 'user_api_key_login_flow.dart';
 import 'user_api_key_service.dart';
@@ -158,6 +161,15 @@ class DeepLinkService {
     final target = ForumSite.fromUri(uri);
     if (target != null && target != SiteContext.current) {
       unawaited(_switchForLink(target, uri));
+      return;
+    }
+    // LINUX DO CDK 的分发链接 / 首页走原生页面（与帖子里点链接一致）
+    final cdkTarget = cdkLinkTarget(url);
+    if (cdkTarget != null) {
+      final projectId = cdkTarget.projectId;
+      projectId != null
+          ? CdkProjectPage.open(context, projectId)
+          : CdkHomePage.open(context);
       return;
     }
     // 子域服务不是论坛，不能把其路径里的 ID 当作当前站话题。

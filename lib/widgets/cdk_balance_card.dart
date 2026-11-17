@@ -5,6 +5,7 @@ import 'package:app_icons/app_icons.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../providers/cdk_providers.dart';
+import '../pages/cdk/cdk_home_page.dart';
 import '../pages/webview_page.dart';
 import '../services/network/exceptions/oauth_exception.dart';
 
@@ -69,8 +70,7 @@ class CdkBalanceCard extends ConsumerWidget {
       return Material(
         color: Colors.transparent,
         child: InkWell(
-          onTap: () =>
-              WebViewPage.open(context, _dashboardUrl, title: 'LINUX DO CDK'),
+          onTap: () => CdkHomePage.open(context),
           child: Column(
             children: [
               Padding(
@@ -135,8 +135,7 @@ class CdkBalanceCard extends ConsumerWidget {
 
     if (compact) {
       return GestureDetector(
-        onTap: () =>
-            WebViewPage.open(context, _dashboardUrl, title: 'LINUX DO CDK'),
+        onTap: () => CdkHomePage.open(context),
         child: Card(
           elevation: 0,
           color: theme.colorScheme.surfaceContainerLow,
@@ -199,8 +198,7 @@ class CdkBalanceCard extends ConsumerWidget {
       return MojianLedgerCard(
         icon: Symbols.token_rounded,
         title: 'LINUX DO CDK',
-        onTap: () =>
-            WebViewPage.open(context, _dashboardUrl, title: 'LINUX DO CDK'),
+        onTap: () => CdkHomePage.open(context),
         trailing: isRefreshing
             ? MojianLedgerCard.spinner(mj)
             : onDisable != null
@@ -227,8 +225,7 @@ class CdkBalanceCard extends ConsumerWidget {
     }
 
     return GestureDetector(
-      onTap: () =>
-          WebViewPage.open(context, _dashboardUrl, title: 'LINUX DO CDK'),
+      onTap: () => CdkHomePage.open(context),
       child: Card(
         elevation: 8,
         shadowColor: theme.colorScheme.tertiary.withValues(alpha: 0.3),

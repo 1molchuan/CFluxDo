@@ -1,0 +1,119 @@
+{
+  "@@locale": "zh_TW",
+  "cdkPage_captchaTitle": "人機驗證",
+  "cdkPage_captchaWaiting": "正在驗證…",
+  "cdkPage_captchaTimeout": "驗證逾時，請重試",
+  "cdkPage_captchaExpired": "驗證已過期，請重試",
+  "cdkPage_captchaLoadFailed": "驗證元件載入失敗，請檢查網路後重試",
+  "cdkPage_captchaFailed": "人機驗證失敗：{message}",
+  "@cdkPage_captchaFailed": {
+    "placeholders": {
+      "message": {
+        "type": "String"
+      }
+    }
+  },
+  "cdkPage_captchaUnavailable": "暫時無法載入人機驗證，可點右上角在網頁中領取",
+  "cdkPage_openInBrowser": "在網頁中開啟",
+  "cdkPage_notAuthorized": "尚未授權 LINUX DO CDK。授權後可在 App 內查看積分和領取紀錄、直接領取 CDK",
+  "cdkPage_authorize": "授權",
+  "cdkPage_received": "領取紀錄",
+  "cdkPage_receivedCount": "領取紀錄（{count}）",
+  "@cdkPage_receivedCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "cdkPage_searchHint": "搜尋項目名稱",
+  "cdkPage_receivedEmpty": "尚未領取過 CDK",
+  "cdkPage_noMatches": "沒有相符的紀錄",
+  "cdkPage_trustLevel": "信任等級 {level}",
+  "@cdkPage_trustLevel": {
+    "placeholders": {
+      "level": {
+        "type": "int"
+      }
+    }
+  },
+  "cdkPage_projectTitle": "CDK 分發",
+  "cdkPage_lotteryHint": "這是抽獎項目，中獎結果請在網頁中查看",
+  "cdkPage_inviteHint": "這是邀請制項目，請在網頁中查看",
+  "cdkPage_notStarted": "{time} 開始領取",
+  "@cdkPage_notStarted": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "cdkPage_ended": "領取已結束",
+  "cdkPage_trustTooLow": "需要信任等級 {level} 以上",
+  "@cdkPage_trustTooLow": {
+    "placeholders": {
+      "level": {
+        "type": "int"
+      }
+    }
+  },
+  "cdkPage_soldOut": "已經領完了",
+  "cdkPage_receiveSuccess": "領取成功",
+  "cdkPage_receiveFailed": "領取失敗，請稍後重試",
+  "cdkPage_payUrlInvalid": "付款地址不是 LINUX DO Credit，已攔截",
+  "cdkPage_continuePay": "繼續支付 {amount} LDC",
+  "@cdkPage_continuePay": {
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
+  "cdkPage_payAndReceive": "支付 {amount} LDC 並領取",
+  "@cdkPage_payAndReceive": {
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
+  "cdkPage_receive": "領取",
+  "cdkPage_byCreator": "由 {name} 分發",
+  "@cdkPage_byCreator": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "cdkPage_stock": "剩餘 {available}/{total}",
+  "@cdkPage_stock": {
+    "placeholders": {
+      "available": {
+        "type": "int"
+      },
+      "total": {
+        "type": "int"
+      }
+    }
+  },
+  "cdkPage_price": "{amount} LDC",
+  "@cdkPage_price": {
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
+  "cdkPage_free": "免費",
+  "cdkPage_minTrust": "信任等級 ≥ {level}",
+  "@cdkPage_minTrust": {
+    "placeholders": {
+      "level": {
+        "type": "int"
+      }
+    }
+  },
+  "cdkPage_oneIpOnce": "同一 IP 限領一次",
+  "cdkPage_alreadyReceived": "你已領取"
+}

@@ -4,12 +4,16 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/cdk_user_info.dart';
+import '../services/cdk_api_service.dart';
 import '../services/cdk_oauth_service.dart';
 import '../services/network/exceptions/oauth_exception.dart';
 import '../services/site_context.dart';
 import 'core_providers.dart';
 
 final cdkOAuthServiceProvider = Provider((ref) => CdkOAuthService());
+
+/// CDK 站的原生业务接口（领取记录、项目、领取）
+final cdkApiServiceProvider = Provider((ref) => CdkApiService());
 
 final cdkUserInfoProvider =
     AsyncNotifierProvider<CdkUserInfoNotifier, CdkUserInfo?>(() {

@@ -1,0 +1,119 @@
+{
+  "@@locale": "en",
+  "cdkPage_captchaTitle": "Verification",
+  "cdkPage_captchaWaiting": "Verifying…",
+  "cdkPage_captchaTimeout": "Verification timed out. Please try again.",
+  "cdkPage_captchaExpired": "Verification expired. Please try again.",
+  "cdkPage_captchaLoadFailed": "Couldn't load the verification. Check your network and try again.",
+  "cdkPage_captchaFailed": "Verification failed: {message}",
+  "@cdkPage_captchaFailed": {
+    "placeholders": {
+      "message": {
+        "type": "String"
+      }
+    }
+  },
+  "cdkPage_captchaUnavailable": "Verification is unavailable right now. You can claim it on the web from the top-right menu.",
+  "cdkPage_openInBrowser": "Open on the web",
+  "cdkPage_notAuthorized": "LINUX DO CDK isn't authorized yet. Authorize it to see your points and history and claim CDKs in the app.",
+  "cdkPage_authorize": "Authorize",
+  "cdkPage_received": "Claimed",
+  "cdkPage_receivedCount": "Claimed ({count})",
+  "@cdkPage_receivedCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "cdkPage_searchHint": "Search projects",
+  "cdkPage_receivedEmpty": "You haven't claimed any CDKs yet",
+  "cdkPage_noMatches": "No matching records",
+  "cdkPage_trustLevel": "Trust level {level}",
+  "@cdkPage_trustLevel": {
+    "placeholders": {
+      "level": {
+        "type": "int"
+      }
+    }
+  },
+  "cdkPage_projectTitle": "CDK giveaway",
+  "cdkPage_lotteryHint": "This is a lottery. Check the result on the web.",
+  "cdkPage_inviteHint": "This is invite-only. Open it on the web.",
+  "cdkPage_notStarted": "Opens at {time}",
+  "@cdkPage_notStarted": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "cdkPage_ended": "This giveaway has ended",
+  "cdkPage_trustTooLow": "Requires trust level {level} or above",
+  "@cdkPage_trustTooLow": {
+    "placeholders": {
+      "level": {
+        "type": "int"
+      }
+    }
+  },
+  "cdkPage_soldOut": "All claimed",
+  "cdkPage_receiveSuccess": "Claimed",
+  "cdkPage_receiveFailed": "Couldn't claim it. Please try again later.",
+  "cdkPage_payUrlInvalid": "The payment link isn't LINUX DO Credit, so it was blocked.",
+  "cdkPage_continuePay": "Continue paying {amount} LDC",
+  "@cdkPage_continuePay": {
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
+  "cdkPage_payAndReceive": "Pay {amount} LDC and claim",
+  "@cdkPage_payAndReceive": {
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
+  "cdkPage_receive": "Claim",
+  "cdkPage_byCreator": "Shared by {name}",
+  "@cdkPage_byCreator": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "cdkPage_stock": "{available}/{total} left",
+  "@cdkPage_stock": {
+    "placeholders": {
+      "available": {
+        "type": "int"
+      },
+      "total": {
+        "type": "int"
+      }
+    }
+  },
+  "cdkPage_price": "{amount} LDC",
+  "@cdkPage_price": {
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
+  "cdkPage_free": "Free",
+  "cdkPage_minTrust": "Trust level ≥ {level}",
+  "@cdkPage_minTrust": {
+    "placeholders": {
+      "level": {
+        "type": "int"
+      }
+    }
+  },
+  "cdkPage_oneIpOnce": "One claim per IP",
+  "cdkPage_alreadyReceived": "You've claimed this"
+}

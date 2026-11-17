@@ -1,0 +1,119 @@
+{
+  "@@locale": "zh",
+  "cdkPage_captchaTitle": "人机验证",
+  "cdkPage_captchaWaiting": "正在验证…",
+  "cdkPage_captchaTimeout": "验证超时，请重试",
+  "cdkPage_captchaExpired": "验证已过期，请重试",
+  "cdkPage_captchaLoadFailed": "验证组件加载失败，请检查网络后重试",
+  "cdkPage_captchaFailed": "人机验证失败：{message}",
+  "@cdkPage_captchaFailed": {
+    "placeholders": {
+      "message": {
+        "type": "String"
+      }
+    }
+  },
+  "cdkPage_captchaUnavailable": "暂时无法加载人机验证，可点右上角在网页中领取",
+  "cdkPage_openInBrowser": "在网页中打开",
+  "cdkPage_notAuthorized": "还没有授权 LINUX DO CDK。授权后可以在 App 里查看积分和领取记录、直接领取 CDK",
+  "cdkPage_authorize": "授权",
+  "cdkPage_received": "领取记录",
+  "cdkPage_receivedCount": "领取记录（{count}）",
+  "@cdkPage_receivedCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "cdkPage_searchHint": "搜索项目名称",
+  "cdkPage_receivedEmpty": "还没有领取过 CDK",
+  "cdkPage_noMatches": "没有匹配的记录",
+  "cdkPage_trustLevel": "信任等级 {level}",
+  "@cdkPage_trustLevel": {
+    "placeholders": {
+      "level": {
+        "type": "int"
+      }
+    }
+  },
+  "cdkPage_projectTitle": "CDK 分发",
+  "cdkPage_lotteryHint": "这是抽奖项目，中奖结果请在网页中查看",
+  "cdkPage_inviteHint": "这是邀请制项目，请在网页中查看",
+  "cdkPage_notStarted": "{time} 开始领取",
+  "@cdkPage_notStarted": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "cdkPage_ended": "领取已结束",
+  "cdkPage_trustTooLow": "需要信任等级 {level} 及以上",
+  "@cdkPage_trustTooLow": {
+    "placeholders": {
+      "level": {
+        "type": "int"
+      }
+    }
+  },
+  "cdkPage_soldOut": "已经领完了",
+  "cdkPage_receiveSuccess": "领取成功",
+  "cdkPage_receiveFailed": "领取失败，请稍后重试",
+  "cdkPage_payUrlInvalid": "支付地址不是 LINUX DO Credit，已拦截",
+  "cdkPage_continuePay": "继续支付 {amount} LDC",
+  "@cdkPage_continuePay": {
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
+  "cdkPage_payAndReceive": "支付 {amount} LDC 并领取",
+  "@cdkPage_payAndReceive": {
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
+  "cdkPage_receive": "领取",
+  "cdkPage_byCreator": "由 {name} 分发",
+  "@cdkPage_byCreator": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "cdkPage_stock": "剩余 {available}/{total}",
+  "@cdkPage_stock": {
+    "placeholders": {
+      "available": {
+        "type": "int"
+      },
+      "total": {
+        "type": "int"
+      }
+    }
+  },
+  "cdkPage_price": "{amount} LDC",
+  "@cdkPage_price": {
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
+  "cdkPage_free": "免费",
+  "cdkPage_minTrust": "信任等级 ≥ {level}",
+  "@cdkPage_minTrust": {
+    "placeholders": {
+      "level": {
+        "type": "int"
+      }
+    }
+  },
+  "cdkPage_oneIpOnce": "同一 IP 限领一次",
+  "cdkPage_alreadyReceived": "你已领取"
+}
