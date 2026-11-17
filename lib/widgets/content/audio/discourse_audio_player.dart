@@ -1,9 +1,11 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:just_audio/just_audio.dart';
 
 import '../../../l10n/s.dart';
+import '../../../services/log/log_writer.dart';
 import '../../../services/network/gateway_media_source.dart';
 import '../../media_player/controls/playback_speed_menu.dart';
 
@@ -29,7 +31,14 @@ class DiscourseAudioPlayer extends StatefulWidget {
 }
 
 class _DiscourseAudioPlayerState extends State<DiscourseAudioPlayer> {
-  final AudioPlayer _player = AudioPlayer();
+  /// just_audio 默认用自带的本机代理转发自定义请求头，转发时又把 `Host` 写回
+  /// 目标地址自己的 host（`_getUrl`）。改写到本机网关的地址于是带着
+  /// `Host: 127.0.0.1:端口` 到网关，被回 400「Loopback host is not proxied」——
+  /// 加速模式下帖子里的音频（外链、论坛上传、语音消息）全部放不出来（2026-11
+  /// 佬友反馈）。安卓上让 ExoPlayer 自己带请求头，与视频播放器同一条路
+  final AudioPlayer _player = AudioPlayer(
+    useProxyForRequestHeaders: defaultTargetPlatform != TargetPlatform.android,
+  );
   bool _ready = false;
   Object? _error;
 
@@ -44,20 +53,68 @@ class _DiscourseAudioPlayerState extends State<DiscourseAudioPlayer> {
   }
 
   Future<void> _init() async {
+    final url = widget.url;
+    final watch = Stopwatch()..start();
+    // 播放器自己联网，不经过 Dart 网关：改写到本机网关才走得了 ECH
+    final source = GatewayMediaSource.resolve(url);
     try {
-      // 播放器自己联网，不经过 Dart 网关：改写到本机网关才走得了 ECH
-      final source = GatewayMediaSource.resolve(widget.url);
-      await _player.setUrl(
-        source.uri.toString(),
-        headers: source.headers.isEmpty ? null : source.headers,
-      );
-      if (mounted) setState(() => _ready = true);
+      await _load(source);
+      if (mounted && url == widget.url) setState(() => _ready = true);
+      return;
     } catch (e) {
-      // 平台差异排查的关键线索:AVFoundation 对容器/扩展名远比
-      // ExoPlayer 挑剔,失败原因只在这里可见(对齐 DiscourseVideoPlayer)
-      debugPrint('[Audio] 加载失败 url=${widget.url} error=$e');
-      if (mounted) setState(() => _error = e);
+      _logFailure(source.viaGateway, watch, e);
+      if (!source.viaGateway || !mounted || url != widget.url) {
+        if (mounted && url == widget.url) setState(() => _error = e);
+        return;
+      }
     }
+    // 网关那条路不通（外链站点经网关被拒等）：直连再试一次，对齐视频播放器
+    try {
+      await _load(GatewayMediaSource.direct(url));
+      _logRetried(watch);
+      if (mounted && url == widget.url) setState(() => _ready = true);
+    } catch (e) {
+      _logFailure(false, watch, e);
+      if (mounted && url == widget.url) setState(() => _error = e);
+    }
+  }
+
+  Future<void> _load(GatewayMediaSource source) => _player.setUrl(
+    source.uri.toString(),
+    headers: source.headers.isEmpty ? null : source.headers,
+  );
+
+  /// 失败原因只在这里拿得到（ExoPlayer 的 Response code 等），release 包的
+  /// debugPrint 是空的，记进应用日志；只记域名和路径
+  void _logFailure(bool viaGateway, Stopwatch watch, Object error) {
+    final uri = Uri.tryParse(widget.url);
+    LogWriter.instance.write({
+      'timestamp': DateTime.now().toIso8601String(),
+      'level': 'warning',
+      'type': 'media',
+      'event': 'audio_load_failed',
+      'message': '音频加载失败',
+      'host': uri?.host,
+      'path': uri?.path,
+      'viaGateway': viaGateway,
+      'elapsedMs': watch.elapsedMilliseconds,
+      'error': error.toString(),
+      ...GatewayMediaSource.diagnostics(),
+    });
+  }
+
+  void _logRetried(Stopwatch watch) {
+    final uri = Uri.tryParse(widget.url);
+    LogWriter.instance.write({
+      'timestamp': DateTime.now().toIso8601String(),
+      'level': 'info',
+      'type': 'media',
+      'event': 'audio_direct_retry_ok',
+      'message': '音频直连重试成功',
+      'host': uri?.host,
+      'path': uri?.path,
+      'elapsedMs': watch.elapsedMilliseconds,
+    });
   }
 
   @override
