@@ -176,15 +176,25 @@ class LdStoreToken {
 
 /// 商城 OAuth 回调交回的登录结果：回跳地址 hash 或 query 里的 `ldsp_oauth`，
 /// 内容是 base64url 编码的 `{t: token, u: user, j: isJoined, ts}`。
+/// 新版授权（PKCE，2026-11 商城升级后）落点里给的是一次性兑换码，不是凭据：
+/// `ldsp_oauth = base64(json {c: code, s: state, exp})`，要带着当初的 verifier
+/// 去 `POST /api/shop/auth/exchange` 换凭据。形状校验照商城前端 `isOAuthHandoff`
+class LdStoreOAuthHandoff {
+  const LdStoreOAuthHandoff({required this.code, required this.state});
+
+  final String code;
+  final String state;
+}
+
 class LdStoreLoginPayload {
   LdStoreLoginPayload._();
 
-  /// 从回跳地址取出凭据；载荷里的用户必须与凭据本身是同一个人。
-  static LdStoreToken? fromRedirect(Uri location, {DateTime? now}) {
+  /// 落点里 `ldsp_oauth` 解出来的 JSON（与商城前端一致：兼容 + 被转成空格、
+  /// URL-safe base64、缺 padding、先 encodeURIComponent 再 base64）
+  static Map<dynamic, dynamic>? _decode(Uri location) {
     final raw = _param(location.fragment) ?? _param(location.query);
-    if (raw == null || raw.isEmpty) return null;
+    if (raw == null || raw.isEmpty || raw.length > 32768) return null;
     try {
-      // 与商城前端一致：兼容 + 被转成空格、URL-safe base64、缺 padding
       final normalized = Uri.decodeComponent(raw)
           .replaceAll(RegExp(r'\s'), '+')
           .replaceAll('-', '+')
@@ -198,10 +208,38 @@ class LdStoreLoginPayload {
       try {
         json = jsonDecode(text);
       } on FormatException {
-        // 另一种写法：先 encodeURIComponent 再 base64
         json = jsonDecode(Uri.decodeComponent(text));
       }
-      if (json is! Map) return null;
+      return json is Map ? json : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 新版：一次性兑换码（没有就返回 null，再试旧版 [fromRedirect]）
+  static LdStoreOAuthHandoff? handoffFromRedirect(Uri location) {
+    final json = _decode(location);
+    if (json == null) return null;
+    final code = json['c'];
+    final state = json['s'];
+    final exp = json['exp'];
+    if (code is! String ||
+        !RegExp(r'^[A-Za-z0-9_-]{43,128}$').hasMatch(code) ||
+        state is! String ||
+        state.isEmpty ||
+        state.length > 8192 ||
+        exp is! int ||
+        exp <= 0) {
+      return null;
+    }
+    return LdStoreOAuthHandoff(code: code, state: state);
+  }
+
+  /// 旧版：落点里直接是凭据；载荷里的用户必须与凭据本身是同一个人。
+  static LdStoreToken? fromRedirect(Uri location, {DateTime? now}) {
+    final json = _decode(location);
+    if (json == null) return null;
+    try {
       final token = LdStoreToken.parse(json['t']?.toString(), now: now);
       final user = json['u'];
       if (token == null || user is! Map) return null;

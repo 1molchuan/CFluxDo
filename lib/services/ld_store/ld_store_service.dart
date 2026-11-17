@@ -1,6 +1,9 @@
 import 'dart:convert';
+import 'dart:math';
 
+import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:html/parser.dart' as html_parser;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -26,7 +29,16 @@ class LdStoreAuthExpiredException implements Exception {
 
 /// 授权走到「等用户确认」这一步时的状态。
 class LdStorePendingAuthorization {
-  const LdStorePendingAuthorization._({this.approveUrl, this.callbackUrl});
+  const LdStorePendingAuthorization._({
+    this.approveUrl,
+    this.callbackUrl,
+    this.verifier,
+    this.state,
+  });
+
+  /// PKCE：初始化时生成的 verifier 与商城给的 state，回来换凭据时要用
+  final String? verifier;
+  final String? state;
 
   /// connect.linux.do 的同意链接；用户在确认框里点「允许」后才请求。
   final Uri? approveUrl;
@@ -354,19 +366,31 @@ class LdStoreService {
   /// 不发出同意请求——那一步要等用户在确认框里点「允许」。
   Future<LdStorePendingAuthorization> beginAuthorization() async {
     final Uri authUrl;
+    // 2026-11 商城升级：初始化必须带 PKCE 的 code_challenge，否则回
+    // INVALID_PKCE「登录页面或插件版本过旧」（旧版 App 因此授权失败）
+    final pkce = generatePkce();
+    final String? state;
     try {
       final response = await _storeDio.get<dynamic>(
         '$authApiBase/api/auth/init',
         queryParameters: {
           'site': 'linux.do',
           'return_url': returnUrl.toString(),
+          'code_challenge': pkce.challenge,
         },
       );
       final data = _unwrap(response.data);
       final raw = data is Map ? data['auth_url'] : null;
+      final rawState = data is Map ? data['state'] : null;
+      state = rawState is String && rawState.isNotEmpty ? rawState : null;
       authUrl = Uri.parse('$raw');
-    } on DioException {
-      throw Exception(S.current.oauth_getAuthUrlFailed);
+    } on DioException catch (e) {
+      final message = _callbackError(e.response?.data);
+      throw Exception(
+        message == null
+            ? S.current.oauth_getAuthUrlFailed
+            : '${S.current.oauth_getAuthUrlFailed}：$message',
+      );
     } on FormatException {
       throw Exception(S.current.oauth_getAuthUrlFailed);
     }
@@ -399,10 +423,18 @@ class LdStoreService {
             !approve.path.startsWith('/oauth2/approve/')) {
           throw Exception(S.current.oauth_approvePageParseFailed);
         }
-        return LdStorePendingAuthorization._(approveUrl: approve);
+        return LdStorePendingAuthorization._(
+          approveUrl: approve,
+          verifier: pkce.verifier,
+          state: state,
+        );
       }
       if (_isOAuthCallback(location)) {
-        return LdStorePendingAuthorization._(callbackUrl: location);
+        return LdStorePendingAuthorization._(
+          callbackUrl: location,
+          verifier: pkce.verifier,
+          state: state,
+        );
       }
       // 授权页可能先经论坛 SSO 换 connect 会话再跳回；只在这两个域名里跟随
       if (location.scheme != 'https' ||
@@ -484,7 +516,11 @@ class LdStoreService {
         _callbackError(response.data) ?? S.current.oauth_callbackFailed,
       );
     }
-    final token = LdStoreLoginPayload.fromRedirect(landing, now: _clock());
+    // 新版落点是一次性兑换码，带 verifier 去换凭据；旧版落点直接是凭据
+    final handoff = LdStoreLoginPayload.handoffFromRedirect(landing);
+    final LdStoreToken? token = handoff != null
+        ? await _exchange(handoff, pending)
+        : LdStoreLoginPayload.fromRedirect(landing, now: _clock());
     if (token == null) {
       AppLogger.warning(
         'LD士多回调的登录结果解析不出: '
@@ -501,6 +537,70 @@ class LdStoreService {
       throw Exception(S.current.ldStore_accountMismatch);
     }
     await saveToken(expectedUsername, token);
+    return token;
+  }
+
+  /// PKCE：verifier 是 32 字节随机数的十六进制（64 位），challenge 是它的
+  /// SHA-256 做 base64url、去掉 `=`（与商城前端 `prepareOAuthHandoff` 一致）
+  @visibleForTesting
+  static ({String verifier, String challenge}) generatePkce() {
+    final random = Random.secure();
+    final verifier = List<int>.generate(
+      32,
+      (_) => random.nextInt(256),
+    ).map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+    return (verifier: verifier, challenge: pkceChallenge(verifier));
+  }
+
+  @visibleForTesting
+  static String pkceChallenge(String verifier) => base64Url
+      .encode(sha256.convert(ascii.encode(verifier)).bytes)
+      .replaceAll('=', '');
+
+  /// 用一次性兑换码换凭据（POST /api/shop/auth/exchange），state 必须是初始化时那个
+  Future<LdStoreToken?> _exchange(
+    LdStoreOAuthHandoff handoff,
+    LdStorePendingAuthorization pending,
+  ) async {
+    final verifier = pending.verifier;
+    if (verifier == null ||
+        (pending.state != null && pending.state != handoff.state)) {
+      AppLogger.warning(
+        'LD士多授权兑换前校验不过: verifier=${verifier != null} '
+        'stateMatch=${pending.state == handoff.state}',
+        tag: 'LdStore',
+      );
+      throw Exception(S.current.oauth_callbackFailed);
+    }
+    final Response<dynamic> response;
+    try {
+      response = await _storeDio.post<dynamic>(
+        '$apiBase/api/shop/auth/exchange',
+        data: {
+          'code': handoff.code,
+          'state': handoff.state,
+          'verifier': verifier,
+          'origin': siteUrl,
+        },
+      );
+    } on DioException catch (e) {
+      final message = _callbackError(e.response?.data);
+      AppLogger.warning(
+        'LD士多授权兑换失败: status=${e.response?.statusCode} type=${e.type.name}',
+        tag: 'LdStore',
+      );
+      throw Exception(message ?? S.current.oauth_callbackFailed);
+    }
+    final data = _unwrap(response.data);
+    final raw = data is Map ? data['token'] : null;
+    final user = data is Map ? data['user'] : null;
+    final token = LdStoreToken.parse(raw?.toString(), now: _clock());
+    if (token == null ||
+        user is! Map ||
+        '${user['id']}' != token.userId ||
+        '${user['site'] ?? 'linux.do'}' != token.site) {
+      return null;
+    }
     return token;
   }
 

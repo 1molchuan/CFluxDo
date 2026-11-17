@@ -121,10 +121,19 @@ void main() {
       final pending = await service.beginAuthorization();
       expect(pending.approveUrl.toString(), _approve);
       expect(forum.requests.map((r) => r.uri.path), ['/oauth2/authorize']);
-      expect(store.requests.single.uri.queryParameters, {
-        'site': 'linux.do',
-        'return_url': 'https://ldcstore.com/auth/callback?redirect=%2F',
-      });
+      final initQuery = store.requests.single.uri.queryParameters;
+      expect(initQuery['site'], 'linux.do');
+      expect(
+        initQuery['return_url'],
+        'https://ldcstore.com/auth/callback?redirect=%2F',
+      );
+      // 2026-11 商城升级后必须带 PKCE，否则 INVALID_PKCE
+      expect(initQuery['code_challenge'], matches(r'^[A-Za-z0-9_-]{43}$'));
+      expect(pending.state, 'linux.do:state');
+      expect(
+        LdStoreService.pkceChallenge(pending.verifier!),
+        initQuery['code_challenge'],
+      );
 
       final token = await service.completeAuthorization(
         pending,
@@ -144,6 +153,90 @@ void main() {
       expect(store.requests.every((r) => r.headers['cookie'] == null), isTrue);
 
       expect((await service.loadToken('alice'))?.value, jwt);
+    });
+  });
+
+  group('PKCE（新版落点是一次性兑换码）', () {
+    String handoffLanding({String state = 'linux.do:state'}) {
+      final encoded = base64.encode(
+        utf8.encode(
+          jsonEncode({'c': 'c' * 43, 's': state, 'exp': 1999999999}),
+        ),
+      );
+      return 'https://ldcstore.com/auth/callback?redirect=%2F#ldsp_oauth='
+          '${Uri.encodeComponent(encoded)}';
+    }
+
+    const exchange = 'https://api2.ldspro.qzz.io/api/shop/auth/exchange';
+
+    testWidgets('带 verifier 去 exchange 换凭据，再校验并存好', (tester) async {
+      await _pumpApp(tester);
+      await tester.runAsync(() async {
+        build(
+          storeRoutesOverride: {
+            ...storeRoutes(landingUrl: handoffLanding()),
+            exchange: (_) => FakeRoute(
+              200,
+              body: {
+                'success': true,
+                'data': {
+                  'token': jwt,
+                  'user': {'id': 12345, 'site': 'linux.do'},
+                },
+              },
+            ),
+          },
+        );
+        final pending = await service.beginAuthorization();
+        final token = await service.completeAuthorization(
+          pending,
+          expectedUsername: 'alice',
+        );
+        expect(token.value, jwt);
+        final sent = store.requests.firstWhere((r) => r.uri.path.endsWith('/exchange'));
+        expect(sent.method, 'POST');
+        final body = sent.data is String
+            ? jsonDecode(sent.data as String)
+            : sent.data as Map;
+        expect(body['code'], 'c' * 43);
+        expect(body['state'], 'linux.do:state');
+        expect(body['verifier'], pending.verifier);
+        expect(body['origin'], 'https://ldcstore.com');
+        expect((await service.loadToken('alice'))?.value, jwt);
+      });
+    });
+
+    testWidgets('落点的 state 和初始化时不一致：不去换、授权失败', (tester) async {
+      await _pumpApp(tester);
+      await tester.runAsync(() async {
+        build(
+          storeRoutesOverride: {
+            ...storeRoutes(landingUrl: handoffLanding(state: 'other')),
+            exchange: (_) => FakeRoute(500),
+          },
+        );
+        final pending = await service.beginAuthorization();
+        await expectLater(
+          service.completeAuthorization(pending, expectedUsername: 'alice'),
+          throwsA(isA<Exception>()),
+        );
+        expect(
+          store.requests.where((r) => r.uri.path.endsWith('/exchange')),
+          isEmpty,
+        );
+        expect(await service.loadToken('alice'), isNull);
+      });
+    });
+
+    test('challenge 与商城前端算法一致（SHA-256 → base64url 去 =）', () {
+      // python: base64.urlsafe_b64encode(sha256(b'abc').digest()).rstrip(b'=')
+      expect(
+        LdStoreService.pkceChallenge('abc'),
+        'ungWv48Bz-pBQUDeXa4iI7ADYaOWF3qctBD_YfIAFa0',
+      );
+      final pkce = LdStoreService.generatePkce();
+      expect(pkce.verifier, matches(r'^[0-9a-f]{64}$'));
+      expect(pkce.challenge, LdStoreService.pkceChallenge(pkce.verifier));
     });
   });
 
