@@ -18,6 +18,7 @@ import '../../widgets/common/relative_time_text.dart';
 import '../../widgets/common/skeleton.dart';
 import '../../widgets/common/smart_avatar.dart';
 import '../../widgets/desktop_refresh_indicator.dart';
+import '../../widgets/layout/host_bottom_bar_avoider.dart';
 import '../../widgets/layout/master_detail_layout.dart';
 import 'chat_browse_channels_page.dart';
 import 'chat_search_page.dart';
@@ -194,6 +195,8 @@ class _ChatListPageState extends ConsumerState<ChatListPage>
     final (channelBadge, dmBadge) = channelsAsync.value != null
         ? _tabBadges(channelsAsync.value!)
         : (0, 0);
+    // 必须在内层 Scaffold 外面算（FAB 槽位里 padding 已被去掉）
+    final fabLift = HostBottomBarAvoider.liftOf(context);
 
     final listScaffold = Scaffold(
       appBar: AppBar(
@@ -271,15 +274,18 @@ class _ChatListPageState extends ConsumerState<ChatListPage>
           ),
         ),
       ),
-      // 新建会话只对私信有意义;频道 tab 隐藏 FAB
+      // 新建会话只对私信有意义;频道 tab 隐藏 FAB。作为底栏 tab 时要让过底栏
       floatingActionButton: AnimatedBuilder(
         animation: _tabController,
         builder: (context, _) => _tabController.index == 1
-            ? FloatingActionButton(
-                heroTag: 'newChat',
-                onPressed: _openNewChat,
-                tooltip: context.l10n.chat_newChat,
-                child: const Icon(Symbols.add_comment_rounded),
+            ? HostBottomBarAvoider(
+                lift: fabLift,
+                child: FloatingActionButton(
+                  heroTag: 'newChat',
+                  onPressed: _openNewChat,
+                  tooltip: context.l10n.chat_newChat,
+                  child: const Icon(Symbols.add_comment_rounded),
+                ),
               )
             : const SizedBox.shrink(),
       ),

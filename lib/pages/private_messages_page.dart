@@ -22,6 +22,7 @@ import '../widgets/topic/topic_list_skeleton.dart';
 import '../widgets/post/reply_sheet.dart';
 import '../widgets/common/error_view.dart';
 import '../widgets/desktop_refresh_indicator.dart';
+import '../widgets/layout/host_bottom_bar_avoider.dart';
 import '../l10n/s.dart';
 import 'topic_detail_page/topic_detail_page.dart';
 import 'topics_screen.dart' show PaneContentWidget;
@@ -184,11 +185,15 @@ class _PrivateMessagesPageState extends ConsumerState<PrivateMessagesPage>
         ),
         // 新建私信：此前只能从某个用户的头像菜单发起，对方没在可见处
         // 发过言就完全没有路径。对齐 Discourse 网页版私信列表的入口。
-        floatingActionButton: FloatingActionButton(
-          heroTag: 'composePm',
-          onPressed: _composeNewMessage,
-          tooltip: context.l10n.pm_newTitle,
-          child: const Icon(Icons.edit_rounded),
+        // 作为底栏 tab 时要让过底栏；抬高量在内层 Scaffold 外面算
+        floatingActionButton: HostBottomBarAvoider(
+          lift: HostBottomBarAvoider.liftOf(context),
+          child: FloatingActionButton(
+            heroTag: 'composePm',
+            onPressed: _composeNewMessage,
+            tooltip: context.l10n.pm_newTitle,
+            child: const Icon(Icons.edit_rounded),
+          ),
         ),
       ),
     );

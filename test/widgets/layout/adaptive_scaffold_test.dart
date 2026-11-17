@@ -6,6 +6,7 @@ import 'package:fluxdo/pages/topics_page.dart';
 import 'package:fluxdo/providers/theme_provider.dart';
 import 'package:fluxdo/widgets/layout/adaptive_navigation.dart';
 import 'package:fluxdo/widgets/layout/adaptive_scaffold.dart';
+import 'package:fluxdo/widgets/layout/host_bottom_bar_avoider.dart';
 import 'package:fluxdo/theme/vscode_theme.dart';
 import 'package:fluxdo/widgets/layout/vscode_workbench_chrome.dart';
 import 'package:fluxdo/widgets/layout/site_switch_button.dart';
@@ -242,5 +243,120 @@ void main() {
     expect(bodyPadding!.top, 44);
     expect(tester.getTopLeft(find.text('body')).dy, 0);
     expect(find.byType(SiteSwitchButton), findsNothing);
+  });
+
+  for (final floating in [false, true]) {
+    testWidgets('底栏 tab 页自己的 FAB 让过宿主底栏（floating=$floating）', (
+      tester,
+    ) async {
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await tester.binding.setSurfaceSize(const Size(390, 844));
+
+      SharedPreferences.setMockInitialValues({
+        if (floating) 'pref_bottom_nav_floating': true,
+      });
+      final prefs = await SharedPreferences.getInstance();
+      final container = ProviderContainer(
+        overrides: [sharedPreferencesProvider.overrideWithValue(prefs)],
+      );
+      addTearDown(container.dispose);
+
+      const fabKey = ValueKey('fab');
+      // 和聊天页一样：抬高量在内层 Scaffold 外面（页面自己的 context）算
+      Widget page({required bool avoid}) => Builder(
+        builder: (pageContext) {
+          final fab = FloatingActionButton(
+            key: fabKey,
+            onPressed: () {},
+            child: const Icon(Icons.add),
+          );
+          return Scaffold(
+            body: const SizedBox.expand(),
+            floatingActionButton: avoid
+                ? HostBottomBarAvoider(
+                    lift: HostBottomBarAvoider.liftOf(pageContext),
+                    child: fab,
+                  )
+                : fab,
+          );
+        },
+      );
+
+      Future<void> pump({required bool avoid}) => tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: TranslationProvider(
+            child: MaterialApp(
+              home: MediaQuery(
+                data: const MediaQueryData(
+                  size: Size(390, 844),
+                  padding: EdgeInsets.only(top: 44, bottom: 20),
+                  viewPadding: EdgeInsets.only(top: 44, bottom: 20),
+                ),
+                child: AdaptiveScaffold(
+                  selectedIndex: 1,
+                  onDestinationSelected: (_) {},
+                  destinations: const [
+                    AdaptiveDestination(
+                      id: 'home',
+                      icon: Icon(Icons.home_outlined),
+                      selectedIcon: Icon(Icons.home),
+                      label: '首页',
+                    ),
+                    AdaptiveDestination(
+                      id: 'chat',
+                      icon: Icon(Icons.chat_outlined),
+                      selectedIcon: Icon(Icons.chat),
+                      label: '聊天',
+                    ),
+                  ],
+                  body: page(avoid: avoid),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      final navFinder = find.byType(AdaptiveBottomNavigation);
+
+      // 不包：FAB 只让系统安全区，落进底栏范围（佬友截图里的样子）
+      await pump(avoid: false);
+      await tester.pumpAndSettle();
+      expect(
+        tester.getBottomLeft(find.byKey(fabKey)).dy,
+        greaterThan(tester.getTopLeft(navFinder).dy),
+      );
+
+      // 包上：FAB 底边在底栏（悬浮胶囊含外边距）顶边之上
+      await pump(avoid: true);
+      await tester.pumpAndSettle();
+      expect(
+        tester.getBottomLeft(find.byKey(fabKey)).dy,
+        lessThanOrEqualTo(tester.getTopLeft(navFinder).dy),
+      );
+    });
+  }
+
+  testWidgets('独立路由打开时 HostBottomBarAvoider 不额外抬高', (tester) async {
+    double? lift;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: MediaQuery(
+          data: const MediaQueryData(
+            size: Size(390, 844),
+            padding: EdgeInsets.only(bottom: 20),
+            viewPadding: EdgeInsets.only(bottom: 20),
+          ),
+          child: Builder(
+            builder: (context) {
+              lift = HostBottomBarAvoider.liftOf(context);
+              return const SizedBox();
+            },
+          ),
+        ),
+      ),
+    );
+    expect(lift, 0);
   });
 }
