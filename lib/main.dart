@@ -59,6 +59,7 @@ import 'services/cf_challenge_logger.dart';
 import 'services/browser_trust_coordinator.dart';
 import 'services/startup/app_startup.dart';
 import 'services/startup/startup_timeline.dart';
+import 'services/session/session_token_diagnostics.dart';
 import 'services/site_context.dart';
 import 'config/forum_site.dart';
 import 'services/update_service.dart';
@@ -460,6 +461,14 @@ Future<void> main(List<String> args) async {
   unawaited(
     WidgetsBinding.instance.waitUntilFirstFrameRasterized.then(
       (_) => StartupTimeline.mark('first_frame'),
+    ),
+  );
+
+  // 上个进程留下的两站两端 _t 摘要（排查切站 / 切账号后掉登录）。首帧后读，
+  // 不占启动；那时首页预加载多半还没回来，记的基本还是启动前的样子
+  unawaited(
+    WidgetsBinding.instance.waitUntilFirstFrameRasterized.then(
+      (_) => SessionTokenDiagnostics.log('app_start'),
     ),
   );
 

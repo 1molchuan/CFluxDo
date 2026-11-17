@@ -172,9 +172,11 @@ class _AccountSwitcherSheetState extends ConsumerState<AccountSwitcherSheet> {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    final currentId = ref.watch(
-      currentUserProvider.select((user) => user.value?.id),
-    );
+    // 刚切完账号时 currentUserProvider 还在重载、拿不到值：退回服务里的当前
+    // 用户，免得当前账号被当成别的账号、能点
+    final currentId =
+        ref.watch(currentUserProvider.select((user) => user.value?.id)) ??
+        ref.read(discourseServiceProvider).currentUserNotifier.value?.id;
     final accounts = ref.watch(savedAccountsProvider).value ?? const [];
     final sorted = [
       ...accounts.where((a) => a.userId == currentId),

@@ -1094,6 +1094,12 @@ mixin _AuthMixin on _DiscourseServiceBase {
 
     // 先切断在途请求，避免失效会话继续产生 403 噪声
     AuthSession().advance();
+    final lostUserId = currentUserNotifier.value?.id;
+    await SessionTokenDiagnostics.log(
+      'server_forced_logout',
+      extra: {'source': source},
+      timeout: const Duration(milliseconds: 1500),
+    );
 
     try {
       // callApi: false —— 会话已被服务端撤销，再调 DELETE /session 只会 403
@@ -1103,8 +1109,23 @@ mixin _AuthMixin on _DiscourseServiceBase {
       // 登录着”的中间态（同 logout() 里第四~六步的 try/finally 理由）
       _isLoggingOut = false;
     }
+    await _markSavedAccountNeedsLogin(lostUserId);
 
     _authErrorController.add(S.current.auth_loggedOutByServer);
+  }
+
+  /// 被动登出后把这个账号在本机账号列表里标成「要重新登录」。
+  ///
+  /// 会话已被服务端拒绝，列表里存的凭据是同一会话更早的值，同样失效；不标
+  /// 的话账号列表照常显示它，点过去只会被拒再切回来（2026-11 佬友日志里连撞
+  /// 两次才进登录页）。不在列表里的账号什么都不做。
+  Future<void> _markSavedAccountNeedsLogin(int? userId) async {
+    if (userId == null) return;
+    try {
+      await AccountStore().markNeedsLogin(userId, needsLogin: true);
+    } catch (e) {
+      debugPrint('[Auth] 标记已保存账号需重新登录失败: $e');
+    }
   }
 
   Future<void> _handleAuthInvalid(
@@ -1178,9 +1199,18 @@ mixin _AuthMixin on _DiscourseServiceBase {
       'sentHasT': sentHasT,
       'sentTLen': sentTLen,
     });
+    // 两站两端的 _t 摘要：分清是 WebView 那边动过（两端分叉）还是服务端删了
+    // 整条会话（两端一致却都被拒）
+    final lostUserId = currentUserNotifier.value?.id;
+    await SessionTokenDiagnostics.log(
+      'passive_logout',
+      extra: {'source': source},
+      timeout: const Duration(milliseconds: 1500),
+    );
 
     await AuthIssueNoticeService.instance.recordPassiveLogout();
     await logout(callApi: false, refreshPreload: true);
+    await _markSavedAccountNeedsLogin(lostUserId);
     _isLoggingOut = false;
     _authErrorController.add(message);
   }

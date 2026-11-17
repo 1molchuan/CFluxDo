@@ -9,6 +9,7 @@ import 'cf_clearance_refresh_service.dart';
 import 'log/log_writer.dart';
 import 'network/doh/network_settings_service.dart';
 import 'network/doh_proxy/doh_proxy_service.dart';
+import 'session/session_token_diagnostics.dart';
 import 'site_context.dart';
 import 'site_data_lifecycle.dart';
 import 'user_api_key_service.dart';
@@ -48,6 +49,12 @@ class SiteSwitchService {
       }
       await SiteContext.persistSelection(target);
       selectionSaved = true;
+      // 离站前记下各站点两端的 _t：排查「切走一阵再切回来，账号掉了」
+      await SessionTokenDiagnostics.log(
+        'site_switch',
+        extra: {'target': target.host},
+        timeout: const Duration(seconds: 2),
+      );
       await LogWriter.instance.flushNow();
 
       // 桌面使用进程重启，避免在活跃 WebView2 下析构环境导致消息泵卡死。

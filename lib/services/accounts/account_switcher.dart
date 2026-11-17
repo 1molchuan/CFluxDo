@@ -19,6 +19,7 @@ import '../network/cookie/webview_cookie_priming.dart';
 import '../network/cookie/webview_cookie_push.dart';
 import '../preloaded_data_service.dart';
 import '../session/session_token_authority.dart';
+import '../session/session_token_diagnostics.dart';
 import '../site_context.dart';
 import '../site_data_lifecycle.dart';
 import '../user_api_key_service.dart';
@@ -156,6 +157,12 @@ class AccountSwitcher {
     if (_busy || CfChallengeService().isVerifying) {
       return AccountSwitchOutcome.busy;
     }
+    // 点的就是当前账号（刚切完、面板里的「当前」还没刷新时会发生，佬友日志
+    // 里有两次）：不动。以前会把同一个账号的 cookie 清掉再写回、多轮换一次
+    if (_service.currentUserNotifier.value?.id == target.userId) {
+      _log('account_switch_skipped_current', target: target);
+      return AccountSwitchOutcome.switched;
+    }
     _busy = true;
     final timing = _SwitchTiming();
     SavedAccount? previous;
@@ -182,6 +189,13 @@ class AccountSwitcher {
       if (attached != _Attach.invalid) {
         await store.markNeedsLogin(target.userId, needsLogin: false);
         _log('account_switch_done', target: target, previous: previous);
+        // 切完两端各是哪枚 _t（核对请求可能刚轮换过），排查之后掉登录用
+        unawaited(
+          SessionTokenDiagnostics.log(
+            'account_switch',
+            extra: {'targetUserId': target.userId},
+          ),
+        );
         return outcome = attached == _Attach.confirmed
             ? AccountSwitchOutcome.switched
             : AccountSwitchOutcome.switchedUnverified;
