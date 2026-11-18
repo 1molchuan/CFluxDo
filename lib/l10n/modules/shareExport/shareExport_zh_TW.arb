@@ -146,5 +146,9 @@
   "share_themeWhite": "純白",
   "share_uploadFailed": "上傳失敗，請重試",
   "share_uploading": "正在上傳...",
-  "share_themeMojian": "墨箋"
+  "share_themeMojian": "墨箋",
+  "download_probingRoutes": "正在測速選擇下載線路 {done}/{total}",
+  "download_route": "線路：{route}",
+  "download_routeSwitched": "{from} 不通或太慢，已換到 {to}",
+  "download_allRoutesFailed": "所有下載線路都沒下完，請稍後重試，或到 GitHub 手動下載"
 }

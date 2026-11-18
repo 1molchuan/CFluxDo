@@ -14,6 +14,10 @@ import '../l10n/s.dart';
 class ApkAsset {
   final String downloadUrl;
   final String? sha256Url;
+
+  /// GitHub 接口给的 SHA-256（asset 的 `digest`，小写十六进制）。检查更新时
+  /// 从 api.github.com 拿到，不经任何镜像，下载走公共镜像时靠它核对内容
+  final String? sha256;
   final String architecture;
   final int size;
   final String name;
@@ -21,6 +25,7 @@ class ApkAsset {
   ApkAsset({
     required this.downloadUrl,
     this.sha256Url,
+    this.sha256,
     required this.architecture,
     required this.size,
     required this.name,
@@ -29,6 +34,7 @@ class ApkAsset {
   Map<String, dynamic> toJson() => {
         'downloadUrl': downloadUrl,
         'sha256Url': sha256Url,
+        if (sha256 != null) 'sha256': sha256,
         'architecture': architecture,
         'size': size,
         'name': name,
@@ -37,6 +43,7 @@ class ApkAsset {
   factory ApkAsset.fromJson(Map<String, dynamic> json) => ApkAsset(
         downloadUrl: json['downloadUrl'] as String,
         sha256Url: json['sha256Url'] as String?,
+        sha256: json['sha256'] as String?,
         architecture: json['architecture'] as String,
         size: json['size'] as int,
         name: json['name'] as String,
@@ -407,6 +414,7 @@ class UpdateService {
       apkAssets.add(ApkAsset(
         downloadUrl: asset['browser_download_url'] as String,
         sha256Url: sha256Map[name],
+        sha256: sha256OfDigest(asset['digest']),
         architecture: architecture,
         size: asset['size'] as int? ?? 0,
         name: name,
@@ -414,6 +422,15 @@ class UpdateService {
     }
 
     return apkAssets;
+  }
+
+  /// GitHub 资源的 `digest`（`sha256:<64 位十六进制>`）→ 小写十六进制；
+  /// 没有或格式不对返回 null
+  @visibleForTesting
+  static String? sha256OfDigest(Object? digest) {
+    if (digest is! String) return null;
+    final match = RegExp(r'^sha256:([0-9a-fA-F]{64})$').firstMatch(digest.trim());
+    return match?.group(1)!.toLowerCase();
   }
 
   /// 从 APK 文件名中识别 ABI（`cfluxdo-1.1.0-arm64-v8a.apk`）；不是发行 ABI 的文件一律忽略

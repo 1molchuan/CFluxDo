@@ -14,11 +14,15 @@ class ApkUpdateState {
   final ApkAsset? asset;
   final String? error;
 
+  /// 测速进度、当前线路、换线等补充说明
+  final String? detail;
+
   const ApkUpdateState({
     this.status = ApkDownloadStatus.idle,
     this.progress = 0,
     this.asset,
     this.error,
+    this.detail,
   });
 
   bool get isActive =>
@@ -103,6 +107,7 @@ class ApkUpdateNotifier extends StateNotifier<ApkUpdateState> {
       progress: p.progress,
       asset: asset,
       error: p.error,
+      detail: p.detail,
     );
     _syncNotification();
   }

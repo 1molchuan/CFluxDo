@@ -146,5 +146,36 @@
   "share_themeWhite": "纯白",
   "share_uploadFailed": "上传失败，请重试",
   "share_uploading": "正在上传...",
-  "share_themeMojian": "墨笺"
+  "share_themeMojian": "墨笺",
+  "download_probingRoutes": "正在测速选择下载线路 {done}/{total}",
+  "@download_probingRoutes": {
+    "placeholders": {
+      "done": {
+        "type": "int"
+      },
+      "total": {
+        "type": "int"
+      }
+    }
+  },
+  "download_route": "线路：{route}",
+  "@download_route": {
+    "placeholders": {
+      "route": {
+        "type": "String"
+      }
+    }
+  },
+  "download_routeSwitched": "{from} 不通或太慢，已换到 {to}",
+  "@download_routeSwitched": {
+    "placeholders": {
+      "from": {
+        "type": "String"
+      },
+      "to": {
+        "type": "String"
+      }
+    }
+  },
+  "download_allRoutesFailed": "所有下载线路都没下完，请稍后重试，或到 GitHub 手动下载"
 }

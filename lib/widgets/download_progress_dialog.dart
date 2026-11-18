@@ -167,7 +167,10 @@ class DownloadProgressDialog extends ConsumerWidget {
   }
 
   Widget _buildStatusText(BuildContext context, ApkUpdateState state) {
-    return Text(
+    final detail = state.status == ApkDownloadStatus.error
+        ? null
+        : state.detail;
+    final status = Text(
       _statusText(state),
       textAlign: TextAlign.center,
       style: TextStyle(
@@ -175,6 +178,23 @@ class DownloadProgressDialog extends ConsumerWidget {
         color: _subContentColor(context),
         letterSpacing: 0.5,
       ),
+    );
+    if (detail == null || detail.isEmpty) return status;
+    // 测速进度 / 当前线路 / 换线说明
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        status,
+        const SizedBox(height: 6),
+        Text(
+          detail,
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            fontSize: 12,
+            color: _subContentColor(context).withValues(alpha: 0.75),
+          ),
+        ),
+      ],
     );
   }
 
@@ -187,7 +207,10 @@ class DownloadProgressDialog extends ConsumerWidget {
       case ApkDownloadStatus.downloading:
         return l10n.download_downloading(assetName);
       case ApkDownloadStatus.verifying:
-        return l10n.download_verifying;
+        // 下载前测速选线时带着说明，状态写「正在连接」；下完核对时没有说明
+        return state.detail == null
+            ? l10n.download_verifying
+            : l10n.download_connecting;
       case ApkDownloadStatus.installing:
         return l10n.download_installing;
       case ApkDownloadStatus.completed:

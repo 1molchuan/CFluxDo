@@ -87,5 +87,9 @@
   "share_themeWhite": "White",
   "share_uploadFailed": "Upload failed, please retry",
   "share_uploading": "Uploading...",
-  "share_themeMojian": "Ink & Paper"
+  "share_themeMojian": "Ink & Paper",
+  "download_probingRoutes": "Testing download routes {done}/{total}",
+  "download_route": "Route: {route}",
+  "download_routeSwitched": "{from} failed or was too slow, switched to {to}",
+  "download_allRoutesFailed": "No download route could finish. Try again later, or download it from GitHub."
 }
