@@ -38,6 +38,22 @@ void _hostLists() {
       );
     });
 
+    test('MITM 范围含 LD士多 的网页与接口域（高墙地区明文 SNI 被干扰，要经 ECH）', () {
+      expect(
+        ProxyLeafTrust.mitmHosts,
+        containsAll(['ldcstore.com', 'ldspro.qzz.io']),
+      );
+      expect(
+        ProxyLeafTrust.preallowHosts,
+        containsAll([
+          'ldcstore.com',
+          'api.ldspro.qzz.io',
+          'api1.ldspro.qzz.io',
+          'api2.ldspro.qzz.io',
+        ]),
+      );
+    });
+
     test('预放行列表含 ldstatic 的图片、消息总线与直传主机', () {
       expect(
         ProxyLeafTrust.preallowHosts,

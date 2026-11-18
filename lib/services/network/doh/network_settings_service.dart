@@ -261,6 +261,10 @@ class NetworkSettingsService {
 
   /// linux.do 的静态资源域（cdn / cdn3 / ping / linuxdo-uploads.s3 都在它下面）
   static const _ldstaticHost = 'ldstatic.com';
+
+  /// LD士多（商城网页 ldcstore.com、接口 api / api1 / api2.ldspro.qzz.io）。都在
+  /// Cloudflare 上，借 linux.do 的 ECH 钥匙握手实测 Accepted（2026-11-18）
+  static const ldStoreHosts = ['ldcstore.com', 'ldspro.qzz.io'];
   static const accelAtlasRoutesUrl = 'https://$_atlasHost/v1/routes';
 
   /// cfhub：众包 ECH 测速分池，探针上报与探针令牌都在这里
@@ -1036,6 +1040,9 @@ class NetworkSettingsService {
           // linux.do 的静态资源域（图片 / 表情 / 消息总线 / 直传）：和主站同一个
           // 赢家 + ECH，高墙地区的明文 SNI 会被 RST（福建实测图片全 502）
           _ldstaticHost,
+          // LD士多：上海佬友网页和 App 都进不去，日志里接口全是网关 502
+          // 「TLS handshake failed」（约 40 ms 就断，明文 SNI 被干扰）
+          ...ldStoreHosts,
         ],
         appVersion: _appVersion,
         networkSig: ConnectivityService().networkSignature.value,

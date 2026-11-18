@@ -29,8 +29,15 @@ class ProxyLeafTrust {
   /// 必须经 ECH 的主机（后缀匹配），传给代理作为 MITM 范围。
   /// ldstatic.com 是 linux.do 的静态资源域（cdn / cdn3 图片与表情、ping 消息总线、
   /// linuxdo-uploads.s3 直传）：高墙地区对它的明文 SNI 同样是 RST，只做隧道
-  /// 的话图片、通知、上传全挂，所以和主站一样由代理终结 TLS、经 ECH 上游
-  static const mitmHosts = ['linux.do', 'idcflare.com', 'ldstatic.com'];
+  /// 的话图片、通知、上传全挂，所以和主站一样由代理终结 TLS、经 ECH 上游。
+  /// ldcstore.com / ldspro.qzz.io 是 LD士多 的网页与接口，同理（上海实测被干扰）
+  static const mitmHosts = [
+    'linux.do',
+    'idcflare.com',
+    'ldstatic.com',
+    'ldcstore.com',
+    'ldspro.qzz.io',
+  ];
 
   /// 代理启动后预先放行的主机：linux.do 主站与 App 里出现过的子域
   static const _preallowHosts = [
@@ -50,6 +57,10 @@ class ProxyLeafTrust {
     'cdn3.ldstatic.com',
     'ping.ldstatic.com',
     'linuxdo-uploads.s3.ldstatic.com',
+    'ldcstore.com',
+    'api.ldspro.qzz.io',
+    'api1.ldspro.qzz.io',
+    'api2.ldspro.qzz.io',
   ];
 
   @visibleForTesting
