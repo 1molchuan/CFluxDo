@@ -1,5 +1,19 @@
 part of 'discourse_service.dart';
 
+/// 按 ID 取话题时一次最多带这么多个。服务端一页只回 30 个（按最近顶起排），多带没用；
+/// 攒了一夜的新话题（上千个 ID）全带上会把地址撑到 8 KB 以上，源站回 414，再长连本机
+/// 网关都拒收（2026-11-20 早上「载入新话题」连续 414 / 连接被关）
+const maxTopicIdsPerRequest = 100;
+
+/// `topic_ids` 参数的值：只留最后（最新攒下）的 [maxTopicIdsPerRequest] 个
+@visibleForTesting
+String joinTopicIdsForRequest(List<int> topicIds) {
+  final ids = topicIds.length > maxTopicIdsPerRequest
+      ? topicIds.sublist(topicIds.length - maxTopicIdsPerRequest)
+      : topicIds;
+  return ids.join(',');
+}
+
 /// 话题相关
 mixin _TopicsMixin on _DiscourseServiceBase {
   /// 按 topic_ids 获取话题（对齐网页版 loadBefore 请求）
@@ -10,7 +24,7 @@ mixin _TopicsMixin on _DiscourseServiceBase {
     }
     final response = await _dio.get(
       '/latest.json',
-      queryParameters: {'topic_ids': topicIds.join(',')},
+      queryParameters: {'topic_ids': joinTopicIdsForRequest(topicIds)},
     );
     // isolate 内构造(jsonDecode 已由 BackgroundTransformer 移出主线程,
     // 几十个 Topic 对象的 fromJson 构造同样不便宜):返回值经
@@ -59,7 +73,7 @@ mixin _TopicsMixin on _DiscourseServiceBase {
   }) async {
     String path;
     final queryParams = <String, dynamic>{
-      if (topicIds != null) 'topic_ids': topicIds.join(','),
+      if (topicIds != null) 'topic_ids': joinTopicIdsForRequest(topicIds),
     };
 
     if (page > 0) {
