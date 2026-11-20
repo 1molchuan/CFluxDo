@@ -10,6 +10,21 @@ import '../flux_request_spec.dart';
 /// 网络请求日志拦截器，记录每个请求的 method/url/statusCode/duration
 class NetworkLogInterceptor extends Interceptor {
   static const String _startTimeKey = '_networkLog_startTime';
+  static const String _firstSeenKey = '_networkLog_firstSeen';
+
+  /// 在拦截器链最前面记下请求发起的时刻（重放沿用第一次的）。本拦截器排在链尾，
+  /// `duration` 只是最后一次真正发出去到拿到结果的时间：排队（并发闸门、验证期冻结）
+  /// 和被恢复层重放掉的前几次都不在里面。2026-11-20 排查卡顿时，上游连接断掉后
+  /// 用户等了 25 s，日志里那条请求却只有 215 ms
+  static void markFirstSeen(RequestOptions options) {
+    options.extra.putIfAbsent(
+      _firstSeenKey,
+      () => DateTime.now().millisecondsSinceEpoch,
+    );
+  }
+
+  /// 总时长比 `duration` 多出这么多才另记一个 `totalMs`
+  static const int _totalMsThreshold = 500;
 
   @override
   void onRequest(RequestOptions options, RequestInterceptorHandler handler) {
@@ -77,10 +92,11 @@ class NetworkLogInterceptor extends Interceptor {
     String? gatewayError,
     String? error,
   }) {
+    final now = DateTime.now().millisecondsSinceEpoch;
     final startTime = options.extra[_startTimeKey] as int?;
-    final duration = startTime != null
-        ? DateTime.now().millisecondsSinceEpoch - startTime
-        : null;
+    final duration = startTime != null ? now - startTime : null;
+    final firstSeen = options.extra[_firstSeenKey] as int?;
+    final totalMs = firstSeen != null ? now - firstSeen : null;
 
     // URL 脱敏：不记录查询参数
     final uri = options.uri;
@@ -95,6 +111,9 @@ class NetworkLogInterceptor extends Interceptor {
       'url': sanitizedUrl,
       'statusCode': statusCode,
       'duration': duration,
+      if (totalMs != null &&
+          totalMs - (duration ?? 0) >= _totalMsThreshold)
+        'totalMs': totalMs,
       'gatewayError': ?gatewayError,
       'error': ?error,
     };

@@ -153,6 +153,8 @@ class DiscourseDio {
 
     // 论坛引擎只服务一个站点，另一站（含子域）不能进入会话拦截器链。
     dio.interceptors.add(InterceptorsWrapper(onRequest: (options, handler) {
+      // 请求发起的时刻：日志里据此算上排队和重放的总时长
+      NetworkLogInterceptor.markFirstSeen(options);
       final host = options.uri.host.toLowerCase();
       final otherSite = ForumSite.values.any((site) =>
           site != SiteContext.current &&
