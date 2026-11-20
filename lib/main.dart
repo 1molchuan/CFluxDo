@@ -1424,6 +1424,13 @@ class _MainPageState extends ConsumerState<MainPage>
         state == AppLifecycleState.detached) {
       UserPresenceService().setForeground(false);
     }
+    // 让路实测只在前台做：后台时系统可能直接拒掉 App 的连接。inactive（下拉通知栏、
+    // 权限弹窗）还算前台
+    if (state == AppLifecycleState.resumed) {
+      VpnAutoToggleService.instance.setAppForeground(true);
+    } else if (state != AppLifecycleState.inactive) {
+      VpnAutoToggleService.instance.setAppForeground(false);
+    }
 
     if (state == AppLifecycleState.hidden) {
       // hidden 比 paused 更早触发，在系统挂起 Dart isolate 之前启动前台服务

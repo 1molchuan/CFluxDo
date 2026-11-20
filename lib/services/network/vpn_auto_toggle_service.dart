@@ -81,6 +81,19 @@ class ForumUnreachableStreak {
   }
 }
 
+/// 一次实测的结论（见 [VpnAutoToggleService.probeDirect]）
+enum DirectProbeResult {
+  /// 拿到了 HTTP 响应：系统网络能直连
+  reachable,
+
+  /// 握手被重置、证书不对、超时：这个网络确实连不上
+  blocked,
+
+  /// 连接被本机拒绝 / 没有路由 / 域名解析不出来：网络还没就绪，或系统不让这个 App
+  /// 联网（退到后台后被省电、后台流量限制拦下），说明不了论坛通不通
+  notReady,
+}
+
 /// VPN 自动切换服务
 ///
 /// 连接加速让不让路：安卓「自动」判定下按**实测**——网络形态变了（含 VPN 开关）就绕开
@@ -94,6 +107,11 @@ class ForumUnreachableStreak {
 ///
 /// 让路期间论坛一直连不上时恢复连接加速（见 [reportForumTransport]），并把这个网络记成
 /// 不能直连。
+///
+/// 实测只在前台做、只认可信的结论（见 [runProbe]）。2026-11-20 日志：App 退到后台后
+/// 系统直接拒掉它的连接，这时网络一变就测、测到的全是「连不上」，于是切回加速、重启
+/// 网关、把错的结论记进缓存；回到前台带着错的模式跑（开着 VPN 仍走加速，首页连续 502）。
+/// VPN 刚起来还没接管时的秒失败同理。两天里网关被这样重启了 60 次。
 class VpnAutoToggleService {
   VpnAutoToggleService._();
   static final VpnAutoToggleService instance = VpnAutoToggleService._();
@@ -103,7 +121,11 @@ class VpnAutoToggleService {
   static const _keySuppressedProxy = 'vpn_suppressed_proxy';
   static const _keyDetectionMode = 'vpn_detection_mode';
   static const _keyAccelResumed = 'vpn_accel_resumed';
-  static const _keyDirectProbe = 'vpn_direct_probe';
+  static const _keyDirectProbe = 'vpn_direct_probe_v2';
+
+  /// 1.3.4 ~ 1.3.5-beta 的实测缓存：App 在后台被系统断网、VPN 还没接管时测到的
+  /// 「不能直连」也记了进去（2026-11-20 日志里 `mobile|vpn` 一直是错的），整个作废
+  static const _keyDirectProbeLegacy = 'vpn_direct_probe';
 
   /// 实测结果按「网络形态@站点」缓存，只当下次同一网络启动时的初值；最多留这么多条
   static const _probeCacheLimit = 12;
@@ -144,11 +166,28 @@ class VpnAutoToggleService {
 
   /// 测试替身：实测函数（默认 [probeDirect]）与是否按实测（默认只有安卓）
   @visibleForTesting
-  static Future<bool> Function(Uri url) directProber = probeDirect;
+  static Future<DirectProbeResult> Function(Uri url) directProber = probeDirect;
   @visibleForTesting
   static bool? probeSupportedOverride;
   @visibleForTesting
   static Duration probeDelay = const Duration(milliseconds: 1500);
+
+  /// 测出「网络还没就绪」后隔多久再测，测完这几次还是没就绪就先按不能直连（不落缓存）
+  @visibleForTesting
+  static List<Duration> probeRetryDelays = const [
+    Duration(seconds: 2),
+    Duration(seconds: 4),
+    Duration(seconds: 8),
+  ];
+
+  /// 回到前台时，开着 VPN 且上次实测早于这么久就重测一次：VPN 换节点、切规则 / 全局
+  /// 都不产生网络事件
+  @visibleForTesting
+  static Duration probeStaleAfter = const Duration(minutes: 5);
+
+  /// 加速开着、VPN 也在时论坛连续连不上，最多隔这么久重测一次
+  @visibleForTesting
+  static Duration reprobeMinInterval = const Duration(seconds: 30);
 
   /// 防重入标记；进行中又来了新判断就记下，做完再按最新状态对一遍
   bool _isSuppressing = false;
@@ -162,6 +201,22 @@ class VpnAutoToggleService {
   Timer? _probeTimer;
   int _probeGeneration = 0;
   DateTime? _probedAt;
+
+  /// App 是否在前台。退到后台后系统可能直接拒掉这个 App 的连接（华为省电、后台流量
+  /// 限制，日志里是成片的 Connection refused），这时测到的「连不上」不是网络的结论
+  bool _appForeground = true;
+
+  /// 每次退到后台加一：实测跨过了后台，没测通的结果就不可信
+  int _backgroundEpoch = 0;
+
+  /// 后台期间欠下的实测，回前台补
+  bool _probePending = false;
+
+  /// 加速开着、VPN 也在时论坛连接层的连续失败：够数就重测（VPN 可能已经能直连了）
+  @visibleForTesting
+  ForumUnreachableStreak accelUnreachableStreak = ForumUnreachableStreak();
+  Timer? _accelUnreachableTimer;
+  DateTime? _lastReprobeAt;
 
   /// Windows 网卡枚举是异步的。只允许最后一次网络变化的结果生效，避免较慢的
   /// 旧枚举覆盖较新的连接状态。
@@ -208,6 +263,8 @@ class VpnAutoToggleService {
     'probeDriven': _probeDriven,
     'directReachable': directReachableNotifier.value,
     'probedAt': _probedAt?.toIso8601String(),
+    'probePending': _probePending,
+    'appForeground': _appForeground,
     'networkSig': _networkSig,
     'dohSuppressed': _prefsReady ? isDohSuppressed : null,
     'proxySuppressed': _prefsReady ? isProxySuppressed : null,
@@ -232,10 +289,13 @@ class VpnAutoToggleService {
         : direct == null
         ? '，未实测'
         : (direct ? '，实测能直连' : '，实测不能直连');
+    // 没有网络时让路判断不动（见 [_recomputeYield]），日志里说清楚是沿用
+    final holding = _probeDriven && _networkSig.isEmpty;
     AppLogger.info(
       '网络形态：${_lastConnectivityResults.map((r) => r.name).join('+')}，'
       '${vpnActive ? '有 VPN 网卡' : '无 VPN 网卡'}$probeText'
-      '${enabled ? (_yieldAccel ? '，加速让路' : '，保持加速') : '（自动让路已关）'}',
+      '${enabled ? (_yieldAccel ? '，加速让路' : '，保持加速') : '（自动让路已关）'}'
+      '${enabled && holding ? '（没有网络，沿用之前的判断）' : ''}',
       tag: 'VpnAutoToggle',
       fields: {'source': source, ...diagnostics()},
     );
@@ -266,9 +326,15 @@ class VpnAutoToggleService {
   /// 加速该不该让路：按实测时用本网络的实测结果，没测过先用上次同一网络的缓存，
   /// 都没有就按 VPN 网卡（旧行为）；其余情况就是 VPN 网卡 / 强制档
   void _recomputeYield() {
-    _yieldAccel = _probeDriven
-        ? (directReachableNotifier.value ?? _cachedProbe() ?? _shouldSuppress)
-        : _shouldSuppress;
+    if (!_probeDriven) {
+      _yieldAccel = _shouldSuppress;
+      return;
+    }
+    // 断网的一瞬（Wi-Fi 切流量常先报一次「无网络」）没什么可判断的：保持原样，
+    // 免得网关先切回加速、下一秒又切回让路，白白重启两次
+    if (_networkSig.isEmpty) return;
+    _yieldAccel =
+        directReachableNotifier.value ?? _cachedProbe() ?? _shouldSuppress;
   }
 
   /// 网络形态变了：作废上一个网络的实测，「本次已恢复加速」也到此为止
@@ -279,6 +345,8 @@ class VpnAutoToggleService {
     directReachableNotifier.value = null;
     probingNotifier.value = false;
     _probedAt = null;
+    _probePending = false;
+    _resetAccelUnreachableWatch();
     if (accelResumed && _probeDriven) {
       accelResumedNotifier.value = false;
       unawaited(_prefs.remove(_keyAccelResumed));
@@ -335,7 +403,55 @@ class VpnAutoToggleService {
       prefs.getString(_keyDetectionMode),
     );
     accelResumedNotifier.value = prefs.getBool(_keyAccelResumed) ?? false;
+    if (prefs.containsKey(_keyDirectProbeLegacy)) {
+      unawaited(prefs.remove(_keyDirectProbeLegacy));
+    }
     _resetUnreachableWatch();
+    _resetAccelUnreachableWatch();
+  }
+
+  /// 单例在用例之间回到刚启动的样子（进程里只有冷启动才是这个状态）
+  @visibleForTesting
+  void resetForTest() {
+    _probeTimer?.cancel();
+    _probeGeneration++;
+    _networkSig = '';
+    _yieldAccel = false;
+    _shouldSuppress = false;
+    _appForeground = true;
+    _probePending = false;
+    _probedAt = null;
+    _lastReprobeAt = null;
+    _lastLoggedNetworkState = null;
+    _lastConnectivityResults = const [];
+    directReachableNotifier.value = null;
+    probingNotifier.value = false;
+    vpnActiveNotifier.value = false;
+    _resetAccelUnreachableWatch();
+  }
+
+  /// App 前后台变化（main.dart 的生命周期回调）。退到后台：之后的实测留到回前台再做；
+  /// 回到前台：补上欠下的实测，开着 VPN 且上次实测已久的也重测一次
+  void setAppForeground(bool foreground) {
+    if (foreground == _appForeground) return;
+    _appForeground = foreground;
+    if (!foreground) {
+      _backgroundEpoch++;
+      _resetAccelUnreachableWatch();
+      return;
+    }
+    if (!_probeDriven || !enabled || _networkSig.isEmpty) return;
+    final probedAt = _probedAt;
+    final stale =
+        vpnActive &&
+        probedAt != null &&
+        DateTime.now().difference(probedAt) >= probeStaleAfter;
+    final unmeasured =
+        directReachableNotifier.value == null && !probingNotifier.value;
+    if (_probePending || unmeasured || stale) {
+      // 刚回前台系统放行网络还要一小会儿
+      _scheduleProbe(delay: const Duration(milliseconds: 300));
+    }
   }
 
   /// 开关控制
@@ -428,6 +544,9 @@ class VpnAutoToggleService {
     _logNetworkState('connectivity');
 
     if (!enabled) return;
+    // 没有网络时什么都不调整（见 [_recomputeYield]）：上游代理也不随这一瞬的
+    // 「VPN 没了」恢复、下一秒再暂停
+    if (_probeDriven && _networkSig.isEmpty) return;
     unawaited(_reconcile());
   }
 
@@ -596,8 +715,9 @@ class VpnAutoToggleService {
 
   /// 绕开加速、用系统网络（随 VPN / 路由器）对 [url] 发一次 HEAD：拿到任何 HTTP 响应
   /// （含 CF 质询的 403）就说明 TLS 握手过了、没被重置；连接被重置、证书不对（DNS 被
-  /// 污染到别家 IP）、超时都算不能。只打论坛自己，不经第三方
-  static Future<bool> probeDirect(Uri url) async {
+  /// 污染到别家 IP）、超时都算不能；连接被本机拒绝、没有路由、解析不出域名是网络还没
+  /// 就绪（见 [classifyProbeError]）。只打论坛自己，不经第三方
+  static Future<DirectProbeResult> probeDirect(Uri url) async {
     final client = HttpClient()
       ..findProxy = ((_) => 'DIRECT')
       ..connectionTimeout = const Duration(seconds: 6)
@@ -611,12 +731,33 @@ class VpnAutoToggleService {
         const Duration(seconds: 8),
       );
       await response.drain<void>().catchError((_) {});
-      return true;
-    } catch (_) {
-      return false;
+      return DirectProbeResult.reachable;
+    } catch (e) {
+      return classifyProbeError(e);
     } finally {
       client.close(force: true);
     }
+  }
+
+  /// Linux / 安卓的 errno：ECONNREFUSED、ENETUNREACH、EHOSTUNREACH、ENETDOWN、
+  /// EPERM、EACCES。墙的重置发生在握手里（ECONNRESET），丢包是超时，都不在这里
+  static const _localRefusalErrnos = {111, 101, 113, 100, 1, 13};
+
+  /// 实测失败的原因归类。被本机拒绝 / 没有路由 / 解析不出域名：VPN 刚起来还没接管、
+  /// 换网还没换完、或系统不让后台的 App 联网，都是马上失败（日志里 30 ms ~ 1 s），
+  /// 不能当成「这个网络被墙」记下来；其余（握手被重置、证书不对、超时）才是连不上
+  @visibleForTesting
+  static DirectProbeResult classifyProbeError(Object error) {
+    if (error is SocketException) {
+      final code = error.osError?.errorCode;
+      if (code != null && _localRefusalErrnos.contains(code)) {
+        return DirectProbeResult.notReady;
+      }
+      if (error.message.contains('Failed host lookup')) {
+        return DirectProbeResult.notReady;
+      }
+    }
+    return DirectProbeResult.blocked;
   }
 
   String get _probeKey => '$_networkSig@${SiteContext.current.host}';
@@ -637,7 +778,9 @@ class VpnAutoToggleService {
       final host = url == null ? null : Uri.tryParse(url)?.host.toLowerCase();
       if (host != null && host.isNotEmpty) hosts.add(host);
     }
-    if (isLinuxDo) hosts.addAll(const ['ping.ldstatic.com', 'cdn.ldstatic.com']);
+    if (isLinuxDo) {
+      hosts.addAll(const ['ping.ldstatic.com', 'cdn.ldstatic.com']);
+    }
     return [
       for (final host in hosts)
         Uri.https(host, host == forumHost.toLowerCase() ? '/srv/status' : '/'),
@@ -695,10 +838,20 @@ class VpnAutoToggleService {
     _probeTimer = Timer(delay ?? probeDelay, () => unawaited(runProbe()));
   }
 
-  /// 实测一次并按结果对齐（换网后旧结果作废）
+  /// 实测并按结果对齐（换网后旧结果作废）。
+  ///
+  /// 只在前台测、只认可信的结论：
+  /// - App 在后台时不测，记下欠一次，回前台补（[setAppForeground]）；
+  /// - 测的途中退到了后台，没测通的结果作废，同样回前台补；
+  /// - 「网络还没就绪」（[DirectProbeResult.notReady]）不是结论：隔一会儿重测，期间
+  ///   让路判断不动；重测几次仍没就绪才先按不能直连，但不写缓存
   @visibleForTesting
   Future<void> runProbe() async {
     if (!_probeDriven || !enabled || _networkSig.isEmpty) return;
+    if (!_appForeground) {
+      _deferProbeToForeground('App 在后台');
+      return;
+    }
     final generation = ++_probeGeneration;
     final sig = _networkSig;
     final host = SiteContext.current.host;
@@ -709,33 +862,80 @@ class VpnAutoToggleService {
       longPollingBaseUrl: preloaded.longPollingBaseUrl,
       cdnUrl: preloaded.cdnUrl,
     );
+    bool superseded() =>
+        generation != _probeGeneration ||
+        sig != _networkSig ||
+        !enabled ||
+        !_probeDriven;
+    _probePending = false;
     probingNotifier.value = true;
-    final watch = Stopwatch()..start();
-    // 并行测，全部能直连才算：任何一个连不上，让路后那部分功能就坏了
-    final results = await Future.wait([
-      for (final uri in targets) directProber(uri),
-    ]);
-    final failed = [
-      for (var i = 0; i < targets.length; i++)
-        if (!results[i]) targets[i].host,
-    ];
-    final ok = failed.isEmpty;
-    if (generation != _probeGeneration || sig != _networkSig) return;
-    probingNotifier.value = false;
-    _probedAt = DateTime.now();
-    directReachableNotifier.value = ok;
-    await _storeProbe(ok);
-    AppLogger.info(
-      ok
-          ? '实测系统网络能直连 ${targets.map((u) => u.host).join('、')}'
-                '（${watch.elapsedMilliseconds} ms，网络 $sig）'
-          : '实测系统网络不能直连：${failed.join('、')} 连不上'
-                '（共测 ${targets.length} 个，${watch.elapsedMilliseconds} ms，网络 $sig）',
-      tag: 'VpnAutoToggle',
-    );
-    _recomputeYield();
-    _logNetworkState('probe');
-    await _reconcile();
+    for (var attempt = 0; ; attempt++) {
+      final backgroundEpoch = _backgroundEpoch;
+      final watch = Stopwatch()..start();
+      // 并行测，全部能直连才算：任何一个连不上，让路后那部分功能就坏了
+      final results = await Future.wait([
+        for (final uri in targets) directProber(uri),
+      ]);
+      if (superseded()) return;
+      final elapsed = watch.elapsedMilliseconds;
+      final ok = results.every((r) => r == DirectProbeResult.reachable);
+      final blocked = [
+        for (var i = 0; i < targets.length; i++)
+          if (results[i] == DirectProbeResult.blocked) targets[i].host,
+      ];
+      final notReady = [
+        for (var i = 0; i < targets.length; i++)
+          if (results[i] == DirectProbeResult.notReady) targets[i].host,
+      ];
+      // 能直连假不了；没测通又跨过了后台，就可能是系统断网造成的
+      if (!ok && (!_appForeground || backgroundEpoch != _backgroundEpoch)) {
+        probingNotifier.value = false;
+        _deferProbeToForeground('实测途中 App 退到了后台');
+        return;
+      }
+      if (!ok && blocked.isEmpty && attempt < probeRetryDelays.length) {
+        final wait = probeRetryDelays[attempt];
+        AppLogger.info(
+          '实测没出结论：${notReady.join('、')} 被本机拒绝或解析不出（$elapsed ms，'
+          '网络 $sig），网络还没就绪，${wait.inSeconds} 秒后重测',
+          tag: 'VpnAutoToggle',
+        );
+        await Future<void>.delayed(wait);
+        if (superseded()) return;
+        if (!_appForeground) {
+          probingNotifier.value = false;
+          _deferProbeToForeground('等重测时 App 退到了后台');
+          return;
+        }
+        continue;
+      }
+      probingNotifier.value = false;
+      _probedAt = DateTime.now();
+      directReachableNotifier.value = ok;
+      // 一直没就绪只是先按不能直连，不是这个网络的结论，不记
+      final conclusive = ok || blocked.isNotEmpty;
+      if (conclusive) await _storeProbe(ok);
+      final failed = [...blocked, ...notReady];
+      AppLogger.info(
+        ok
+            ? '实测系统网络能直连 ${targets.map((u) => u.host).join('、')}'
+                  '（$elapsed ms，网络 $sig）'
+            : '实测系统网络不能直连：${failed.join('、')} 连不上'
+                  '（共测 ${targets.length} 个，$elapsed ms，网络 $sig'
+                  '${conclusive ? '' : '，网络一直没就绪，先保持加速、不记结果'}）',
+        tag: 'VpnAutoToggle',
+      );
+      _recomputeYield();
+      _logNetworkState('probe');
+      await _reconcile();
+      return;
+    }
+  }
+
+  void _deferProbeToForeground(String why) {
+    if (_probePending) return;
+    _probePending = true;
+    AppLogger.info('$why，让路实测留到回前台再做（网络 $_networkSig）', tag: 'VpnAutoToggle');
   }
 
   /// 网络适配器报告论坛请求在连接层的结果（[reachable]：拿到了 HTTP 响应）。
@@ -745,7 +945,13 @@ class VpnAutoToggleService {
   /// 域名会被重置、系统 DNS 还常被污染，只留浏览器指纹的网关也连不上，于是本次 VPN 期间
   /// 恢复完整加速（ECH + 优选）。[detail] 是失败原因，只进日志
   void reportForumTransport({required bool reachable, String? detail}) {
-    if (!_watchingStepAside) return;
+    // 后台的失败不算数：系统可能正拒着这个 App 的连接，长轮询连败不说明让路让错了
+    // （算了就会恢复加速、重启网关，还把这个网络记成不能直连）
+    if (!reachable && !_appForeground) return;
+    if (!_watchingStepAside) {
+      _watchAccelOverVpn(reachable: reachable, detail: detail);
+      return;
+    }
     if (reachable) {
       _resetUnreachableWatch();
       return;
@@ -774,6 +980,46 @@ class VpnAutoToggleService {
     _unreachableConfirmTimer?.cancel();
     _unreachableConfirmTimer = null;
     unreachableStreak.reset();
+  }
+
+  /// 反过来的兜底：VPN 网卡在、实测说不能直连所以加速开着，可经加速一直连不上
+  /// （VPN 不放行 CF 的裸 IP、不通 IPv6；或上次实测时 VPN 还没好）。够数就重测一次，
+  /// 能直连了就让路。只在前台算：后台被系统断网的失败不说明问题
+  void _watchAccelOverVpn({required bool reachable, String? detail}) {
+    final watching =
+        enabled &&
+        _probeDriven &&
+        vpnActive &&
+        !_yieldAccel &&
+        _appForeground &&
+        _networkSig.isNotEmpty &&
+        !probingNotifier.value;
+    if (!watching || reachable) {
+      _resetAccelUnreachableWatch();
+      return;
+    }
+    final wait = accelUnreachableStreak.recordFailure();
+    if (wait == null) return;
+    _accelUnreachableTimer?.cancel();
+    _accelUnreachableTimer = Timer(wait, () {
+      if (!accelUnreachableStreak.confirm()) return;
+      final last = _lastReprobeAt;
+      final now = DateTime.now();
+      if (last != null && now.difference(last) < reprobeMinInterval) return;
+      if (!enabled || !_probeDriven || !vpnActive || _yieldAccel) return;
+      _lastReprobeAt = now;
+      AppLogger.warning(
+        '开着 VPN、保持加速期间论坛连不上（${detail ?? 'unreachable'}），重新实测能否直连',
+        tag: 'VpnAutoToggle',
+      );
+      _scheduleProbe(delay: Duration.zero);
+    });
+  }
+
+  void _resetAccelUnreachableWatch() {
+    _accelUnreachableTimer?.cancel();
+    _accelUnreachableTimer = null;
+    accelUnreachableStreak.reset();
   }
 
   /// 本次 VPN 期间恢复连接加速：去掉暂停记号、打开加速，记下「本次已恢复」
