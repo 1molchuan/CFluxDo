@@ -12,6 +12,7 @@
   "cf_autoVerifyDisabled": "Auto CF verification is off. Complete it manually from the error view.",
   "cf_autoVerifyTimeout": "Auto-verification needs your confirmation. Follow the page prompts to finish.",
   "cf_backgroundVerifying": "Verifying automatically. Tap to view",
+  "cf_backgroundNeedsTap": "Verification needs you. Tap to finish",
   "cf_cannotOpenVerifyPage": "Cannot open verification page, please retry",
   "cf_challengeFailedCooldown": "Verification failed, in cooldown period",
   "cf_challengeNotEffective": "Verification not effective, please retry",

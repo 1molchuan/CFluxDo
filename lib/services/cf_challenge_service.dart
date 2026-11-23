@@ -1057,11 +1057,10 @@ class _CfChallengePageState extends State<CfChallengePage> {
   /// 辅助还在跑时，后台静默预算多给这么久再弹到前台。
   static const _preclearanceGraceExtension = 8;
 
-  /// 后台验证的「正在自动验证」胶囊是否已露出。多数非交互挑战一两秒就过，
-  /// 这时不打扰用户；过了 [_backgroundPillDelay] 还在验证才显示。
+  /// 后台验证的胶囊是否已露出。自动验证（含转圈）期间一律不露：能过就悄悄
+  /// 过了，过不了而有人在等结果会直接转前台。只有纯后台轮次（没人在等）里
+  /// 勾选框已经出来时才露，让用户自己决定要不要点进去完成
   bool _pillVisible = false;
-  Timer? _pillDelayTimer;
-  static const _backgroundPillDelay = Duration(seconds: 2);
   static const _backgroundMaxCheckCount = 10;
   static const _foregroundMaxCheckCount = 60;
   static const _noChallengeCheckDelay = Duration(milliseconds: 1200);
@@ -1084,6 +1083,7 @@ class _CfChallengePageState extends State<CfChallengePage> {
     return CfSpinnerPolicy.backgroundBudgetSeconds(
       baseSeconds: base,
       spinning: _spinning,
+      awaitingTap: _pillVisible,
     );
   }
 
@@ -1104,16 +1104,6 @@ class _CfChallengePageState extends State<CfChallengePage> {
           : Uri.parse(widget.fallbackVerifyUrl!),
     );
     _isBackground = widget.startInBackground;
-    if (_isBackground) {
-      _pillDelayTimer = Timer(_backgroundPillDelay, () {
-        if (!mounted || !_isBackground || _handedOff) return;
-        CfChallengeLogger.log(
-          '[VERIFY] Background verify still running after '
-          '${_backgroundPillDelay.inSeconds}s, showing pill',
-        );
-        setState(() => _pillVisible = true);
-      });
-    }
     _needsManualAttention = false;
     _snapshotInitialClearance();
     widget.signals.attachReader(_readFreshClearance);
@@ -1167,7 +1157,6 @@ class _CfChallengePageState extends State<CfChallengePage> {
   void dispose() {
     widget.signals.attachReader(null);
     widget.signals.attachCurrentReader(null);
-    _pillDelayTimer?.cancel();
     _deferredRevealTimer?.cancel();
     _timeoutTimer?.cancel();
     _noChallengeCheckTimer?.cancel();
@@ -1610,7 +1599,12 @@ class _CfChallengePageState extends State<CfChallengePage> {
       '[VERIFY] Turnstile $event while in background'
       '${someoneWaiting ? ', promoting to foreground' : ', silent round keeps waiting'}',
     );
-    if (someoneWaiting) _promoteToForeground();
+    if (someoneWaiting) {
+      _promoteToForeground();
+    } else if (!_pillVisible) {
+      // 没人在等：不把验证页弹到正在阅读的用户脸上，只露胶囊让用户自己点
+      setState(() => _pillVisible = true);
+    }
   }
 
   /// challenge-platform 响应到达时的回调
@@ -3405,7 +3399,7 @@ class _CfChallengePageState extends State<CfChallengePage> {
           DraggableFloatingPill(
             initialTop: 100,
             onTap: _promoteToForeground,
-            child: Text(S.current.cf_backgroundVerifying),
+            child: Text(S.current.cf_backgroundNeedsTap),
           ),
       ],
     );

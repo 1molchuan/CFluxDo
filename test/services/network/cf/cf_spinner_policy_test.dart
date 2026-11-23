@@ -90,6 +90,22 @@ void main() {
     );
   });
 
+  test('纯后台轮次勾选框出来、胶囊在等用户点：至少留 45 s 再放弃', () {
+    expect(
+      CfSpinnerPolicy.backgroundBudgetSeconds(
+        baseSeconds: 10,
+        spinning: false,
+        awaitingTap: true,
+      ),
+      45,
+    );
+    expect(
+      CfSpinnerPolicy.backgroundBudgetSeconds(baseSeconds: 10, spinning: false),
+      10,
+      reason: '没出勾选框、也不在转圈：照旧 10 s',
+    );
+  });
+
   test('6 s 宽限期到点：转圈就不弹前台；用户主动要的前台不受影响', () {
     expect(
       CfSpinnerPolicy.holdGracePromotion(
