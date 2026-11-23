@@ -4,9 +4,11 @@ import 'dart:io' as io;
 import 'package:flutter/services.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
-import 'cf_challenge_logger.dart';
+import 'network/cf/cf_auto_tapper.dart';
 import 'network/cf/cf_tap_policy.dart';
 
+/// 替用户点 Turnstile 勾选框的平台层：页面里定位勾选框、经原生通道往
+/// 指定的 WebView 注入一次触摸。流程控制见 [CfAutoTapper]。
 class CfNativeClick {
   const CfNativeClick._();
 
@@ -14,178 +16,149 @@ class CfNativeClick {
 
   static bool get isSupported => io.Platform.isAndroid;
 
-  static Future<({double nx, double ny, String source})?> locate(
-    InAppWebViewController controller,
-  ) async {
-    for (var attempt = 0; attempt < CfTapPolicy.locateAttempts; attempt++) {
-      if (attempt > 0) {
-        await Future<void>.delayed(CfTapPolicy.locateRetryDelay);
-      }
-      try {
-        final raw = await controller.evaluateJavascript(source: _locatorScript);
-        final rect = _decodeRect(raw);
-        if (rect == null) continue;
-        final point = CfTapPolicy.normalize(
-          left: rect.left,
-          top: rect.top,
-          width: rect.width,
-          height: rect.height,
-          viewportWidth: rect.viewportWidth,
-          viewportHeight: rect.viewportHeight,
-        );
-        return (nx: point.nx, ny: point.ny, source: rect.source);
-      } catch (e) {
-        CfChallengeLogger.log('[VERIFY] 定位 Turnstile 失败: $e');
-      }
+  /// 在挑战页里找勾选框，并确认那个点上没被别的东西盖住
+  static Future<CfTapLocation> locate(InAppWebViewController controller) async {
+    try {
+      final raw = await controller.evaluateJavascript(source: locatorScript);
+      return decodeLocation(raw);
+    } catch (e) {
+      return CfTapLocation.unavailable('script_error: $e');
     }
-    return null;
   }
 
-  static Future<bool> tap({
-    required int? viewId,
-    required String? host,
+  /// 往 [viewId] 对应的 WebView 注入一次触摸；找不到这个 WebView 就不点
+  static Future<CfTapDispatch> tap({
+    required int viewId,
     required double nx,
     required double ny,
   }) async {
-    if (!isSupported) return false;
+    if (!isSupported) return const CfTapDispatch.failed('unsupported');
     try {
-      final ok = await _channel.invokeMethod<bool>('tap', {
+      final raw = await _channel.invokeMethod<Object?>('tap', {
         'viewId': viewId,
-        'host': host,
         'nx': nx,
         'ny': ny,
       });
-      return ok ?? false;
+      if (raw is Map && raw['ok'] == true) return const CfTapDispatch.ok();
+      final reason = raw is Map ? raw['reason']?.toString() : null;
+      return CfTapDispatch.failed(reason ?? 'unknown');
     } on MissingPluginException {
-      return false;
+      return const CfTapDispatch.failed('no_plugin');
     } on PlatformException catch (e) {
-      CfChallengeLogger.log('[VERIFY] 原生触摸通道异常: ${e.message}');
-      return false;
+      return CfTapDispatch.failed('${e.code}: ${e.message}');
     }
   }
 
-  static _WidgetRect? _decodeRect(Object? raw) {
+  /// 解析定位脚本的返回值。Android 上 evaluateJavascript 可能多包一层 JSON 字符串。
+  static CfTapLocation decodeLocation(Object? raw) {
     Object? value = raw;
     for (var depth = 0; depth < 2 && value is String; depth++) {
       try {
         value = jsonDecode(value);
       } catch (_) {
-        return null;
+        return const CfTapLocation.unavailable('bad_result');
       }
     }
-    if (value is! Map) return null;
-    final map = value;
-    double? number(String key) => (map[key] as num?)?.toDouble();
-    final left = number('left');
-    final top = number('top');
-    final width = number('width');
-    final height = number('height');
-    final viewportWidth = number('vw');
-    final viewportHeight = number('vh');
-    if (left == null ||
-        top == null ||
-        width == null ||
-        height == null ||
-        viewportWidth == null ||
-        viewportHeight == null ||
-        width < 8 ||
-        height < 8 ||
-        viewportWidth <= 0 ||
-        viewportHeight <= 0) {
-      return null;
+    if (value is! Map) return const CfTapLocation.unavailable('bad_result');
+    if (value['ok'] != true) {
+      return CfTapLocation.unavailable(
+        value['reason']?.toString() ?? 'unknown',
+      );
     }
-    return _WidgetRect(
-      left: left,
-      top: top,
-      width: width,
-      height: height,
-      viewportWidth: viewportWidth,
-      viewportHeight: viewportHeight,
-      source: map['source']?.toString() ?? 'iframe',
+    final x = (value['x'] as num?)?.toDouble();
+    final y = (value['y'] as num?)?.toDouble();
+    final vw = (value['vw'] as num?)?.toDouble();
+    final vh = (value['vh'] as num?)?.toDouble();
+    if (x == null ||
+        y == null ||
+        vw == null ||
+        vh == null ||
+        vw <= 0 ||
+        vh <= 0) {
+      return const CfTapLocation.unavailable('bad_result');
+    }
+    final nx = x / vw;
+    final ny = y / vh;
+    if (nx <= 0 || nx >= 1 || ny <= 0 || ny >= 1) {
+      return const CfTapLocation.unavailable('out_of_viewport');
+    }
+    return CfTapLocation.point(
+      nx: nx,
+      ny: ny,
+      source: value['source']?.toString() ?? 'unknown',
     );
   }
 
-  static const _locatorScript = r'''
+  /// 勾选框的点击点只在这里算：找 widget → 按 [CfTapPolicy.checkboxOffset] 的规则
+  /// 取勾选框中心 → 用 elementFromPoint 确认这个点落在 widget 上（没被我们的遮罩
+  /// 或别的元素盖住）。返回相对 visualViewport 的 CSS 像素坐标。
+  ///
+  /// 挑战页的 Turnstile iframe 可能在 closed shadow root 里，querySelector 找不到；
+  /// 这时从挑战容器里找标准尺寸的宿主元素，elementFromPoint 也会落在宿主上。
+  static final String locatorScript =
+      '''
 (function () {
-  function metrics() {
-    var vv = window.visualViewport;
-    if (vv && vv.width > 0 && vv.height > 0) {
-      return {
-        ox: vv.offsetLeft || 0,
-        oy: vv.offsetTop || 0,
-        vw: vv.width,
-        vh: vv.height
-      };
-    }
-    var vw = innerWidth || (document.documentElement && document.documentElement.clientWidth) || 0;
-    var vh = innerHeight || (document.documentElement && document.documentElement.clientHeight) || 0;
-    return {ox: 0, oy: 0, vw: vw, vh: vh};
+  var MIN_W = ${CfTapPolicy.checkboxMinWidth}, MAX_H = ${CfTapPolicy.checkboxMaxHeight};
+  var LEFT = ${CfTapPolicy.checkboxLeft}, LEFT_RATIO = ${CfTapPolicy.checkboxLeftRatio};
+  var CHALLENGE = '#challenge-form, #challenge-running, #challenge-stage';
+  function fail(reason) { return JSON.stringify({ok: false, reason: reason}); }
+  if (typeof window._cf_chl_opt === 'undefined' && !document.querySelector(CHALLENGE)) {
+    return fail('not_challenge');
   }
-  var m = metrics();
-  if (m.vw <= 0 || m.vh <= 0) return null;
-  var isChallenge = typeof window._cf_chl_opt !== 'undefined' ||
-    !!document.querySelector('#challenge-form, #challenge-running, #challenge-stage');
-  if (!isChallenge) return null;
-  function usable(el) {
-    if (!el) return false;
-    if (el.closest && el.closest('#__fluxdo_preclearance')) return false;
+  var vv = window.visualViewport;
+  var ox = vv ? (vv.offsetLeft || 0) : 0, oy = vv ? (vv.offsetTop || 0) : 0;
+  var vw = vv && vv.width > 0 ? vv.width : (innerWidth || 0);
+  var vh = vv && vv.height > 0 ? vv.height : (innerHeight || 0);
+  if (vw <= 0 || vh <= 0) return fail('no_viewport');
+
+  function shown(el) {
+    if (!el || (el.closest && el.closest('#__fluxdo_preclearance'))) return false;
     var r = el.getBoundingClientRect();
-    if (!(r.width >= 8 && r.height >= 8)) return false;
-    if (r.right <= m.ox || r.bottom <= m.oy ||
-        r.left >= m.ox + m.vw || r.top >= m.oy + m.vh) {
-      return false;
-    }
-    var s = window.getComputedStyle ? getComputedStyle(el) : null;
-    if (s && (s.display === 'none' || s.visibility === 'hidden' || s.opacity === '0')) {
-      return false;
-    }
-    return true;
+    if (r.width < 8 || r.height < 8) return false;
+    var s = getComputedStyle(el);
+    return s.display !== 'none' && s.visibility !== 'hidden' && s.opacity !== '0';
   }
-  function describe(el, source) {
+  function standard(el) {
     var r = el.getBoundingClientRect();
-    return {
-      left: r.left - m.ox, top: r.top - m.oy,
-      width: r.width, height: r.height,
-      vw: m.vw, vh: m.vh, source: source
-    };
+    return r.width >= MIN_W && r.height > 0 && r.height <= MAX_H;
   }
-  var selectors = [
-    ['#challenge-stage iframe', 'stage-iframe'],
-    ['#challenge-form iframe', 'form-iframe'],
-    ['#cf-challenge-running iframe', 'running-iframe'],
-    ['iframe[src*="challenges.cloudflare.com"]', 'turnstile-iframe'],
-    ['iframe[src*="challenge-platform"]', 'challenge-iframe'],
-    ['.cf-turnstile iframe', 'widget-iframe']
-  ];
-  for (var i = 0; i < selectors.length; i++) {
-    var nodes = document.querySelectorAll(selectors[i][0]);
-    for (var j = 0; j < nodes.length; j++) {
-      if (usable(nodes[j])) return describe(nodes[j], selectors[i][1]);
+  var candidates = [];
+  var iframes = document.querySelectorAll(
+    '#challenge-stage iframe, #challenge-form iframe, #challenge-running iframe, ' +
+    'iframe[src*="challenges.cloudflare.com"], iframe[src*="challenge-platform"], ' +
+    '.cf-turnstile iframe');
+  for (var i = 0; i < iframes.length; i++) candidates.push([iframes[i], 'iframe']);
+  var hosts = document.querySelectorAll(
+    '#challenge-stage div, #challenge-form div, #challenge-running div, .cf-turnstile div');
+  for (var j = 0; j < hosts.length; j++) {
+    // closed shadow root 的宿主：没有 light DOM 子节点、尺寸是标准 widget
+    if (hosts[j].children.length === 0 && standard(hosts[j])) {
+      candidates.push([hosts[j], 'shadow-host']);
     }
   }
-  var stage = document.querySelector('#challenge-stage, #cf-challenge-running, .cf-turnstile');
-  if (usable(stage)) return describe(stage, 'challenge-stage');
-  return null;
+  var sawWidget = false, lastReason = 'not_found';
+  for (var k = 0; k < candidates.length; k++) {
+    var el = candidates[k][0];
+    if (!shown(el)) continue;
+    sawWidget = true;
+    if (!standard(el)) { lastReason = 'odd_size'; continue; }
+    var r = el.getBoundingClientRect();
+    var cx = r.left + Math.min(LEFT, r.width * LEFT_RATIO);
+    var cy = r.top + r.height / 2;
+    if (cx < ox || cy < oy || cx >= ox + vw || cy >= oy + vh) {
+      lastReason = 'out_of_viewport';
+      continue;
+    }
+    var hit = document.elementFromPoint(cx, cy);
+    if (hit !== el && !(hit && el.contains(hit))) {
+      lastReason = hit && hit.id === '__fluxdoCfMask' ? 'masked' : 'occluded';
+      continue;
+    }
+    return JSON.stringify({
+      ok: true, x: cx - ox, y: cy - oy, vw: vw, vh: vh, source: candidates[k][1]
+    });
+  }
+  return fail(sawWidget ? lastReason : 'not_found');
 })()
 ''';
-}
-
-class _WidgetRect {
-  const _WidgetRect({
-    required this.left,
-    required this.top,
-    required this.width,
-    required this.height,
-    required this.viewportWidth,
-    required this.viewportHeight,
-    required this.source,
-  });
-
-  final double left;
-  final double top;
-  final double width;
-  final double height;
-  final double viewportWidth;
-  final double viewportHeight;
-  final String source;
 }

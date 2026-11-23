@@ -1,6 +1,5 @@
 package com.github.lingyan000.fluxdo
 
-import android.app.Activity
 import android.os.SystemClock
 import android.util.Log
 import android.view.InputDevice
@@ -12,35 +11,47 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.MethodChannel
 
+/**
+ * 验证页替用户点 Turnstile 勾选框：往 Dart 指定的那个 WebView（按 platform view id）
+ * 注入一次手指触摸。找不到这个 WebView 就不点，绝不退到别的 WebView 上。
+ *
+ * 返回 `{ok: true}` 只表示 down/move/up 已全部送进目标 WebView；点没点中由 Dart 侧
+ * 看 Turnstile 的反馈判断。
+ */
 object CfNativeClickChannel {
     private const val TAG = "CfNativeClick"
     private const val CHANNEL = "com.fluxdo/cf_native_click"
 
-    fun register(activity: Activity, engine: FlutterEngine) {
+    private const val MOVE_DELAY_MS = 24L
+    private const val UP_DELAY_MS = 86L
+
+    fun register(engine: FlutterEngine) {
         MethodChannel(engine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
             if (call.method != "tap") {
                 result.notImplemented()
                 return@setMethodCallHandler
             }
             val viewId = (call.argument<Any>("viewId") as? Number)?.toInt()
-            val host = call.argument<String>("host")
-            val nx = call.argument<Double>("nx")
-            val ny = call.argument<Double>("ny")
-            if (nx == null || ny == null) {
-                result.error("bad_args", "nx/ny 不能为空", null)
+            val nx = (call.argument<Any>("nx") as? Number)?.toDouble()
+            val ny = (call.argument<Any>("ny") as? Number)?.toDouble()
+            if (viewId == null || nx == null || ny == null ||
+                nx !in 0.0..1.0 || ny !in 0.0..1.0
+            ) {
+                result.success(failure("bad_args"))
                 return@setMethodCallHandler
             }
             try {
-                val webView = findWebView(activity, engine, viewId, host)
+                val platformView = engine.platformViewsControllerDelegator.getPlatformViewById(viewId)
+                val webView = findSingleWebView(platformView)
                 if (webView == null) {
-                    Log.w(TAG, "找不到目标 WebView (viewId=$viewId, host=$host)")
-                    result.success(false)
+                    Log.w(TAG, "viewId=$viewId 下没有唯一的 WebView，不点")
+                    result.success(failure("view_not_found"))
                     return@setMethodCallHandler
                 }
-                result.success(tap(webView, nx, ny))
+                tap(webView, nx, ny) { outcome -> result.success(outcome) }
             } catch (e: Exception) {
-                Log.w(TAG, "原生输入失败: ${e.message}")
-                result.error("tap_failed", e.message, null)
+                Log.w(TAG, "查找目标 WebView 失败: ${e.message}")
+                result.success(failure("exception: ${e.message}"))
             }
         }
     }
@@ -49,90 +60,112 @@ object CfNativeClickChannel {
         MethodChannel(messenger, CHANNEL).setMethodCallHandler(null)
     }
 
-    private fun findWebView(
-        activity: Activity,
-        engine: FlutterEngine,
-        viewId: Int?,
-        host: String?,
-    ): WebView? {
-        if (viewId != null) {
-            val platformView = engine.platformViewsControllerDelegator.getPlatformViewById(viewId)
-            pick(collectWebViews(platformView), host)?.let { return it }
-        }
-        val candidates = mutableListOf<WebView>()
-        collectWebViews(activity.window?.decorView, candidates)
-        return pick(candidates, host)
-    }
+    private fun failure(reason: String) = mapOf("ok" to false, "reason" to reason)
 
-    private fun collectWebViews(view: View?): List<WebView> {
-        val result = mutableListOf<WebView>()
-        collectWebViews(view, result)
-        return result
+    /** platform view 本身是 WebView，或其子树里恰好只有一个 WebView（下拉刷新外壳） */
+    private fun findSingleWebView(root: View?): WebView? {
+        val found = mutableListOf<WebView>()
+        collectWebViews(root, found)
+        return found.singleOrNull()
     }
 
     private fun collectWebViews(view: View?, out: MutableList<WebView>) {
         when (view) {
             is WebView -> out.add(view)
-            is ViewGroup -> {
-                for (index in 0 until view.childCount) {
-                    collectWebViews(view.getChildAt(index), out)
-                }
+            is ViewGroup -> for (index in 0 until view.childCount) {
+                collectWebViews(view.getChildAt(index), out)
             }
         }
     }
 
-    private fun pick(candidates: List<WebView>, host: String?): WebView? {
-        if (candidates.isEmpty()) return null
-        if (host != null) {
-            candidates.firstOrNull {
-                it.url?.contains(host, ignoreCase = true) == true ||
-                    it.originalUrl?.contains(host, ignoreCase = true) == true
-            }?.let { return it }
+    private fun tap(webView: WebView, nx: Double, ny: Double, done: (Map<String, Any>) -> Unit) {
+        val width = webView.width
+        val height = webView.height
+        if (width <= 0 || height <= 0 || !webView.isAttachedToWindow) {
+            done(failure("view_not_laid_out"))
+            return
         }
-        return candidates.maxByOrNull { it.width.toLong() * it.height.toLong() }
-    }
-
-    private fun tap(webView: WebView, nx: Double, ny: Double): Boolean {
-        val width = if (webView.width > 0) webView.width else webView.measuredWidth
-        val height = if (webView.height > 0) webView.height else webView.measuredHeight
-        if (width <= 0 || height <= 0) {
-            Log.w(TAG, "WebView 尺寸无效 (${width}x$height)")
-            return false
-        }
-        val x = (nx.coerceIn(0.0, 1.0) * width).toFloat()
-        val y = (ny.coerceIn(0.0, 1.0) * height).toFloat()
+        val x = (nx * width).toFloat()
+        val y = (ny * height).toFloat()
         val downTime = SystemClock.uptimeMillis()
+        // 手指在屏幕上会有一点点漂移
+        val driftX = 0.6f
+        val driftY = 0.4f
 
-        fun event(eventTime: Long, action: Int, px: Float, py: Float): MotionEvent =
-            MotionEvent.obtain(
-                downTime,
-                eventTime,
-                action,
-                px,
-                py,
-                1f,
-                0.08f,
-                0,
-                1f,
-                1f,
-                0,
-                0,
-            ).apply { source = InputDevice.SOURCE_TOUCHSCREEN }
-
-        val down = event(downTime, MotionEvent.ACTION_DOWN, x, y)
-        val move = event(downTime + 16, MotionEvent.ACTION_MOVE, x + 0.6f, y + 0.6f)
-        val up = event(downTime + 72, MotionEvent.ACTION_UP, x + 0.6f, y + 0.6f)
-
-        return try {
-            val downHandled = webView.dispatchTouchEvent(down)
-            webView.dispatchTouchEvent(move)
-            val upHandled = webView.dispatchTouchEvent(up)
-            Log.i(TAG, "dispatchTouchEvent (${x.toInt()}, ${y.toInt()}) size=${width}x$height")
-            downHandled || upHandled
-        } finally {
-            down.recycle()
-            move.recycle()
-            up.recycle()
+        // 后两段在 postDelayed 里跑，异常不能漏出去，否则 Dart 侧永远等不到回复
+        fun send(action: Int, px: Float, py: Float): Boolean {
+            if (!webView.isAttachedToWindow) return false
+            val event = fingerEvent(downTime, SystemClock.uptimeMillis(), action, px, py)
+            return try {
+                webView.dispatchTouchEvent(event)
+                true
+            } catch (e: Exception) {
+                Log.w(TAG, "dispatchTouchEvent 失败: ${e.message}")
+                false
+            } finally {
+                event.recycle()
+            }
         }
+
+        if (!send(MotionEvent.ACTION_DOWN, x, y)) {
+            done(failure("detached"))
+            return
+        }
+        webView.postDelayed({
+            if (!send(MotionEvent.ACTION_MOVE, x + driftX, y + driftY)) {
+                done(failure("detached"))
+                return@postDelayed
+            }
+            webView.postDelayed({
+                if (!send(MotionEvent.ACTION_UP, x + driftX, y + driftY)) {
+                    done(failure("detached"))
+                    return@postDelayed
+                }
+                Log.i(TAG, "已注入触摸 (${x.toInt()}, ${y.toInt()}) size=${width}x$height")
+                done(mapOf("ok" to true))
+            }, UP_DELAY_MS - MOVE_DELAY_MS)
+        }, MOVE_DELAY_MS)
     }
+
+    private fun fingerEvent(
+        downTime: Long,
+        eventTime: Long,
+        action: Int,
+        x: Float,
+        y: Float,
+    ): MotionEvent {
+        val properties = MotionEvent.PointerProperties().apply {
+            id = 0
+            toolType = MotionEvent.TOOL_TYPE_FINGER
+        }
+        val coords = MotionEvent.PointerCoords().apply {
+            this.x = x
+            this.y = y
+            pressure = if (action == MotionEvent.ACTION_UP) 0f else 0.65f
+            size = 0.08f
+            touchMajor = 18f
+            touchMinor = 16f
+        }
+        return MotionEvent.obtain(
+            downTime,
+            eventTime,
+            action,
+            1,
+            arrayOf(properties),
+            arrayOf(coords),
+            0,
+            0,
+            1f,
+            1f,
+            touchscreenDeviceId(),
+            0,
+            InputDevice.SOURCE_TOUCHSCREEN,
+            0,
+        )
+    }
+
+    private fun touchscreenDeviceId(): Int =
+        InputDevice.getDeviceIds().firstOrNull { id ->
+            InputDevice.getDevice(id)?.supportsSource(InputDevice.SOURCE_TOUCHSCREEN) == true
+        } ?: 0
 }

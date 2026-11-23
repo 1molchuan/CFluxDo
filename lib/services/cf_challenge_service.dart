@@ -18,6 +18,7 @@ import 'network/cf/cf_spinner_policy.dart';
 import 'cf_challenge_logger.dart';
 import 'cf_clearance_authority.dart';
 import 'cf_native_click.dart';
+import 'network/cf/cf_auto_tapper.dart';
 import 'network/cf/cf_tap_policy.dart';
 import 'cf_clearance_refresh_service.dart';
 import 'network/cf/turnstile_configuration.dart';
@@ -1020,8 +1021,32 @@ class _CfChallengePageState extends State<CfChallengePage> {
   /// 勾选框出来了。在这之前挑战页多半还在转圈自动验证，露给用户只能干等。
   bool _interactiveSignaled = false;
 
-  int _tapGeneration = -1;
-  bool _tapInFlight = false;
+  /// 替用户点勾选框（只在前台或有人在等结果时，见 [CfTapPolicy.shouldAttempt]）
+  late final CfAutoTapper _autoTapper = CfAutoTapper(
+    locate: () async {
+      final controller = _controller;
+      if (controller == null) {
+        return const CfTapLocation.unavailable('no_controller');
+      }
+      return CfNativeClick.locate(controller);
+    },
+    dispatch: (nx, ny) async {
+      final viewId = _controller?.getViewId();
+      if (viewId is! int) return const CfTapDispatch.failed('no_view_id');
+      return CfNativeClick.tap(viewId: viewId, nx: nx, ny: ny);
+    },
+    canTap: () => CfTapPolicy.shouldAttempt(
+      supported: CfNativeClick.isSupported,
+      interactiveSignaled: _interactiveSignaled,
+      isBackground: _isBackground,
+      someoneWaiting: _someoneWaiting,
+      done: !mounted || _hasPopped || _handedOff,
+    ),
+    log: CfChallengeLogger.log,
+  );
+
+  bool get _someoneWaiting =>
+      widget.foregroundAfter != null || widget.signals.hasForegroundWaiter;
 
   /// 前台里挑战还在转圈：先盖着（只显示我们自己的加载动画），等勾选框出来再露；
   /// 万一收不到 Turnstile 的消息，最多盖这么久（见 [CfSpinnerPolicy]）
@@ -1168,6 +1193,7 @@ class _CfChallengePageState extends State<CfChallengePage> {
     _loadStopFallbackTimer?.cancel();
     _pageReadyFallbackTimer?.cancel();
     _sitekeyDiscoveryTimer?.cancel();
+    _autoTapper.newDocument();
     // InAppWebView 自身会随 Widget 销毁平台 Controller；这里再次手动
     // dispose 会让 Windows 插件对同一个原生对象执行双重释放。
     _controller = null;
@@ -1559,11 +1585,12 @@ class _CfChallengePageState extends State<CfChallengePage> {
   // Turnstile 内嵌框架经 postMessage 向宿主页上报状态：
   // {source:'cloudflare-challenge', event, widgetId}。interactiveBegin 表示 CF 判定
   // 这次要人工操作（勾选框等），后台验证据此立即转前台，不必干等静默期超时
-  // （思路取自上游 a4067bc8）。
+  // （思路取自上游 a4067bc8）；interactiveEnd 表示勾选框被点了，替用户点击据此判断点中。
   window.addEventListener('message', function(e) {
     var d = e.data;
     if (!d || typeof d !== 'object' || d.source !== 'cloudflare-challenge') return;
-    if (d.event !== 'interactiveBegin' && d.event !== 'interactiveTimeout') return;
+    if (d.event !== 'interactiveBegin' && d.event !== 'interactiveTimeout' &&
+        d.event !== 'interactiveEnd') return;
     try {
       window.flutter_inappwebview.callHandler('onChallengeInteractive', d.event);
     } catch(e) {}
@@ -1572,16 +1599,24 @@ class _CfChallengePageState extends State<CfChallengePage> {
 ''';
   }
 
-  /// Turnstile 上报「需要人工操作」（interactiveBegin / interactiveTimeout）。
+  /// Turnstile 上报「需要人工操作」（interactiveBegin / interactiveTimeout）
+  /// 或「人工操作结束」（interactiveEnd）。
   ///
-  /// 后台尝试中、且有人在等结果（先静默再前台，或有前台等待者）时立即转前台：
-  /// 勾选框已经出来了，再静默等下去只是白白多等几秒。纯静默轮次维持原样——
-  /// 只露胶囊、超时放弃，不把验证页弹到正在阅读的用户脸上。
+  /// 后台尝试中、且有人在等结果（先静默再前台，或有前台等待者）时先替用户点一下
+  /// 勾选框，点中了留一小段宽限给 widget 签出 clearance，没过再转前台。纯静默轮次
+  /// 维持原样——不点、只露胶囊、超时放弃，不把验证页弹到正在阅读的用户脸上。
   void _onChallengeInteractive(List<dynamic> args) {
     if (!mounted || _hasPopped || _handedOff) return;
     final event = args.isNotEmpty ? '${args.first}' : 'interactive';
+    if (event == 'interactiveEnd') {
+      CfChallengeLogger.log('[VERIFY] Turnstile interactiveEnd');
+      _autoTapper.interactionEnded();
+      return;
+    }
     final first = !_interactiveSignaled;
     _interactiveSignaled = true;
+    // 每次要人工操作（含超时后 widget 重置）都是新的一回合
+    _autoTapper.newRound();
     if (first) {
       AppLogger.info(
         '验证页：Turnstile 要人工操作（$event），'
@@ -1596,80 +1631,34 @@ class _CfChallengePageState extends State<CfChallengePage> {
       if (_hasSeenChallenge && !_checkingOriginFallback) {
         _revealChallengeWebView();
       }
-      unawaited(_nativeTap());
+      unawaited(_autoTapper.run());
       return;
     }
-    final someoneWaiting =
-        widget.foregroundAfter != null || widget.signals.hasForegroundWaiter;
+    final someoneWaiting = _someoneWaiting;
     CfChallengeLogger.log(
       '[VERIFY] Turnstile $event while in background'
-      '${someoneWaiting ? ', waiter present' : ', silent round keeps waiting'}',
+      '${someoneWaiting ? ', tapping before promoting' : ', silent round keeps waiting'}',
     );
     if (someoneWaiting) {
       unawaited(_tapThenPromote());
-    } else {
-      unawaited(_nativeTap());
-      if (!_pillVisible) {
-        // 没人在等：不把验证页弹到正在阅读的用户脸上，只露胶囊让用户自己点
-        setState(() => _pillVisible = true);
-      }
+    } else if (!_pillVisible) {
+      // 没人在等：不把验证页弹到正在阅读的用户脸上，只露胶囊让用户自己点
+      setState(() => _pillVisible = true);
     }
   }
 
+  /// 有人在等的后台轮次：先替用户点，点中了再留 [CfTapPolicy.postTapGrace]
+  /// 等 clearance，还没过（或根本没点成）才转前台交给用户。
   Future<void> _tapThenPromote() async {
-    final dispatched = await _nativeTap();
-    if (!mounted || _hasPopped || _handedOff || !_isBackground) return;
-    if (dispatched) {
+    bool stillWaiting() =>
+        mounted && !_hasPopped && !_handedOff && _isBackground;
+    final outcome = await _autoTapper.run();
+    if (!stillWaiting()) return;
+    if (outcome == CfTapOutcome.effective) {
       await Future<void>.delayed(CfTapPolicy.postTapGrace);
-      if (!mounted || _hasPopped || _handedOff || !_isBackground) return;
+      if (!stillWaiting()) return;
     }
     _promoteToForeground();
-  }
-
-  Future<bool> _nativeTap() async {
-    final generation = _loadGeneration;
-    if (!CfTapPolicy.shouldAttempt(
-      supported: CfNativeClick.isSupported,
-      interactiveSignaled: _interactiveSignaled,
-      alreadyAttempted: _tapGeneration == generation,
-      done: !mounted || _hasPopped || _handedOff,
-    )) {
-      return false;
-    }
-    if (_tapInFlight) return false;
-    final controller = _controller;
-    if (controller == null) return false;
-    _tapInFlight = true;
-    try {
-      final target = await CfNativeClick.locate(controller);
-      if (target == null) {
-        CfChallengeLogger.log('[VERIFY] 视口内没有 Turnstile widget');
-        return false;
-      }
-      if (!mounted ||
-          _hasPopped ||
-          _handedOff ||
-          generation != _loadGeneration) {
-        return false;
-      }
-      final viewId = controller.getViewId();
-      final host = Uri.tryParse(_target.current.toString())?.host;
-      final ok = await CfNativeClick.tap(
-        viewId: viewId is int ? viewId : null,
-        host: host,
-        nx: target.nx,
-        ny: target.ny,
-      );
-      if (ok) _tapGeneration = generation;
-      CfChallengeLogger.log(
-        '[VERIFY] ${ok ? 'native touch dispatched' : 'native touch failed'} '
-        '(${target.source}, ${target.nx.toStringAsFixed(3)}, '
-        '${target.ny.toStringAsFixed(3)})',
-      );
-      return ok;
-    } finally {
-      _tapInFlight = false;
-    }
   }
 
   /// challenge-platform 响应到达时的回调
@@ -2009,6 +1998,7 @@ class _CfChallengePageState extends State<CfChallengePage> {
     // 作废旧页面的探测尾巴，再发起一次同站导航。备用入口不再回到首页。
     _originProbeSerial++;
     _loadGeneration++;
+    _autoTapper.newDocument();
     _challengeRevealProbeGeneration++;
     _sitekeyDiscoveryTimer?.cancel();
     _timeoutTimer?.cancel();
@@ -2125,6 +2115,7 @@ class _CfChallengePageState extends State<CfChallengePage> {
     _hasSeenChallenge = false;
     _interactiveSignaled = false;
     _loggedSpinnerBackground = false;
+    _autoTapper.newDocument();
     _deferredRevealTimer?.cancel();
     _deferredRevealTimer = null;
     _hideOriginFallbackPage = false;
@@ -2183,7 +2174,7 @@ class _CfChallengePageState extends State<CfChallengePage> {
     if (_interactiveSignaled && _hasSeenChallenge && !_challengeWebViewVisible) {
       _revealChallengeWebView();
     }
-    if (_interactiveSignaled) unawaited(_nativeTap());
+    if (_interactiveSignaled) unawaited(_autoTapper.run());
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
@@ -2945,6 +2936,7 @@ class _CfChallengePageState extends State<CfChallengePage> {
             if (_hasPopped || _handedOff) return;
             final isCompletionNavigation = _hasSeenChallenge;
             _loadGeneration++;
+            _autoTapper.newDocument();
             _sitekeyDiscoveryTimer?.cancel();
             _challengeRevealProbeGeneration++;
             _loadStopFallbackTimer?.cancel();
