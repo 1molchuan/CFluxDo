@@ -60,5 +60,19 @@
   "oauth_noRedirectResponse": "Authorization service did not return a redirect",
   "onboarding_guestAccess": "Guest access",
   "onboarding_networkSettings": "Network settings",
-  "onboarding_slogan": "Sincere · Friendly · United · Professional"
+  "onboarding_slogan": "Sincere · Friendly · United · Professional",
+  "login_finishing": "Finishing sign-in…",
+  "login_authCallbackInvalid": "Couldn't read the authorization result. Please authorize again.",
+  "login_authorized": "Authorized",
+  "login_noOtp": "Authorized, but no sign-in code came back. Please try again.",
+  "login_otpRejected": "The sign-in code has expired. Please authorize again.",
+  "login_confirmFailed": "Couldn't confirm the sign-in. Please try again.",
+  "login_success": "Signed in",
+  "login_pendingHint": "Sign-in isn't finished yet. The authorization stays valid for 10 minutes: tap \"Finish signing in\" on the sign-in page.",
+  "login_resumePending": "Finish signing in",
+  "login_resumePendingDesc": "Your last authorization went through. One step is left, no need to authorize again.",
+  "login_cannotOpenBrowser": "Couldn't open the browser. Please try again.",
+  "login_preflightTitle": "Sign-in may not go through right now",
+  "login_preflightBody": "The app can't reach the forum or didn't pass the human check. This is common with a proxy (VPN) on: turn it off, or add CFluxDo to the proxy's bypass list, then try again.\n\nYou can also continue: if the app can't finish signing in after you authorize, it will switch to the built-in web page to finish.",
+  "login_preflightContinue": "Continue"
 }

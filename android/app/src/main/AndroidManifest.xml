@@ -44,6 +44,17 @@
               android:resource="@style/NormalTheme"
               />
             <!--
+                深链由 app_links 交给 DeepLinkService 处理。不关掉 Flutter 自带的深链处理，
+                它会把同一个链接再当成路由名 pushNamed 一次：App 没有命名路由，每次从浏览器
+                授权回来（discourse://auth_redirect）都在日志里留一条
+                「Null check operator used on a null value」（_onUnknownRoute）。
+                下面两个图标别名里也要各写一份：App 平时是从别名启动的。
+            -->
+            <meta-data
+              android:name="flutter_deeplinking_enabled"
+              android:value="false"
+              />
+            <!--
                 为 Flutter 工具链 / adb 提供 MAIN+LAUNCHER，使其能发现并启动 .MainActivity。
                 添加 data scheme 防止启动器匹配此 filter（launcher intent 无 data → 不匹配），
                 实际启动器入口由 activity-alias 提供。
@@ -111,6 +122,11 @@
             android:exported="true"
             android:icon="@mipmap/ic_launcher"
             android:targetActivity=".MainActivity">
+            <!-- 从别名启动时系统读的是别名自己的 meta-data，不继承 MainActivity 的 -->
+            <meta-data
+              android:name="flutter_deeplinking_enabled"
+              android:value="false"
+              />
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -123,6 +139,11 @@
             android:exported="true"
             android:icon="@mipmap/ic_launcher_modern"
             android:targetActivity=".MainActivity">
+            <!-- 从别名启动时系统读的是别名自己的 meta-data，不继承 MainActivity 的 -->
+            <meta-data
+              android:name="flutter_deeplinking_enabled"
+              android:value="false"
+              />
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

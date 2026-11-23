@@ -23,6 +23,7 @@ import 'providers/message_bus_providers.dart';
 import 'providers/chat/chat_notification_alert_provider.dart';
 import 'services/auth_issue_notice_service.dart';
 import 'providers/app_state_refresher.dart';
+import 'services/preloaded_data_service.dart';
 import 'services/highlighter_service.dart';
 import 'widgets/common/notification_icon_button.dart';
 import 'widgets/common/anchor_guard_sliver.dart';
@@ -1089,6 +1090,7 @@ class _MainPageState extends ConsumerState<MainPage>
     this,
   );
   VoidCallback? _unregisterMessageBusChannels;
+  VoidCallback? _onFreshPreload;
   int? _lastTappedIndex;
   DateTime? _lastTapTime;
   Timer? _pendingSingleTap;
@@ -1149,7 +1151,11 @@ class _MainPageState extends ConsumerState<MainPage>
     // 窗口内,届时 containerOf(context) 会抛错把刷新链掐死(登录后无
     // 登录态)。container 与根 ProviderScope 同生命周期,不受元素影响。
     final appContainer = ProviderScope.containerOf(context, listen: false);
-    _authStateSub = ref.listenManual<AsyncValue<void>>(authStateProvider, (
+    // 冷启动先显示的是启动快照：这次运行的首页数据到了以后，把从快照里取的
+    // 分类、追踪状态等换成新的
+    _onFreshPreload = () => AppStateRefresher.applyFreshPreload(appContainer);
+    PreloadedDataService().freshRevision.addListener(_onFreshPreload!);
+    _authStateSub = ref.listenManual<AsyncValue<int>>(authStateProvider, (
       _,
       next,
     ) {
@@ -1406,6 +1412,10 @@ class _MainPageState extends ConsumerState<MainPage>
     _pendingSingleTap?.cancel();
     _authErrorSub?.close();
     _authStateSub?.close();
+    final onFreshPreload = _onFreshPreload;
+    if (onFreshPreload != null) {
+      PreloadedDataService().freshRevision.removeListener(onFreshPreload);
+    }
     _unregisterMessageBusChannels?.call();
     _messageBusChannels.stop();
     _connectivitySub?.close();

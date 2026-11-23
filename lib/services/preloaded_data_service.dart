@@ -3,7 +3,8 @@ import 'dart:convert';
 import 'dart:async';
 
 import 'package:dio/dio.dart';
-import 'package:flutter/foundation.dart' show compute, visibleForTesting;
+import 'package:flutter/foundation.dart'
+    show ValueListenable, ValueNotifier, compute, visibleForTesting;
 import 'package:flutter/material.dart';
 
 import '../constants.dart';
@@ -15,6 +16,8 @@ import 'network/flux_request_spec.dart';
 import 'network/cookie/csrf_token_service.dart';
 import 'cf_challenge_service.dart';
 import 'cf_clearance_refresh_service.dart';
+import 'site_context.dart';
+import 'startup/startup_snapshot_store.dart';
 
 /// 预加载数据服务
 /// 从首页 HTML 中提取 Discourse 预加载数据，避免额外 API 请求。
@@ -52,9 +55,21 @@ class PreloadedDataService {
   String? _s3CdnUrl; // S3 CDN 域名（如 https://cdn3.linux.do）
   String? _s3BaseUrl; // S3 基础 URL（如 //linuxdo-uploads.s3.linux.do）
   List<String>? _pluginCandidates; // 首页 HTML 中扫到的 plugin js url 列表
-  bool _hasDiscourseSetup = false; // 是否提取到 data-discourse-setup 标签
   bool _loaded = false;
   bool _loading = false;
+
+  /// 现在的数据是从落盘的启动快照读回来的（上一次运行留下的），这次运行的
+  /// 首页数据还没到。到了以后整份替换，见 [_markFresh]。
+  bool _stale = false;
+
+  /// 正在读快照：首页请求回来得再快，也要等它读完再落数据，免得两边交叉写字段
+  Future<bool>? _snapshotRestore;
+
+  /// 快照里的首页话题列表已经被列表页拿去显示了
+  bool _staleTopicListConsumed = false;
+
+  StartupSnapshotStore _snapshots = StartupSnapshotStore();
+  final ValueNotifier<int> _freshRevision = ValueNotifier(0);
 
   PreloadedDataService._internal()
     : _dio = DiscourseDio.create(
@@ -107,8 +122,34 @@ function __fluxdoCapturePreloaded() {
 })()
 ''';
 
-  /// 是否已加载数据
+  /// 是否有数据可用（可能还是启动快照，见 [isFresh]）
   bool get isLoaded => _loaded;
+
+  /// 数据是这次运行从服务端拿到的（首页请求，或验证页 / 登录页交来的首页）
+  bool get isFresh => _loaded && !_stale;
+
+  /// 正显示着启动快照、这次运行的首页数据还没到
+  bool get isStale => _loaded && _stale;
+
+  /// 启动快照被这次运行的首页数据替换时 +1。页面据此把快照期间显示的内容
+  /// 换成新的（见 AppStateRefresher.applyFreshPreload）
+  ValueListenable<int> get freshRevision => _freshRevision;
+
+  /// 列表页显示的是快照里的首页话题列表，新数据到了以后应该换掉
+  bool get staleTopicListConsumed => _staleTopicListConsumed;
+
+  /// 列表页已经接手处理新的首页话题列表
+  void markFreshTopicListHandled() => _staleTopicListConsumed = false;
+
+  /// 新的首页话题列表没被用上（用户已经往下读了）：丢掉，免得之后某次
+  /// 列表重建把这份已经放旧的数据当成最新的
+  void discardInitialTopicList() {
+    _cachedTopicListResponse = null;
+    _topicListData = null;
+    final pending = _topicListResponseCompleter;
+    _topicListResponseCompleter = null;
+    if (pending != null) _completeOnce(pending, null);
+  }
   Map<String, dynamic>? get currentUserSync => _currentUser;
   Map<String, dynamic>? get siteSettingsSync => _siteSettings;
   Map<String, dynamic>? get siteSync => _site;
@@ -162,9 +203,111 @@ function __fluxdoCapturePreloaded() {
   /// 确保预加载数据已准备好
   ///
   /// [observer] 挂到首页请求上，旁观重试与撞盾（启动预加载用它报进度）。
+  ///
+  /// 有启动快照时也算准备好：调用方要的是「有数据可用」。启动序列要的是
+  /// 这次运行的数据，用 [ensureFresh]。
   Future<void> ensureLoaded({FluxRequestObserver? observer}) async {
     await _ensureLoaded(observer: observer);
   }
+
+  /// 确保拿到这次运行的首页数据（启动快照不算）。失败时抛错。
+  Future<void> ensureFresh({FluxRequestObserver? observer}) async {
+    if (isFresh) return;
+    while (_loading) {
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+    }
+    if (isFresh) return;
+    await _loadPreloadedData(observer: observer);
+  }
+
+  /// 冷启动时把上一次的首页数据读回来。[hasSession] 是原生这边有没有登录
+  /// Cookie：快照的登录状态要和它一致才用（登出后残留的、换了账号的都不用）。
+  ///
+  /// 返回是否读回了可用的数据。读回后 [isLoaded] 为 true、[isStale] 为 true。
+  Future<bool> restoreFromSnapshot({required bool hasSession}) {
+    return _snapshotRestore ??= _restoreFromSnapshot(hasSession: hasSession);
+  }
+
+  Future<bool> _restoreFromSnapshot({required bool hasSession}) async {
+    if (_loaded) return false;
+    final snapshot = await _snapshots.load();
+    if (snapshot == null) return false;
+    if (snapshot.host != SiteContext.current.host ||
+        snapshot.loggedIn != hasSession) {
+      // 换了站点、登出后残留、登录后还没存过：这份不能用，也不留着
+      await _snapshots.clear();
+      return false;
+    }
+    if (_loaded) return false;
+    final parsed = await _parsePreloadedDataFromHtml(
+      snapshot.fragment,
+      fromSnapshot: true,
+      accept: (preloaded, hasSetup) =>
+          !_loaded &&
+          _isReusable(preloaded, hasSetup, allowAnonymous: !hasSession) &&
+          _userIdOf(preloaded) == snapshot.userId,
+    );
+    if (!parsed) {
+      if (!_loaded) await _snapshots.clear();
+      return false;
+    }
+    _loaded = true;
+    _stale = true;
+    AppLogger.info(
+      '已读回启动快照',
+      tag: 'PreloadedData',
+      fields: {
+        'ageMinutes': DateTime.now().difference(snapshot.savedAt).inMinutes,
+        'loggedIn': snapshot.loggedIn,
+      },
+    );
+    return true;
+  }
+
+  static int? _userIdOf(Map<String, dynamic> preloaded) {
+    final user = preloaded['currentUser'];
+    final id = user is Map ? user['id'] : null;
+    return id is int ? id : null;
+  }
+
+  /// 预加载数据够不够直接拿来启动：有站点设置、站点信息和 discourse-setup，
+  /// 不允许游客时还得有当前用户
+  static bool _isReusable(
+    Map<String, dynamic> preloaded,
+    bool hasSetup, {
+    required bool allowAnonymous,
+  }) {
+    return hasSetup &&
+        (allowAnonymous || preloaded['currentUser'] is Map) &&
+        preloaded['siteSettings'] is Map &&
+        preloaded['site'] is Map;
+  }
+
+  /// 这次运行的首页数据落地：不再是快照，存成下一次启动的快照
+  void _markFresh(String html) {
+    final wasStale = _stale;
+    _stale = false;
+    _staleTopicListConsumed = wasStale && _staleTopicListConsumed;
+    final fragment = StartupSnapshotStore.buildFragment(html);
+    if (fragment != null) {
+      final userId = _currentUser?['id'];
+      unawaited(
+        _snapshots.save(
+          StartupSnapshot(
+            fragment: fragment,
+            savedAt: DateTime.now(),
+            host: SiteContext.current.host,
+            userId: userId is int ? userId : null,
+          ),
+        ),
+      );
+    }
+    if (wasStale) _freshRevision.value++;
+  }
+
+  /// 仅供测试：换掉快照的存放位置
+  @visibleForTesting
+  set debugSnapshotStore(StartupSnapshotStore store) => _snapshots = store;
 
   /// 获取 currentUser 数据（包含通知计数等）
   Future<Map<String, dynamic>?> getCurrentUser() async {
@@ -480,6 +623,7 @@ function __fluxdoCapturePreloaded() {
       _cachedTopicListResponse = null;
       _topicListData = null;
       _topicListResponseCompleter = null;
+      if (_stale) _staleTopicListConsumed = true;
       return response;
     }
     if (_topicListData == null && _topicListResponseCompleter == null) {
@@ -496,6 +640,7 @@ function __fluxdoCapturePreloaded() {
       _cachedTopicListResponse = null;
       _topicListData = null;
       _topicListResponseCompleter = null;
+      if (_stale) _staleTopicListConsumed = true;
       return response;
     } catch (e) {
       debugPrint('[PreloadedData] 解析 topic_list 失败: $e');
@@ -520,12 +665,16 @@ function __fluxdoCapturePreloaded() {
     _cachedTopicListResponse = null; // 消费后清除
     _topicListData = null;
     _topicListResponseCompleter = null;
+    if (_stale) _staleTopicListConsumed = true;
     return response;
   }
 
   /// 强制刷新预加载数据
   Future<void> refresh() async {
     _clearCachedData();
+    // 调用方认为手上的数据不能再用（登录、登出、换账号）：旧快照一并作废，
+    // 这次加载成功后会存新的
+    await _snapshots.clear();
     await _loadPreloadedData();
   }
 
@@ -549,33 +698,50 @@ function __fluxdoCapturePreloaded() {
     String html, {
     bool allowAnonymous = false,
   }) async {
-    _clearCachedData();
-    final parsed = await _parsePreloadedDataFromHtml(html);
+    // 正显示着启动快照：界面在用这份数据，不能先清空；新数据校验通过才整份
+    // 替换，通不过就原样留着
+    final keepCurrent = isStale;
+    if (!keepCurrent) _clearCachedData();
+    var incomplete = false;
+    final parsed = await _parsePreloadedDataFromHtml(
+      html,
+      accept: (preloaded, hasSetup) {
+        final ok = _isReusable(
+          preloaded,
+          hasSetup,
+          allowAnonymous: allowAnonymous,
+        );
+        if (!ok) {
+          incomplete = true;
+          debugPrint(
+            '[PreloadedData] HTML 快照缺少完整引导数据: '
+            'hasSetup=$hasSetup, '
+            'hasCurrentUser=${preloaded['currentUser'] is Map}, '
+            'hasSiteSettings=${preloaded['siteSettings'] is Map}, '
+            'hasSite=${preloaded['site'] is Map}',
+          );
+        }
+        return ok;
+      },
+    );
     if (!parsed) {
-      debugPrint('[PreloadedData] HTML 快照不包含可用的 data-preloaded');
-      _clearCachedData();
-      return false;
-    }
-
-    if (!_hasReusableBootstrapData(allowAnonymous: allowAnonymous)) {
-      debugPrint(
-        '[PreloadedData] HTML 快照缺少完整引导数据: '
-        'hasSetup=$_hasDiscourseSetup, '
-        'hasCurrentUser=${_currentUser != null}, '
-        'hasSiteSettings=${_siteSettings != null}, '
-        'hasSite=${_site != null}',
-      );
-      _clearCachedData();
+      if (!incomplete) {
+        debugPrint('[PreloadedData] HTML 快照不包含可用的 data-preloaded');
+      }
+      if (!keepCurrent) _clearCachedData();
       return false;
     }
 
     _loaded = true;
+    _markFresh(html);
     debugPrint('[PreloadedData] 已从 HTML 快照恢复数据');
     return true;
   }
 
   void _clearCachedData() {
     _loaded = false;
+    _stale = false;
+    _staleTopicListConsumed = false;
     _currentUser = null;
     _siteSettings = null;
     AvatarUrl.configure(_siteSettings?['avatar_sizes']);
@@ -589,7 +755,6 @@ function __fluxdoCapturePreloaded() {
     _topicTrackingStatesCompleter = null;
     _enabledReactions = null;
     _topicTrackingStateMeta = null;
-    _hasDiscourseSetup = false;
     // 以下为站点级基础设施数据，不随用户登录状态变化。
     // 下次 HTML 解析时会自然更新，refresh 窗口期内保留可避免
     // UrlHelper CDN 降级和 MessageBus 连接中断。
@@ -617,6 +782,8 @@ function __fluxdoCapturePreloaded() {
 
   void reset() {
     _clearCachedData();
+    _snapshotRestore = null;
+    unawaited(_snapshots.clear());
     _baseUri = '';
     _cdnUrl = null;
     _s3CdnUrl = null;
@@ -658,12 +825,18 @@ function __fluxdoCapturePreloaded() {
             FluxRequestKeys.observer: ?observer,
             // 验证页通过后可能已把它停留的首页交了过来:撞盾恢复据此
             // 不再为这次请求另起一轮验证
-            FluxRequestKeys.satisfiedProbe: () => _loaded,
+            FluxRequestKeys.satisfiedProbe: () => isFresh,
           },
         ),
       );
 
       final html = response.data as String;
+      // 快照还在读：等它读完再落这次的数据
+      await _snapshotRestore?.catchError((Object _) => false);
+      if (isFresh) {
+        // 请求在途期间验证页 / 登录页已经把首页交了过来
+        return;
+      }
       final parsed = await _parsePreloadedDataFromHtml(
         html,
         source: response.realUri,
@@ -676,10 +849,11 @@ function __fluxdoCapturePreloaded() {
       }
       debugPrint('[PreloadedData] 数据加载成功');
       _loaded = true;
+      _markFresh(html);
       // 预热完成后仅更新站点基础数据和 sitekey。cf_clearance 自动续期
       // 由 BrowserTrustCoordinator 统一判断启动，避免预加载服务绕过生命周期门禁。
     } catch (e) {
-      if (_loaded) {
+      if (isFresh) {
         // 请求撞盾期间验证页通过，并把它停留的首页快照交了过来
         // （见 CfChallengeService 的落值收尾）：数据已齐，不算失败
         AppLogger.info('首页请求失败，但验证页快照已补齐预加载数据: $e', tag: 'PreloadedData');
@@ -692,39 +866,74 @@ function __fluxdoCapturePreloaded() {
     }
   }
 
-  /// 从 HTML 中解析预加载数据（兼容新旧两种形态）
-  Future<bool> _parsePreloadedDataFromHtml(String html, {Uri? source}) async {
-    _extractCsrfTokenFromHtml(html);
-    _extractSharedSessionKeyFromHtml(html);
-    _extractTurnstileSitekeyFromHtml(html, source: source);
-    _extractBaseUriFromHtml(html);
-    _extractCdnUrlFromHtml(html);
-    _extractPluginCandidatesInBackground(html);
-
+  /// 从 HTML 中解析预加载数据（兼容新旧两种形态）。
+  ///
+  /// 先在后台解码、交给 [accept] 校验，通过后才同步落字段：正显示着的数据
+  /// 不会出现半新半旧，校验不过也不会被动到。[fromSnapshot] 是落盘的启动快照：
+  /// 不取 CSRF、验证组件参数和插件脚本列表（都跟着这次运行的会话和站点构建走）。
+  Future<bool> _parsePreloadedDataFromHtml(
+    String html, {
+    Uri? source,
+    bool fromSnapshot = false,
+    bool Function(Map<String, dynamic> preloaded, bool hasSetup)? accept,
+  }) async {
+    final String dataString;
+    final bool htmlEntityEncoded;
     // 新版形态：<script type="application/json" id="data-preloaded">{...}</script>
     // 内容是原始 JSON，不做 HTML 实体解码（否则正文中字面的 &quot; 会被误还原）
     final scriptTag = RegExp(
       '''<script[^>]*id=["']data-preloaded["'][^>]*>''',
       caseSensitive: false,
     ).firstMatch(html);
-    if (scriptTag != null) {
-      final start = scriptTag.end;
-      final end = html.indexOf('</script>', start);
-      if (end > start) {
-        return _parsePreloadedDataString(
-          html.substring(start, end),
-          htmlEntityEncoded: false,
-        );
+    final scriptEnd = scriptTag == null
+        ? -1
+        : html.indexOf('</script>', scriptTag.end);
+    if (scriptTag != null && scriptEnd > scriptTag.end) {
+      dataString = html.substring(scriptTag.end, scriptEnd);
+      htmlEntityEncoded = false;
+    } else {
+      // 旧版形态：元素属性 data-preloaded="..."（HTML 实体转义，Isolate 中解码）
+      final match = RegExp(r'data-preloaded="([^"]*)"').firstMatch(html);
+      if (match == null) {
+        debugPrint('[PreloadedData] 未找到 data-preloaded 数据');
+        if (!fromSnapshot) _extractCsrfTokenFromHtml(html);
+        return false;
       }
+      dataString = match.group(1)!;
+      htmlEntityEncoded = true;
     }
 
-    // 旧版形态：元素属性 data-preloaded="..."（HTML 实体转义，Isolate 中解码）
-    final match = RegExp(r'data-preloaded="([^"]*)"').firstMatch(html);
-    if (match == null) {
-      debugPrint('[PreloadedData] 未找到 data-preloaded 数据');
+    final Map<String, dynamic>? preloaded;
+    try {
+      // 在 Isolate 中完成（可选的）HTML entity 解码 + 外层/内层 JSON 解码
+      preloaded = await compute(_decodePreloadedJsonInIsolate, [
+        dataString,
+        if (htmlEntityEncoded) 'entity',
+      ]);
+    } catch (e) {
+      debugPrint('[PreloadedData] JSON 解析失败: $e');
       return false;
     }
-    return _parsePreloadedDataString(match.group(1)!, htmlEntityEncoded: true);
+    if (preloaded == null) {
+      debugPrint('[PreloadedData] 预加载 JSON 解析为空');
+      return false;
+    }
+    final hasSetup = RegExp(
+      '''id=["']data-discourse-setup["'][^>]*>''',
+      caseSensitive: false,
+    ).hasMatch(html);
+    if (accept != null && !accept(preloaded, hasSetup)) return false;
+
+    // —— 从这里到返回没有 await：外面看到的要么是旧数据，要么是整份新数据 ——
+    if (!fromSnapshot) {
+      _extractCsrfTokenFromHtml(html);
+      _extractTurnstileSitekeyFromHtml(html, source: source);
+      _extractPluginCandidatesInBackground(html);
+    }
+    _extractSharedSessionKeyFromHtml(html);
+    _extractBaseUriFromHtml(html);
+    _extractCdnUrlFromHtml(html);
+    return _applyPreloaded(preloaded);
   }
 
   void _extractCsrfTokenFromHtml(String html) {
@@ -778,7 +987,6 @@ function __fluxdoCapturePreloaded() {
       caseSensitive: false,
     ).firstMatch(html);
     if (tagMatch == null) return;
-    _hasDiscourseSetup = true;
     final tag = tagMatch.group(0)!;
 
     String? extractAttr(String attrName) {
@@ -831,13 +1039,6 @@ function __fluxdoCapturePreloaded() {
     }());
   }
 
-  bool _hasReusableBootstrapData({required bool allowAnonymous}) {
-    return _hasDiscourseSetup &&
-        (allowAnonymous || _currentUser != null) &&
-        _siteSettings != null &&
-        _site != null;
-  }
-
   /// 从 HTML 中提取 discourse-base-uri（子路径部署前缀）
   void _extractBaseUriFromHtml(String html) {
     final match = RegExp(
@@ -858,23 +1059,17 @@ function __fluxdoCapturePreloaded() {
     debugPrint('[PreloadedData] baseUri: $_baseUri');
   }
 
-  /// 解析预加载数据字符串
+  /// 把解码好的预加载数据落到字段上（同步）。
   ///
-  /// [htmlEntityEncoded] 为 true 时（旧版属性形态）先做 HTML 实体解码。
-  Future<bool> _parsePreloadedDataString(
-    String dataString, {
-    required bool htmlEntityEncoded,
-  }) async {
+  /// 跟着当前用户走的几项先清掉再填：这份数据里没有（比如会话失效后回来的
+  /// 游客首页）就应该是空的，不能留着上一份的。
+  bool _applyPreloaded(Map<String, dynamic> preloaded) {
     try {
-      // 在 Isolate 中完成（可选的）HTML entity 解码 + 外层/内层 JSON 解码
-      final preloaded = await compute(_decodePreloadedJsonInIsolate, [
-        dataString,
-        if (htmlEntityEncoded) 'entity',
-      ]);
-      if (preloaded == null) {
-        debugPrint('[PreloadedData] 预加载 JSON 解析为空');
-        return false;
-      }
+      _currentUser = null;
+      _topicTrackingStateMeta = null;
+      _topicTrackingStates = null;
+      _topicTrackingStatesRawJson = null;
+      discardInitialTopicList();
 
       // 解析 currentUser（已在 Isolate 中完成 jsonDecode）
       if (preloaded.containsKey('currentUser')) {
@@ -973,7 +1168,7 @@ function __fluxdoCapturePreloaded() {
       _parseTopicListFromPreloaded(preloaded);
       return true;
     } catch (e) {
-      debugPrint('[PreloadedData] JSON 解析失败: $e');
+      debugPrint('[PreloadedData] 预加载数据落字段失败: $e');
       return false;
     }
   }

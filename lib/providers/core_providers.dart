@@ -20,9 +20,13 @@ final authErrorProvider = StreamProvider<String>((ref) {
 });
 
 /// 认证状态变化 Provider（登录/退出）
-final authStateProvider = StreamProvider<void>((ref) {
+///
+/// 值是递增的序号，不是 `void`：Riverpod 3 用 `==` 过滤更新，每次都是同一个
+/// 值的话，监听方只在进程里第一次变化时收得到，之后登录、登出都不再通知。
+final authStateProvider = StreamProvider<int>((ref) {
   final service = ref.watch(discourseServiceProvider);
-  return service.authStateStream;
+  var sequence = 0;
+  return service.authStateStream.map((_) => ++sequence);
 });
 
 /// 启动序列：全 App 唯一的「是否已登录」来源（测试可覆盖）。
@@ -43,12 +47,30 @@ class CurrentUserNotifier extends AsyncNotifier<User?> {
   @override
   FutureOr<User?> build() {
     final startup = ref.read(appStartupProvider);
+    _followVerdict(startup);
     final verdictUser = startup.verdictNow?.user;
     if (verdictUser != null) {
-      _refreshUser(verdictUser);
+      // 启动快照里的用户先亮出来，不拿它去刷新资料：这次运行确认过的判定
+      // 出来后会重算一次（见 [_followVerdict]）
+      if (!startup.verdictIsProvisional) _refreshUser(verdictUser);
       return verdictUser;
     }
     return _loadUserWithCache(startup);
+  }
+
+  /// 会话判定一变就重算：登录、登出、启动快照给的临时判定被这次运行的判定
+  /// 取代。网络不通时判定一直不出，界面保持快照里的用户（和缓存先行一样）。
+  ///
+  /// 不能只靠调用方挑时机来刷新：登出函数返回的那一刻，启动序列可能还没收到
+  /// 「登录状态变了」的广播（广播是异步送达的），这时重算读到的仍是登出前的
+  /// 判定，会把用户又填回去——同一次运行里先登录再登出，界面仍显示已登录。
+  void _followVerdict(AppStartup startup) {
+    void onVerdict() {
+      if (ref.mounted) ref.invalidateSelf();
+    }
+
+    startup.session.addListener(onVerdict);
+    ref.onDispose(() => startup.session.removeListener(onVerdict));
   }
 
   Future<User?> _loadUserWithCache(AppStartup startup) async {

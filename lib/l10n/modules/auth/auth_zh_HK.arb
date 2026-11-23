@@ -67,5 +67,19 @@
   "oauth_noRedirectResponse": "授權服務未返回重定向",
   "onboarding_guestAccess": "遊客訪問",
   "onboarding_networkSettings": "網絡設置",
-  "onboarding_slogan": "真誠 · 友善 · 團結 · 專業"
+  "onboarding_slogan": "真誠 · 友善 · 團結 · 專業",
+  "login_finishing": "正在完成登入…",
+  "login_authCallbackInvalid": "授權回調解析失敗，請重新授權",
+  "login_authorized": "授權成功",
+  "login_noOtp": "授權成功，但沒有收到登入口令，請重試",
+  "login_otpRejected": "登入口令已失效，請重新授權",
+  "login_confirmFailed": "登入狀態確認失敗，請重試",
+  "login_success": "登入成功",
+  "login_pendingHint": "登入還未完成。授權 10 分鐘內有效，可以在登入頁點「繼續完成登入」",
+  "login_resumePending": "繼續完成登入",
+  "login_resumePendingDesc": "上次授權已經成功，只差最後一步，不用重新授權",
+  "login_cannotOpenBrowser": "無法開啟瀏覽器，請重試",
+  "login_preflightTitle": "現在可能登入不了",
+  "login_preflightBody": "App 現在連不上論壇，或者未能通過人機驗證。開著代理（VPN）時比較常見：可以先關掉代理，或者把 CFluxDo 加進代理的繞過名單後再試。\n\n也可以繼續授權：授權後如果 App 這邊換不成登入，會自動改到內置網頁裏完成。",
+  "login_preflightContinue": "繼續授權"
 }

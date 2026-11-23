@@ -15,6 +15,9 @@ import '../preloaded_data_service.dart';
 import '../session/webview_use.dart';
 import '../site_context.dart';
 import '../startup_progress.dart';
+import '../user_api_key_service.dart';
+import '../toast_service.dart';
+import '../../l10n/s.dart';
 import 'app_startup.dart';
 
 /// [AppStartup] 的生产实现：只做转接，不持有状态。
@@ -35,7 +38,21 @@ class ProductionStartupPorts implements AppStartupPorts {
       _browserTrust.prepareStartup(reason: reason);
 
   @override
-  bool get isPreloaded => PreloadedDataService().isLoaded;
+  bool get isPreloaded => PreloadedDataService().isFresh;
+
+  @override
+  Future<bool> restoreSnapshot() async {
+    // 原生这边有没有登录 Cookie：快照的登录状态要和它对得上才用
+    final token = await CookieJarService().getTToken();
+    return PreloadedDataService().restoreFromSnapshot(
+      hasSession: token != null && token.isNotEmpty,
+    );
+  }
+
+  @override
+  void notifyShowingSnapshot(Object error) {
+    ToastService.show(S.current.preheat_showingLastContent);
+  }
 
   @override
   Future<StartupPreloadPath?> preload({
@@ -79,8 +96,20 @@ class ProductionStartupPorts implements AppStartupPorts {
       _browserTrust.settleAfterNativePreload(reason: reason);
 
   @override
-  void startClearanceRefresh({required String reason}) =>
-      _browserTrust.startClearanceRefresh(reason: reason);
+  void startClearanceRefresh({required String reason}) {
+    _browserTrust.startClearanceRefresh(reason: reason);
+    unawaited(_burnLeftoverAuthKey());
+  }
+
+  /// 上次登录时没撤成的授权密钥（撞盾、断网）：现在会话是好的，补撤一次。
+  /// 平时本地没有残留，读一下存储就返回，不发请求。
+  Future<void> _burnLeftoverAuthKey() async {
+    try {
+      final keys = UserApiKeyService();
+      if (!await keys.hasKey()) return;
+      await keys.burnAfterLoginIfUseless(DiscourseService().dio);
+    } catch (_) {}
+  }
 
   @override
   Future<void> disableBackgroundKeepAlive() =>

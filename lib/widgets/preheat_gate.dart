@@ -65,10 +65,15 @@ class _PreheatGateState extends State<PreheatGate> {
         await _showReloginDialog();
       }
 
-      // 只等预加载（复用 main() 里启动序列已在进行的那次）；预热、会话判定
-      // 与登录后启动项都由启动序列自己接着做，不在这里
-      await AppStartup.instance.ensurePreloaded(reason: 'preheat_gate');
-      StartupTimeline.mark('preloaded');
+      // 有启动快照就立刻放行（这次运行的预加载在后台继续）；没有才等预加载
+      // （复用 main() 里启动序列已在进行的那次）。预热、会话判定与登录后启动项
+      // 都由启动序列自己接着做，不在这里
+      final source = await AppStartup.instance.ensureContentReady(
+        reason: 'preheat_gate',
+      );
+      StartupTimeline.mark(
+        source == StartupContentSource.snapshot ? 'snapshot' : 'preloaded',
+      );
       // 下一帧切到首页内容
       WidgetsBinding.instance.addPostFrameCallback(
         (_) => StartupTimeline.finish('content'),

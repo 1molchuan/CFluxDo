@@ -20,6 +20,28 @@ class StartupTimeline {
     _marks.putIfAbsent(name, () => _watch.elapsedMilliseconds);
   }
 
+  /// 启动日志写过之后才到的节点（靠启动快照先出了内容，这次运行的首页数据后到）：
+  /// 单独记一条。日志还没写时等同 [mark]，跟着启动日志一起出
+  static void late(String name) {
+    if (!_watch.isRunning || _marks.containsKey(name)) return;
+    if (!_reported) {
+      mark(name);
+      return;
+    }
+    final ms = _watch.elapsedMilliseconds;
+    _marks[name] = ms;
+    AppLogger.info(
+      '启动后 $ms ms：$name',
+      tag: 'Startup',
+      fields: {
+        'type': 'startup',
+        'event': 'startup_late_mark',
+        'name': name,
+        'ms': ms,
+      },
+    );
+  }
+
   /// 记最后一个节点并写日志
   static void finish(String name) {
     if (!_watch.isRunning || _reported) return;

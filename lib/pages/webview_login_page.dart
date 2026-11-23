@@ -27,6 +27,7 @@ import '../services/webview_session_cookie_refresh_service.dart';
 import '../services/windows_webview_environment_service.dart';
 import '../services/log/log_writer.dart';
 import '../services/login_ready_coordinator.dart';
+import '../services/otp_login_race.dart';
 import 'package:common_ui/common_ui.dart';
 import '../l10n/s.dart';
 import '../utils/dialog_utils.dart';
@@ -37,7 +38,23 @@ class WebViewLoginPage extends ConsumerStatefulWidget {
   /// 用于邮箱链接登录等场景，可传入 email-login URL
   final String? initialUrl;
 
-  const WebViewLoginPage({super.key, this.initialUrl});
+  /// [initialUrl] 是一次性登录口令的确认页（`/session/otp/<口令>`）：页面出来后
+  /// 替用户点「继续」。授权已经在系统浏览器里做过，原生这边换不成或迟迟
+  /// 没有结果时改到这里换（见 UserApiKeyLoginFlow）。自动点不上就报告
+  /// 「要人来点」，页面会显示出来，用户自己点一下即可。
+  final bool confirmOtp;
+
+  /// 同一枚口令原生那边也在换（错峰竞速，见 [OtpLoginRace]）：这一页向它报告
+  /// 「网页里登录上了」「口令被拒」「要人来点」，并在往原生写会话之前先问它
+  /// 一声——原生已经先成了，这一页就什么都不写。
+  final OtpWebLeg? otpLeg;
+
+  const WebViewLoginPage({
+    super.key,
+    this.initialUrl,
+    this.confirmOtp = false,
+    this.otpLeg,
+  });
 
   @override
   ConsumerState<WebViewLoginPage> createState() => _WebViewLoginPageState();
@@ -55,6 +72,10 @@ class _WebViewLoginPageState extends ConsumerState<WebViewLoginPage>
   InAppWebViewController? _controller;
   bool _isLoading = true;
   bool _loginHandled = false;
+  bool _loginCheckQueued = false;
+
+  /// 在页面里跑脚本、读地址的等待上限
+  static const Duration _pageScriptTimeout = Duration(seconds: 4);
   bool _loginInProgress = false;
   bool _isCompletingLogin = false;
   String? _lastHomeResponseUrl;
@@ -317,6 +338,9 @@ class _WebViewLoginPageState extends ConsumerState<WebViewLoginPage>
                         _injectFingerprintHook(controller);
                         // 自动填充登录表单
                         await _autoFillLoginForm(controller, url);
+                        // 口令确认流程：替用户点确认。刚点了（或这一页已经
+                        // 收场）就不用检测，等下一页加载完再说
+                        if (await _handleOtpPage(controller, url)) return;
                         // 自动检测登录状态
                         await _checkLoginStatus(
                           controller,
@@ -376,6 +400,97 @@ class _WebViewLoginPageState extends ConsumerState<WebViewLoginPage>
         ],
       ),
     );
+  }
+
+  /// 口令确认页上自动点了几次「确认」、为它重新加载了几次。
+  int _otpSubmits = 0;
+  int _otpReloads = 0;
+  static const int _maxOtpSubmits = 2;
+
+  /// 口令确认流程里，每次页面加载完看一眼停在哪。返回 true 表示这一页不用
+  /// 再检测登录状态（刚提交了表单 / 正在重新加载 / 已经收场）。
+  Future<bool> _handleOtpPage(
+    InAppWebViewController controller,
+    WebUri? url,
+  ) async {
+    if (!widget.confirmOtp) return false;
+    if (url == null ||
+        url.host != _baseUri.host ||
+        !url.path.contains('/session/otp/')) {
+      return false;
+    }
+    String? state;
+    try {
+      final result = await controller
+          .evaluateJavascript(
+            source:
+                r'''
+(function (maySubmit) {
+  // 只认论坛自己的确认表单：Rails 表单必带 authenticity_token。
+  // 人机验证页上也可能有表单，而且地址同样含 /session/otp/，绝不能点它。
+  var forms = document.querySelectorAll('form');
+  for (var i = 0; i < forms.length; i++) {
+    var form = forms[i];
+    if (!form.querySelector('input[name="authenticity_token"]')) continue;
+    if (!maySubmit) return 'form';
+    var button = form.querySelector('[type=submit]');
+    // 放到下一拍再提交：页面一跳走，这次调用的返回值就送不回来了
+    setTimeout(function () {
+      if (button) { button.click(); } else { form.submit(); }
+    }, 0);
+    return 'submitted';
+  }
+  if (document.querySelector('.alert-error')) return 'rejected';
+  var text = document.body ? (document.body.innerText || '').slice(0, 200) : '';
+  if (text.indexOf('BAD CSRF') >= 0) return 'bad_csrf';
+  return 'other';
+})('''
+                '${_otpSubmits < _maxOtpSubmits})',
+          )
+          .timeout(_pageScriptTimeout);
+      state = result?.toString();
+    } catch (e) {
+      debugPrint('[WebViewLogin] 查看登录口令确认页失败: $e');
+    }
+    switch (state) {
+      case 'submitted':
+        _otpSubmits++;
+        return true;
+      case 'rejected':
+        // 服务端明确说口令无效（过期，或者原生那边刚把它用掉）：这一页没有
+        // 可做的了
+        widget.otpLeg?.reportRejected();
+        _exit(false);
+        return true;
+      case 'bad_csrf':
+        // 提交时这一页的会话 Cookie 被换掉了（原生那边同时在取 CSRF，它拿到的
+        // 新会话 Cookie 会被推进内置浏览器）。口令没被用掉：重新打开确认页，
+        // 再点一次
+        if (_otpReloads < 1) {
+          _otpReloads++;
+          await controller.loadUrl(urlRequest: URLRequest(url: url));
+          return true;
+        }
+        widget.otpLeg?.reportNeedsUser();
+        return false;
+      default:
+        // 表单没出来（人机验证页等），或者已经替用户点过了还停在这：要人来看
+        widget.otpLeg?.reportNeedsUser();
+        return false;
+    }
+  }
+
+  /// 关掉这一页并带回结果。不直接 pop：这一页上面可能还压着别的页面（原生
+  /// 那边撞盾时弹的验证页），pop 会关错。
+  void _exit(bool result) {
+    if (!mounted) return;
+    final navigator = Navigator.of(context);
+    final route = ModalRoute.of(context);
+    if (route == null || route.isCurrent) {
+      navigator.pop(result);
+    } else if (route.isActive) {
+      navigator.removeRoute(route, result);
+    }
   }
 
   Future<void> _clearCredentials() async {
@@ -442,6 +557,8 @@ class _WebViewLoginPageState extends ConsumerState<WebViewLoginPage>
     InAppWebViewController controller,
     WebUri? url,
   ) async {
+    // 拿口令换会话的流程里没有登录表单，不往页面里填账号密码
+    if (widget.confirmOtp) return;
     final autoFill = ref.read(preferencesProvider).autoFillLogin;
     if (!autoFill) return;
 
@@ -519,11 +636,23 @@ class _WebViewLoginPageState extends ConsumerState<WebViewLoginPage>
     InAppWebViewController controller, {
     String? currentUrl,
   }) async {
-    if (_loginHandled || _loginInProgress) return;
+    if (_loginHandled) return;
+    if (_loginInProgress) {
+      // 正在检测时页面又变了（跳转、加载完成）：这一轮结束后再检测一次，
+      // 不然新页面上的登录状态没人看
+      _loginCheckQueued = true;
+      return;
+    }
     _loginInProgress = true;
 
     try {
-      final pageUri = Uri.tryParse((await controller.getUrl())?.toString() ?? '');
+      final pageUri = Uri.tryParse(
+        (await controller.getUrl().timeout(
+              _pageScriptTimeout,
+              onTimeout: () => null,
+            ))?.toString() ??
+            '',
+      );
       if (!_isCurrentSiteUri(pageUri)) return;
       final username = await _readCurrentUsername(controller);
       if (username == null || username.isEmpty) {
@@ -533,6 +662,11 @@ class _WebViewLoginPageState extends ConsumerState<WebViewLoginPage>
         }
         return;
       }
+
+      // 同一枚口令原生那边也在换：往原生写任何东西之前先问一声。原生已经
+      // 先成了就什么都不写（这一页马上会被撤掉）；否则从这一刻起以网页为准，
+      // 原生的请求被取消
+      if (!(widget.otpLeg?.claim() ?? true)) return;
 
       currentUrl ??= (await controller.getUrl())?.toString();
       await _awaitInitialCookieFlush();
@@ -606,10 +740,16 @@ class _WebViewLoginPageState extends ConsumerState<WebViewLoginPage>
 
       if (mounted) {
         ToastService.showSuccess(S.current.webviewLogin_loginSuccess);
-        Navigator.of(context).pop(true);
+        _exit(true);
       }
     } finally {
       _loginInProgress = false;
+      if (_loginCheckQueued) {
+        _loginCheckQueued = false;
+        if (mounted && !_loginHandled && _controller == controller) {
+          unawaited(_checkLoginStatus(controller));
+        }
+      }
     }
   }
 
@@ -950,20 +1090,53 @@ class _WebViewLoginPageState extends ConsumerState<WebViewLoginPage>
     InAppWebViewController controller,
   ) async {
     try {
+      // 以前只认 `Discourse.User.current()`。LINUX DO 现在的前端已经不再暴露
+      // `Discourse.User`（2026-11-23 实测），网页里登录成功了这里也读不到用户名，
+      // 登录页就一直停着不收尾。
+      //
+      // 页面正在跳转时这个调用可能永远不返回：不设超时的话，登录状态检测
+      // 会一直停在「进行中」，之后的页面都没人检测
       final result = await controller.evaluateJavascript(
-        source: '''
+        source: r'''
         (function() {
+          // 首页预加载数据里的当前用户：服务端渲染进页面的，不依赖前端暴露什么对象
+          function fromPreloaded(el) {
+            if (!el) return null;
+            var raw = el.getAttribute('data-preloaded') || el.textContent;
+            if (!raw) return null;
+            var user = JSON.parse(raw).currentUser;
+            if (typeof user === 'string') user = JSON.parse(user);
+            return user && user.username ? user.username : null;
+          }
           try {
             var meta = document.querySelector('meta[name="current-username"]');
             if (meta && meta.content) return meta.content;
+          } catch (e) {}
+          try {
             if (typeof Discourse !== 'undefined' && Discourse.User && Discourse.User.current()) {
               return Discourse.User.current().username;
             }
-            return null;
-          } catch(e) { return null; }
+          } catch (e) {}
+          try {
+            var name = fromPreloaded(
+              document.querySelector('#data-preloaded, [data-preloaded]')
+            );
+            if (name) return name;
+          } catch (e) {}
+          try {
+            // 前端启动后可能把预加载节点摘掉：文档开始时存下的那份还在
+            if (typeof window.__rawPreloaded === 'string') {
+              var box = document.createElement('div');
+              box.innerHTML = window.__rawPreloaded;
+              return fromPreloaded(
+                box.querySelector('#data-preloaded, [data-preloaded]')
+              );
+            }
+          } catch (e) {}
+          return null;
         })();
       ''',
-      );
+      ).timeout(_pageScriptTimeout);
 
       if (result == null) {
         return null;

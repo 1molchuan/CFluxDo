@@ -60,6 +60,17 @@ class AppStateRefresher {
     });
   }
 
+  /// 冷启动先用启动快照出了内容，这次运行的首页数据到了：把从快照里取过
+  /// 数据的几样换成新的。只动不发请求的（分类、追踪状态都直接读预加载数据），
+  /// 当前用户由会话判定跟进、首页列表由列表页自己按是否在读决定，这里不管。
+  static void applyFreshPreload(ProviderContainer container) {
+    container
+      ..invalidate(categoriesProvider)
+      ..invalidate(topicTrackingStateMetaProvider)
+      ..invalidate(topicTrackingStateProvider)
+      ..invalidate(notificationCountStateProvider);
+  }
+
   static Future<void> resetForLogout(ProviderContainer container) async {
     _resetAccountState(container);
     await container.read(ldcUserInfoProvider.notifier).disable();

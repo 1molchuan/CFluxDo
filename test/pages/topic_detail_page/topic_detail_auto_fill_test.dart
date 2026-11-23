@@ -117,6 +117,8 @@ class _TopicNetwork extends Fake implements DiscourseService {
 /// 启动会话是页面外的平台边界，保留真实 CurrentUserNotifier 的访客路径。
 class _GuestStartup extends Fake implements AppStartup {
   @override
+  final ValueNotifier<SessionVerdict?> session = ValueNotifier(null);
+  @override
   SessionVerdict? get verdictNow => null;
 
   @override

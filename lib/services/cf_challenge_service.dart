@@ -735,13 +735,14 @@ class CfChallengeService {
   /// 浏览器这条链路已被放行；原生重放即使仍被拦，启动也不必再撞一次盾。
   Future<void> _handOverHomeSnapshot(CfVerificationRound round) async {
     final preload = PreloadedDataService();
-    if (preload.isLoaded) return;
+    // 启动快照不算已经拿到：这次运行的首页还在等
+    if (preload.isFresh) return;
     final page = _presentations[round.id]?.pageKey.currentState;
     if (page == null || !page.mounted) return;
     final harvest = await page._harvestHomeSnapshot(_homeSnapshotTimeout);
     final snapshot = harvest.snapshot;
     var hydrated = false;
-    if (snapshot != null && !preload.isLoaded) {
+    if (snapshot != null && !preload.isFresh) {
       hydrated = await preload.hydrateFromHtml(snapshot, allowAnonymous: true);
     }
     CfChallengeLogger.log(

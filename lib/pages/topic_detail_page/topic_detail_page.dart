@@ -2705,7 +2705,7 @@ class _TopicDetailPageState extends ConsumerState<TopicDetailPage>
       if (mounted) setState(() {});
     });
 
-    ref.listen<AsyncValue<void>>(authStateProvider, (_, _) {
+    ref.listen<AsyncValue<int>>(authStateProvider, (_, _) {
       if (!context.mounted) return;
       final stillLoggedIn = ref.read(currentUserProvider).value != null;
       if (_controller.trackEnabled != stillLoggedIn) {

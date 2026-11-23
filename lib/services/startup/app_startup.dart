@@ -6,6 +6,7 @@ import '../../models/user.dart';
 import '../app_logger.dart';
 import '../startup_progress.dart';
 import 'production_startup_ports.dart';
+import 'startup_timeline.dart';
 
 /// 冷启动序列的阶段，按声明顺序进入。
 ///
@@ -34,8 +35,21 @@ enum StartupPhase {
 /// 启动预加载实际走的路径。
 enum StartupPreloadPath { native, webView }
 
+/// 启动页放行时内容的来源。
+enum StartupContentSource {
+  /// 上一次运行留下的启动快照（这次运行的首页数据还在路上）。
+  snapshot,
+
+  /// 这次运行的首页数据。
+  preload,
+}
+
 /// 「是否已登录」的依据。
 enum SessionVerdictSource {
+  /// 启动快照里带着当前用户、原生这边也有登录 Cookie：这次运行还没向服务端
+  /// 确认过，只用于先把界面亮出来。
+  snapshot,
+
   /// 预加载的首页数据里带着当前用户。
   preload,
 
@@ -100,8 +114,18 @@ abstract interface class AppStartupPorts {
   /// WebView cookie priming（含 `_t` 对账），不阻塞调用方。
   void prime({required String reason});
 
+  // --- snapshot ---
+
+  /// 把上一次运行留下的首页数据读回来（启动快照）。读回了返回 true，之后
+  /// [preloadedUserJson] 给的是快照里的用户，[isPreloaded] 仍为 false。
+  Future<bool> restoreSnapshot();
+
+  /// 靠快照先出了内容，这次运行的预加载却失败了：告诉用户现在看到的是上次的内容。
+  void notifyShowingSnapshot(Object error);
+
   // --- preload ---
 
+  /// 这次运行的首页数据是否已经拿到（启动快照不算）。
   bool get isPreloaded;
 
   /// 预加载首页；失败时抛错。返回实际走的路径。
@@ -189,6 +213,20 @@ class AppStartup {
   bool _warmedUp = false;
   StartupPreloadPath? _preloadPath;
 
+  Future<bool>? _snapshotRestore;
+  bool _snapshotRestored = false;
+  bool _snapshotNoticeShown = false;
+  Timer? _preloadRetry;
+  int _preloadRetryCount = 0;
+
+  /// 靠快照出了内容后预加载失败时的重试间隔；用完就等回前台再试
+  static const _preloadRetryDelays = [
+    Duration(seconds: 5),
+    Duration(seconds: 15),
+    Duration(seconds: 45),
+    Duration(minutes: 2),
+  ];
+
   bool _startupVerdictStarted = false;
   final Completer<void> _startupVerdictReady = Completer<void>();
 
@@ -212,6 +250,58 @@ class AppStartup {
       _log('stores not ready at storesReady()', warning: true);
     }
     _attachSessionHooks();
+    // 存储一就绪就去读启动快照：不用等网络栈，读回来启动页就可以放行
+    _snapshotRestore ??= _restoreSnapshot();
+  }
+
+  Future<bool> _restoreSnapshot() async {
+    try {
+      if (_ports.isPreloaded || !await _ports.restoreSnapshot()) return false;
+    } catch (e) {
+      _log('restore startup snapshot failed: $e', warning: true);
+      return false;
+    }
+    _snapshotRestored = true;
+    _applySnapshotVerdict();
+    return true;
+  }
+
+  /// 快照读回来了、这次运行的判定还没出：先按快照给一个临时判定，界面不用等
+  /// 网络就知道是谁。只用于显示：登录后启动项等这次运行确认过的判定。
+  void _applySnapshotVerdict() {
+    if (_resolution != null || _startupVerdictStarted) return;
+    final json = _ports.preloadedUserJson;
+    final verdict = json == null
+        ? const SessionVerdict.loggedOut()
+        : SessionVerdict.loggedIn(
+            user: User.fromJson(json),
+            source: SessionVerdictSource.snapshot,
+          );
+    _resolution = _Resolution(_epoch, Future.value(verdict), provisional: true)
+      ..settled = verdict;
+    _log('provisional session verdict from snapshot: $verdict');
+    final user = verdict.user;
+    if (user != null) _ports.publishUser(user);
+  }
+
+  /// 启动页等的东西：有启动快照就立刻放行（这次运行的预加载在后台继续，
+  /// 回来后整份替换），没有就等预加载。预加载失败时抛错。
+  Future<StartupContentSource> ensureContentReady({
+    String reason = 'unknown',
+  }) async {
+    if (_ports.isPreloaded) return StartupContentSource.preload;
+    final restoring = _snapshotRestore;
+    if (restoring != null && await restoring && !_ports.isPreloaded) {
+      // 没走 launch() 的入口（测试、极早的调用）也要把这次运行的预加载带起来
+      if (!_launched) {
+        unawaited(
+          ensurePreloaded(reason: reason).catchError((Object _) {}),
+        );
+      }
+      return StartupContentSource.snapshot;
+    }
+    await ensurePreloaded(reason: reason);
+    return StartupContentSource.preload;
   }
 
   /// 阶段 3→6：网络栈（DoH / 代理 / VPN）落定后由 main() 调用，不阻塞 runApp。
@@ -232,6 +322,7 @@ class AppStartup {
     _authSub ??= _ports.authStateChanges.listen((_) => _onAuthStateChanged());
     _enter(StartupPhase.prime);
     _ports.prime(reason: reason);
+    _snapshotRestore ??= _restoreSnapshot();
     unawaited(ensurePreloaded(reason: reason).catchError((Object _) {}));
   }
 
@@ -247,7 +338,39 @@ class AppStartup {
       if (identical(_activePreload, future)) _activePreload = null;
     });
     _activePreload = future;
+    // 靠快照先出了内容：这次失败没有启动页可以显示错误和重试，自己接着试
+    unawaited(
+      future.then<void>(
+        (_) {
+          _preloadRetry?.cancel();
+          _preloadRetryCount = 0;
+        },
+        onError: (Object e) => _onPreloadFailedBehindSnapshot(e),
+      ),
+    );
     return future;
+  }
+
+  void _onPreloadFailedBehindSnapshot(Object error) {
+    if (!_snapshotRestored || _ports.isPreloaded) return;
+    _log('preload failed while showing snapshot: $error', warning: true);
+    if (!_snapshotNoticeShown) {
+      _snapshotNoticeShown = true;
+      try {
+        _ports.notifyShowingSnapshot(error);
+      } catch (e) {
+        _log('notifyShowingSnapshot failed: $e', warning: true);
+      }
+    }
+    if (_preloadRetry?.isActive ?? false) return;
+    if (_preloadRetryCount >= _preloadRetryDelays.length) return;
+    final delay = _preloadRetryDelays[_preloadRetryCount++];
+    _preloadRetry = Timer(delay, () {
+      if (_ports.isPreloaded) return;
+      unawaited(
+        ensurePreloaded(reason: 'snapshot_retry').catchError((Object _) {}),
+      );
+    });
   }
 
   Future<void> _preloadOnce(String reason) async {
@@ -265,6 +388,7 @@ class AppStartup {
         _reporter.clear();
       }
     }
+    if (_snapshotRestored) StartupTimeline.late('fresh');
     if (!_warmedUp) {
       _warmedUp = true;
       try {
@@ -306,6 +430,23 @@ class AppStartup {
 
   /// 是否已登录（未判定时按未登录处理）。
   bool get isLoggedIn => verdictNow?.loggedIn ?? false;
+
+  /// 当前的判定是启动快照给的临时判定（这次运行还没向服务端确认）。
+  bool get verdictIsProvisional {
+    final r = _resolution;
+    return r != null && r.epoch == _epoch && r.provisional;
+  }
+
+  /// 这次运行确认过的判定：启动快照给的临时判定不算，等这次运行的预加载
+  /// 完成后的判定。网络一直不通时不会完成，调用方不要拿它挡界面。
+  Future<SessionVerdict> confirmedVerdict() async {
+    final r = _resolution;
+    if (r != null && r.epoch == _epoch && !r.provisional) return r.future;
+    if (!_startupVerdictStarted) {
+      await _startupVerdictReady.future;
+    }
+    return verdict();
+  }
 
   /// 最近一次生效的判定（启动项据此启停）。
   ValueListenable<SessionVerdict?> get session => _session;
@@ -477,6 +618,11 @@ class AppStartup {
       _ports.exitBackgroundPolling();
       await afterSessionReady?.call();
       _ports.ensureNetworkAlive();
+      // 靠快照出的内容、这次运行的首页数据还没拿到：回前台再试一次
+      if (_snapshotRestored && !_ports.isPreloaded) {
+        _preloadRetryCount = 0;
+        unawaited(ensurePreloaded(reason: reason).catchError((Object _) {}));
+      }
     } catch (e) {
       _log('resume from background failed: $e', warning: true);
     } finally {
@@ -517,9 +663,12 @@ class AppStartup {
 }
 
 class _Resolution {
-  _Resolution(this.epoch, this.future);
+  _Resolution(this.epoch, this.future, {this.provisional = false});
 
   final int epoch;
   final Future<SessionVerdict> future;
+
+  /// 启动快照给的临时判定
+  final bool provisional;
   SessionVerdict? settled;
 }

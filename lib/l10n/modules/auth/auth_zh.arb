@@ -74,5 +74,19 @@
   "oauth_noRedirectResponse": "授权服务未返回重定向",
   "onboarding_guestAccess": "游客访问",
   "onboarding_networkSettings": "网络设置",
-  "onboarding_slogan": "真诚 · 友善 · 团结 · 专业"
+  "onboarding_slogan": "真诚 · 友善 · 团结 · 专业",
+  "login_finishing": "正在完成登录…",
+  "login_authCallbackInvalid": "授权回调解析失败，请重新授权",
+  "login_authorized": "授权成功",
+  "login_noOtp": "授权成功，但没有收到登录口令，请重试",
+  "login_otpRejected": "登录口令已失效，请重新授权",
+  "login_confirmFailed": "登录状态确认失败，请重试",
+  "login_success": "登录成功",
+  "login_pendingHint": "登录还没完成。授权 10 分钟内有效，可以在登录页点「继续完成登录」",
+  "login_resumePending": "继续完成登录",
+  "login_resumePendingDesc": "上次授权已经成功，只差最后一步，不用重新授权",
+  "login_cannotOpenBrowser": "无法打开浏览器，请重试",
+  "login_preflightTitle": "现在可能登录不上",
+  "login_preflightBody": "App 现在连不上论坛，或者没能通过人机验证。开着代理（VPN）时比较常见：可以先关掉代理，或者把 CFluxDo 加进代理的绕过名单后再试。\n\n也可以继续授权：授权后如果 App 这边换不成登录，会自动改到内置网页里完成。",
+  "login_preflightContinue": "继续授权"
 }

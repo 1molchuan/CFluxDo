@@ -3,6 +3,7 @@ import 'package:app_icons/app_icons.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../l10n/s.dart';
+import '../utils/dialog_utils.dart';
 import '../services/auth_session.dart';
 import '../constants.dart';
 import '../services/site_context.dart';
@@ -54,6 +55,8 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
   String? _savedPassword;
   bool _credentialsLoaded = false;
   bool _browserAuthLaunching = false;
+  bool _hasPendingLogin = false;
+  bool _resumingLogin = false;
 
   late final AnimationController _entryController;
   final List<Animation<double>> _fade = [];
@@ -64,6 +67,28 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
     super.initState();
     _setupEntryAnimations();
     _loadSavedCredentials();
+    _checkPendingLogin();
+  }
+
+  /// 上次授权已经成功、只差换会话这一步（撞盾、断网或 App 被杀）：口令还在
+  /// 有效期内就在页面上给一个「继续完成登录」，不用重新授权
+  Future<void> _checkPendingLogin() async {
+    final pending = await UserApiKeyLoginFlow.instance.hasPendingLogin();
+    if (mounted && pending != _hasPendingLogin) {
+      setState(() => _hasPendingLogin = pending);
+    }
+  }
+
+  Future<void> _resumePendingLogin() async {
+    if (_resumingLogin) return;
+    setState(() => _resumingLogin = true);
+    UserApiKeyLoginFlow.instance.onFlowFinished = _onBrowserAuthFinished;
+    try {
+      await UserApiKeyLoginFlow.instance.resumePending();
+    } finally {
+      if (mounted) setState(() => _resumingLogin = false);
+      await _checkPendingLogin();
+    }
   }
 
   /// staggered 入场动画 (对齐 onboarding 的节奏)
@@ -112,19 +137,51 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
     setState(() => _browserAuthLaunching = true);
     UserApiKeyLoginFlow.instance.onFlowFinished = _onBrowserAuthFinished;
     try {
+      // 先确认 App 这边连得上论坛、过得了人机验证（撞盾会在这里弹验证页）：
+      // 授权回来后换会话走的是同一条路，现在不通的话授权了也登录不上
+      final reachable = await UserApiKeyLoginFlow.instance.preflight();
+      if (!mounted) return;
+      if (!reachable && !await _confirmAuthorizeAnyway()) return;
       // 首次会懒生成 RSA 密钥对(isolate),可能耗时数秒
       final launched = await UserApiKeyLoginFlow.instance.start();
       if (!launched && mounted) {
-        ToastService.showError('无法打开浏览器,请重试');
+        ToastService.showError(S.current.login_cannotOpenBrowser);
       }
     } finally {
       if (mounted) setState(() => _browserAuthLaunching = false);
     }
   }
 
+  /// 预检没过：说明原因和办法，让用户决定要不要照样去授权
+  Future<bool> _confirmAuthorizeAnyway() async {
+    final l10n = context.l10n;
+    final proceed = await showAppDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(l10n.login_preflightTitle),
+        content: Text(l10n.login_preflightBody),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: Text(l10n.common_cancel),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: Text(l10n.login_preflightContinue),
+          ),
+        ],
+      ),
+    );
+    return proceed == true;
+  }
+
   void _onBrowserAuthFinished(bool success) {
-    if (success && mounted) {
+    if (!mounted) return;
+    if (success) {
       Navigator.of(context).pop(true);
+    } else {
+      // 没成：口令可能还在有效期内，页面上给出「继续完成登录」
+      _checkPendingLogin();
     }
   }
 
@@ -373,6 +430,10 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
                             ),
                           ),
                           const SizedBox(height: 32),
+                          if (_hasPendingLogin) ...[
+                            _buildPendingLogin(theme, scheme),
+                            const SizedBox(height: 20),
+                          ],
                           _entry(
                             3,
                             SiteContext.isLinuxDo
@@ -410,6 +471,40 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
           ),
         ],
       ),
+    );
+  }
+
+  /// 上次授权已成功、只差换会话：接着完成，不用重新授权
+  Widget _buildPendingLogin(ThemeData theme, ColorScheme scheme) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        FilledButton.icon(
+          onPressed: _resumingLogin ? null : _resumePendingLogin,
+          icon: _resumingLogin
+              ? const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: LoadingSpinner(size: 20),
+                )
+              : const Icon(Symbols.login_rounded, size: 20),
+          label: Text(context.l10n.login_resumePending),
+          style: FilledButton.styleFrom(
+            minimumSize: const Size(double.infinity, 52),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(28),
+            ),
+          ),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          context.l10n.login_resumePendingDesc,
+          textAlign: TextAlign.center,
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: scheme.onSurfaceVariant.withValues(alpha: 0.8),
+          ),
+        ),
+      ],
     );
   }
 

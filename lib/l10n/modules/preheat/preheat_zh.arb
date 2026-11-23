@@ -69,5 +69,6 @@
     }
   },
   "preheat_detailUpstreamUnreachable": "连不上服务器节点",
-  "preheat_reasonUpstreamUnreachable": "连不上服务器节点，正在换线路重试"
+  "preheat_reasonUpstreamUnreachable": "连不上服务器节点，正在换线路重试",
+  "preheat_showingLastContent": "暂时连不上论坛，先显示上次的内容"
 }

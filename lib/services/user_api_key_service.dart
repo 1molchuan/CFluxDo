@@ -11,8 +11,57 @@ import '../constants.dart';
 import '../config/forum_site.dart';
 import 'log/log_writer.dart';
 import 'network/cookie/cookie_jar_service.dart';
+import 'network/exceptions/api_exception.dart';
 import 'storage/resilient_secure_storage.dart';
 import 'site_context.dart';
+
+/// 撤销授权密钥的结果：撤掉了 / 服务端本就不认（已失效）/ 请求没到论坛
+enum _RevokeOutcome { revoked, dead, unreachable }
+
+/// 一次性登录口令没换成会话的原因。
+enum OtpRedeemFailure {
+  /// 口令写法不对（不是十六进制串），没有发请求。
+  badFormat,
+
+  /// 被人机验证拦下（验证没过、取消、冷却中）。口令还在，可以换一条路再试。
+  challenge,
+
+  /// 连接层失败（超时、断网、网关连不上）。口令还在，可以再试。
+  network,
+
+  /// 请求到了服务端，但没有签出会话：口令过期或已被用掉。再试也没用。
+  rejected,
+}
+
+/// 用一次性登录口令换会话的结果。
+class OtpRedeemResult {
+  const OtpRedeemResult.success(String this.token) : failure = null;
+  const OtpRedeemResult.failed(OtpRedeemFailure this.failure) : token = null;
+
+  /// 新签出的 `_t`；失败时为 null。
+  final String? token;
+  final OtpRedeemFailure? failure;
+
+  bool get ok => token != null;
+
+  /// 口令还没被服务端用掉：换一条路（内置网页）或稍后再试还有可能成功
+  bool get retryable =>
+      failure == OtpRedeemFailure.challenge ||
+      failure == OtpRedeemFailure.network;
+}
+
+/// 已经拿到手、还没换成会话的一次性登录口令。
+class PendingOtp {
+  const PendingOtp({required this.otp, required this.issuedAt});
+
+  final String otp;
+  final DateTime issuedAt;
+
+  /// 服务端给口令 10 分钟；留 1 分钟余量，快到期的不再拿去试
+  static const lifetime = Duration(minutes: 9);
+
+  bool isExpired(DateTime now) => now.difference(issuedAt) >= lifetime;
+}
 
 /// User API Key 授权与会话自愈服务
 ///
@@ -54,6 +103,10 @@ class UserApiKeyService {
   // auth_redirect 深链,内存态 nonce 会丢失导致每次重启误报"回调解析失败"。
   static String get _keyPendingNonce => SiteContext.storageKey('user_api_key_pending_nonce');
 
+  /// 授权已经成功、还没换成会话的一次性口令（JSON：otp + 拿到的时刻）。
+  /// 换会话那一步撞盾 / 断网 / App 被杀时，10 分钟内可以接着换，不用重新授权。
+  static String get _keyPendingOtp => SiteContext.storageKey('user_api_key_pending_otp');
+
   static const String authRedirect = 'discourse://auth_redirect';
   static const String applicationName = 'CFluxDo';
   static const String scopes = 'one_time_password';
@@ -73,7 +126,13 @@ class UserApiKeyService {
   static const Duration _selfHealCooldown = Duration(minutes: 10);
 
   final _storage = ResilientSecureStorage();
-  final _cookieJar = CookieJarService();
+  Future<String?> Function() _readSessionToken = () =>
+      CookieJarService().getTToken();
+
+  /// 仅供测试：换掉读取原生 `_t` 的方式（真实的 Cookie 存储要先初始化落盘目录）
+  @visibleForTesting
+  set debugSessionTokenReader(Future<String?> Function()? reader) =>
+      _readSessionToken = reader ?? (() => CookieJarService().getTToken());
 
   DateTime? _lastSelfHealFailureAt;
   Future<Map<String, dynamic>?>? _activeSelfHeal;
@@ -100,8 +159,11 @@ class UserApiKeyService {
   /// `POST /user-api-key/revoke`(带 User-Api-Key 头、不带 id)
   /// 永远豁免——`is_revoke_self_request?`。带 key 头亦豁免 CSRF。
   /// 因此"零权限 key 焚毁自己"在任何站点配置下都可行。
-  Future<bool> revokeKey(Dio dio, String apiKey) async {
-    if (apiKey.isEmpty) return false;
+  Future<bool> revokeKey(Dio dio, String apiKey) async =>
+      await _revoke(dio, apiKey) == _RevokeOutcome.revoked;
+
+  Future<_RevokeOutcome> _revoke(Dio dio, String apiKey) async {
+    if (apiKey.isEmpty) return _RevokeOutcome.dead;
     try {
       await dio.post(
         '/user-api-key/revoke',
@@ -111,12 +173,27 @@ class UserApiKeyService {
         ),
       );
       _log('info', 'user_api_key_revoked', '已撤销 User API Key');
-      return true;
+      return _RevokeOutcome.revoked;
     } catch (e) {
+      // 服务端明确不认这枚 key（早已撤销 / 过期）：它已经是死的，不必再撤。
+      // 人机验证的 403 不算——那是请求没到论坛。
+      final response = e is DioException ? e.response : null;
+      final status = response?.statusCode;
+      final challenged =
+          (e is DioException && e.error is CfChallengeException) ||
+          response?.headers.value('cf-mitigated') != null;
+      final dead =
+          !challenged &&
+          status != null &&
+          status >= 400 &&
+          status < 500 &&
+          status != 408 &&
+          status != 429;
       _log('warning', 'user_api_key_revoke_failed', '撤销 User API Key 失败(忽略)', {
         'error': e.toString(),
+        'dead': dead,
       });
-      return false;
+      return dead ? _RevokeOutcome.dead : _RevokeOutcome.unreachable;
     }
   }
 
@@ -131,10 +208,60 @@ class UserApiKeyService {
 
   /// 授权登录收口后的"用完即焚":scopes 无 write(本地无自愈价值)时
   /// 撤销并清除刚拿到的 key,不给服务端留永久零权限凭据。
-  Future<void> burnAfterLoginIfUseless(Dio dio) async {
-    if (keyWorthKeeping) return;
-    await revokeAndClear(dio);
+  ///
+  /// 撤销请求没发成（撞盾、断网）时本地先留着这枚 key，下次再撤（登录成功后、
+  /// 启动判定为已登录后都会再调一次）：以前不管成不成都清本地，服务端就留下
+  /// 一枚再也撤不掉的孤儿。
+  /// 服务端明确不认这枚 key 时它已经失效，照样清本地。
+  ///
+  /// 同一时刻只跑一份：登录收口和「判定为已登录后补撤」会同时调到这里，
+  /// 各发一个撤销请求的话，后到的那个必然被服务端拒（密钥已经撤掉了）。
+  Future<void> burnAfterLoginIfUseless(Dio dio) {
+    return _burning ??= _burnIfUseless(dio).whenComplete(() => _burning = null);
   }
+
+  Future<void>? _burning;
+
+  Future<void> _burnIfUseless(Dio dio) async {
+    if (keyWorthKeeping) return;
+    final key = await readApiKey();
+    if (key == null || key.isEmpty) return;
+    if (await _revoke(dio, key) != _RevokeOutcome.unreachable) {
+      await clearKey();
+    }
+  }
+
+  // ---------- 待兑换的口令 ----------
+
+  Future<void> savePendingOtp(String otp, {DateTime? now}) async {
+    await _storage.write(
+      key: _keyPendingOtp,
+      value: jsonEncode({
+        'otp': otp,
+        'at': (now ?? DateTime.now()).millisecondsSinceEpoch,
+      }),
+    );
+  }
+
+  /// 还能用的待兑换口令；没有或已过期（顺手清掉）返回 null。
+  Future<PendingOtp?> readPendingOtp({DateTime? now}) async {
+    final raw = await _storage.read(key: _keyPendingOtp);
+    if (raw == null || raw.isEmpty) return null;
+    try {
+      final json = jsonDecode(raw) as Map<String, dynamic>;
+      final pending = PendingOtp(
+        otp: json['otp'] as String,
+        issuedAt: DateTime.fromMillisecondsSinceEpoch(json['at'] as int),
+      );
+      if (!pending.isExpired(now ?? DateTime.now())) return pending;
+    } catch (_) {
+      // 存坏了：按没有处理
+    }
+    await clearPendingOtp();
+    return null;
+  }
+
+  Future<void> clearPendingOtp() => _storage.delete(key: _keyPendingOtp);
 
   Future<String> _ensureClientId() async {
     var clientId = await _storage.read(key: _keyClientId);
@@ -473,6 +600,70 @@ class UserApiKeyService {
 
   // ---------- OTP 补发与兑换 ----------
 
+  /// 用已登录的会话（Cookie 认证）签发一次性登录口令。
+  ///
+  /// `_t` 不必离开持有它的那一端：另一端拿这枚口令自己换一个会话。
+  /// 不需要 User API Key；条件和浏览器授权登录相同（CSRF、用户组、回跳地址
+  /// 在白名单里）。linux.do 实测（2026-11-23）：XHR 请求回 200
+  /// `{redirect_url}`，口令加密后挂在 `oneTimePassword` 参数上。
+  ///
+  /// 签不出来（未登录、被拒、连不上、解不开）返回 null。
+  Future<String?> issueOtpWithSession(Dio dio) async {
+    final publicKeyPem = await ensurePublicKeyPem();
+    try {
+      final response = await dio.post<dynamic>(
+        '/user-api-key/otp',
+        data: {
+          'public_key': publicKeyPem,
+          'auth_redirect': authRedirect,
+          'application_name': applicationName,
+        },
+        options: Options(
+          contentType: Headers.formUrlEncodedContentType,
+          followRedirects: false,
+          validateStatus: (status) => status != null && status < 400,
+          headers: const {
+            'X-Requested-With': 'XMLHttpRequest',
+            'Accept': 'application/json, text/javascript, */*; q=0.01',
+          },
+          // 被拒（403）不算会话失效信号；非 XHR 时服务端回 302 到
+          // discourse://，不能跟
+          extra: const {
+            'skipAuthCheck': true,
+            'skipRedirect': true,
+            'requestTag': 'otp-issue',
+          },
+        ),
+      );
+      final data = response.data;
+      final target =
+          (data is Map ? data['redirect_url']?.toString() : null) ??
+          response.headers.value('location');
+      final otpParam = target == null
+          ? null
+          : Uri.tryParse(target)?.queryParameters['oneTimePassword'];
+      if (otpParam == null || otpParam.isEmpty) {
+        _log('warning', 'otp_issue_no_otp_param', '会话签发口令：响应里没有口令', {
+          'statusCode': response.statusCode,
+        });
+        return null;
+      }
+      final otp = await _decrypt(otpParam);
+      if (otp == null || !RegExp(r'^[0-9a-f]+$').hasMatch(otp)) {
+        _log('warning', 'otp_issue_decrypt_failed', '会话签发口令：解密失败');
+        return null;
+      }
+      _log('info', 'otp_issued_by_session', '已用当前会话签发一次性口令');
+      return otp;
+    } on DioException catch (e) {
+      _log('warning', 'otp_issue_failed', '会话签发口令失败', {
+        'statusCode': e.response?.statusCode,
+        'errorType': e.type.toString(),
+      });
+      return null;
+    }
+  }
+
   /// 用 API key 静默补发 OTP。
   /// 服务端 302 到 auth_redirect?oneTimePassword=<加密>,从 Location 头解析。
   Future<String?> requestOtp(Dio dio) async {
@@ -540,22 +731,37 @@ class UserApiKeyService {
   ///   CfChallengeInterceptor 会在 cf_clearance 失效时兜底(前台弹 CF 验证)。
   /// - CSRF 用主 dio 手动 GET /session/csrf 取,POST 时 skipCsrf + 手动带
   ///   X-CSRF-Token,避免 RequestHeaderInterceptor 回落到独立 dio 刷新。
-  Future<String?> redeemOtp(Dio dio, String otp) async {
+  Future<String?> redeemOtp(Dio dio, String otp) async =>
+      (await redeemOtpDetailed(dio, otp)).token;
+
+  /// 同 [redeemOtp]，失败时带原因：调用方据此决定换一条路再试、稍后再试，
+  /// 还是让用户重新授权。
+  ///
+  /// [cancelToken]：同一枚口令还有别的路在换（内置网页），那边先成了就取消
+  /// 这里的请求。[onProgress]：取到 CSRF、准备发兑换请求时调一次。
+  Future<OtpRedeemResult> redeemOtpDetailed(
+    Dio dio,
+    String otp, {
+    CancelToken? cancelToken,
+    void Function()? onProgress,
+  }) async {
     // OTP 令牌是 hex,直接拼路径(路由约束 [0-9a-f]+)
     if (!RegExp(r'^[0-9a-f]+$').hasMatch(otp)) {
       _log('warning', 'otp_redeem_bad_format', 'OTP 格式异常,拒绝兑换');
-      return null;
+      return const OtpRedeemResult.failed(OtpRedeemFailure.badFormat);
     }
 
-    final beforeToken = await _cookieJar.getTToken();
+    final beforeToken = await _readSessionToken();
     try {
       // 1. 主 dio 取 CSRF(GET 无需 CSRF;skipCsrf 避免触发独立 dio 刷新;
       //    过 CF 靠网关的浏览器指纹 + CfChallengeInterceptor 兜底)
-      final csrf = await _fetchCsrfViaMainDio(dio);
+      final csrf = await _fetchCsrfViaMainDio(dio, cancelToken: cancelToken);
       if (csrf == null || csrf.isEmpty) {
         _log('warning', 'otp_redeem_no_csrf', 'OTP 兑换取 CSRF 失败');
-        return null;
+        return const OtpRedeemResult.failed(OtpRedeemFailure.network);
       }
+
+      onProgress?.call();
 
       // 2. 主 dio POST 兑换(手动带 CSRF,skipCsrf 避免拦截器覆盖/回落独立 dio)
       // skipRedirect:兑换成功是 302 → /,我们只要这一跳的 Set-Cookie _t
@@ -563,6 +769,7 @@ class UserApiKeyService {
       // POST 重发到 / → POST / 404,反而误判兑换失败(_t 其实已到手)。
       final response = await dio.post(
         '/session/otp/$otp',
+        cancelToken: cancelToken,
         options: Options(
           followRedirects: false,
           validateStatus: (status) =>
@@ -581,8 +788,14 @@ class UserApiKeyService {
       );
 
       // 成功路径:302 → / 且 Set-Cookie _t(由 AppCookieManager 落 jar)
-      final afterToken = await _cookieJar.getTToken();
-      final ok = afterToken != null &&
+      // 换成了一定是跳转：口令无效时服务端回 200 的提示页。只看 jar 里的 _t
+      // 变没变不够——同一枚口令在内置网页那边换成、会话被搬进 jar 的话，
+      // 这里的请求明明被拒了也会看到「_t 变了」。
+      final status = response.statusCode;
+      final redirected = status != null && status >= 300 && status < 400;
+      final afterToken = await _readSessionToken();
+      final ok = redirected &&
+          afterToken != null &&
           afterToken.isNotEmpty &&
           afterToken != beforeToken;
       _log(ok ? 'info' : 'warning', 'otp_redeem_finished',
@@ -592,20 +805,52 @@ class UserApiKeyService {
         'hasTokenAfter': afterToken != null && afterToken.isNotEmpty,
         'tokenChanged': afterToken != beforeToken,
       });
-      return ok ? afterToken : null;
+      // 服务端收下了请求却没签出会话：口令过期或已被用掉
+      return ok
+          ? OtpRedeemResult.success(afterToken)
+          : const OtpRedeemResult.failed(OtpRedeemFailure.rejected);
     } on DioException catch (e) {
+      if (cancelToken?.isCancelled ?? false) {
+        _log('info', 'otp_redeem_cancelled', 'OTP 兑换已取消(别的路先换成了)');
+        return const OtpRedeemResult.failed(OtpRedeemFailure.network);
+      }
+      final failure = e.error is CfChallengeException
+          ? OtpRedeemFailure.challenge
+          : OtpRedeemFailure.network;
       _log('warning', 'otp_redeem_failed', 'OTP 兑换请求失败', {
         'statusCode': e.response?.statusCode,
         'errorType': e.type.toString(),
+        'failure': failure.name,
       });
-      return null;
+      return OtpRedeemResult.failed(failure);
+    }
+  }
+
+  /// 发起授权前的预检：原生这边现在能不能向论坛发请求（连得上、过得了人机
+  /// 验证）。授权回来后换会话只剩两个请求，这里先把网络和验证的问题暴露
+  /// 出来，免得用户白授权一次。撞盾时会像平常一样弹验证页。
+  Future<bool> canReachForum(Dio dio) async {
+    try {
+      final csrf = await _fetchCsrfViaMainDio(dio);
+      return csrf != null && csrf.isNotEmpty;
+    } on DioException catch (e) {
+      _log('warning', 'login_preflight_failed', '登录预检没过', {
+        'statusCode': e.response?.statusCode,
+        'errorType': e.type.toString(),
+        'challenge': e.error is CfChallengeException,
+      });
+      return false;
     }
   }
 
   /// 用主 dio(完整拦截器链,含 CfChallengeInterceptor)取 CSRF token。
-  Future<String?> _fetchCsrfViaMainDio(Dio dio) async {
+  Future<String?> _fetchCsrfViaMainDio(
+    Dio dio, {
+    CancelToken? cancelToken,
+  }) async {
     final response = await dio.get(
       '/session/csrf',
+      cancelToken: cancelToken,
       options: Options(
         headers: const {
           'X-Requested-With': 'XMLHttpRequest',

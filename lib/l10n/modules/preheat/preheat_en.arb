@@ -69,5 +69,6 @@
     }
   },
   "preheat_detailUpstreamUnreachable": "cannot reach a server node",
-  "preheat_reasonUpstreamUnreachable": "Cannot reach a server node; retrying on another route"
+  "preheat_reasonUpstreamUnreachable": "Cannot reach a server node; retrying on another route",
+  "preheat_showingLastContent": "Can't reach the forum right now. Showing what was loaded last time."
 }

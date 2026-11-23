@@ -428,6 +428,32 @@ class TopicListNotifier extends AsyncNotifier<List<Topic>>
     return response.topics.map((topic) => topic.id).toList();
   }
 
+  /// 把这次运行拿到的首页第一页并进正显示着的列表。
+  ///
+  /// 冷启动先显示了启动快照里的列表、用户已经往下读时用：不整页替换，只把
+  /// 新出现和有新回复的话题插到开头（和点新话题提示条同一种插法）。
+  /// 返回插入的话题 ID。
+  List<int> mergeFreshFirstPage(TopicListResponse fresh) {
+    final current = state.value;
+    if (state.isLoading || current == null) return const [];
+    final known = {for (final topic in current) topic.id: topic};
+    final changed = [
+      for (final topic in fresh.topics)
+        if (_changedSince(known[topic.id], topic)) topic,
+    ];
+    if (changed.isEmpty) return const [];
+    ++_requestGeneration;
+    _rememberTags(fresh);
+    final ids = [for (final topic in changed) topic.id];
+    state = AsyncValue.data(prependTopicUpdates(current, changed, ids));
+    return ids;
+  }
+
+  static bool _changedSince(Topic? shown, Topic fresh) =>
+      shown == null ||
+      shown.highestPostNumber != fresh.highestPostNumber ||
+      shown.lastPostedAt != fresh.lastPostedAt;
+
   /// 加载更多
   Future<void> loadMore() async {
     await runPagedLoadMore((currentTopics, nextPage) async {

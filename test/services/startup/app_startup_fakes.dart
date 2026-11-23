@@ -17,6 +17,11 @@ class FakeStartupPorts implements AppStartupPorts {
   /// 预加载完成后能读到的当前用户 JSON；null 表示匿名首页。
   Map<String, dynamic>? preloadedUser;
 
+  /// 有没有上一次运行留下的启动快照，以及快照里的当前用户（null 表示游客快照）。
+  bool hasSnapshot = false;
+  Map<String, dynamic>? snapshotUser;
+  bool _snapshotRestored = false;
+
   /// [checkStoredSession] 的结果；[storedSessionGate] 不为 null 时等它。
   bool storedSession;
   @override
@@ -68,6 +73,17 @@ class FakeStartupPorts implements AppStartupPorts {
   bool get isPreloaded => _preloaded;
 
   @override
+  Future<bool> restoreSnapshot() async {
+    if (!hasSnapshot) return false;
+    log.add('restoreSnapshot');
+    _snapshotRestored = true;
+    return true;
+  }
+
+  @override
+  void notifyShowingSnapshot(Object error) => log.add('notifyShowingSnapshot');
+
+  @override
   Future<StartupPreloadPath?> preload({
     required String reason,
     required StartupPreloadProgress progress,
@@ -100,8 +116,9 @@ class FakeStartupPorts implements AppStartupPorts {
   void afterPreload() => log.add('afterPreload');
 
   @override
-  Map<String, dynamic>? get preloadedUserJson =>
-      _preloaded ? preloadedUser : null;
+  Map<String, dynamic>? get preloadedUserJson => _preloaded
+      ? preloadedUser
+      : (_snapshotRestored ? snapshotUser : null);
 
   @override
   Future<bool> checkStoredSession() async {

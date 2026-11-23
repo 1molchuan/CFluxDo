@@ -176,7 +176,8 @@ class BrowserTrustCoordinator {
     String reason = 'unknown',
     required StartupPreloadProgress progress,
   }) {
-    if (_preload.isLoaded) return Future.value();
+    // 启动快照不算：要的是这次运行的首页数据
+    if (_preload.isFresh) return Future.value();
 
     final active = _activePreload;
     if (active != null) {
@@ -313,7 +314,7 @@ class BrowserTrustCoordinator {
       _log('preload path=native reason=$reason');
       progress.stage(StartupStage.connecting);
       try {
-        await _preload.ensureLoaded(observer: progress);
+        await _preload.ensureFresh(observer: progress);
         _log('native preload success reason=$reason');
         return;
       } catch (e) {
@@ -330,7 +331,7 @@ class BrowserTrustCoordinator {
             StartupStage.connecting,
             reason: StartupDetourReason.upstreamUnreachable,
           );
-          await _preload.ensureLoaded(observer: progress);
+          await _preload.ensureFresh(observer: progress);
           _log('native preload retry success reason=$reason');
           return;
         }
@@ -386,7 +387,7 @@ class BrowserTrustCoordinator {
           ? StartupDetourReason.webViewTimeout
           : StartupDetourReason.webViewNoData,
     );
-    await _preload.ensureLoaded(observer: progress);
+    await _preload.ensureFresh(observer: progress);
     _log('fallback native preload success reason=$reason');
   }
 

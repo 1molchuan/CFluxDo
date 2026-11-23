@@ -14,6 +14,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart';
 import 'package:m3e_ui/m3e_ui.dart';
 import '../models/topic.dart';
+import '../services/preloaded_data_service.dart';
 import '../models/category.dart';
 import '../providers/discourse_providers.dart';
 import '../providers/selected_topic_provider.dart';
@@ -1192,8 +1193,13 @@ class _TopicsPageState extends ConsumerState<TopicsPage>
         if (index >= 0 && index < _tabController.length) {
           _tabController.animateTo(index);
         }
-        ref.read(tabTagsProvider(categoryId).notifier).state =
-            widget.externalTag == null ? const [] : [widget.externalTag!];
+        // 没变就不写：写入一个内容相同的新列表也会通知监听方。冷启动的首次
+        // 构建走到这里，曾让列表页把刚拿到的首屏丢掉重新请求一遍
+        final tags = widget.externalTag == null
+            ? const <String>[]
+            : [widget.externalTag!];
+        final notifier = ref.read(tabTagsProvider(categoryId).notifier);
+        if (!listEquals(notifier.state, tags)) notifier.state = tags;
       });
     }
 
@@ -3488,10 +3494,60 @@ class _TopicListState extends ConsumerState<_TopicList>
     );
   }
 
+  /// 冷启动先显示了启动快照里的列表、新的第一页到的时候用户已经往下读了：
+  /// 先收着，回到顶部时再并进来
+  TopicListResponse? _pendingFreshFirstPage;
+
   @override
   void initState() {
     super.initState();
     widget.scrollController.addListener(_onScrollForTopicUpdates);
+    PreloadedDataService().freshRevision.addListener(_onFreshPreload);
+  }
+
+  /// 这次运行的首页数据到了。冷启动时「全部」这一栏显示的可能是启动快照里的
+  /// 列表：没在看或还停在顶部就整页换成新的；已经往下读了就不打扰，等回到
+  /// 顶部再把新出现、有新回复的话题插进来。
+  void _onFreshPreload() {
+    final preloaded = PreloadedDataService();
+    if (!mounted ||
+        widget.categoryId != null ||
+        !preloaded.staleTopicListConsumed) {
+      return;
+    }
+    preloaded.markFreshTopicListHandled();
+    final reading =
+        widget.parentActive &&
+        ref.read(currentTabCategoryIdProvider) == widget.categoryId &&
+        !TopicListUpdatesMixin.scrolledToTop(_scrollController);
+    if (!reading) {
+      _pendingFreshFirstPage = null;
+      if (preloaded.hasInitialTopicList) {
+        ref.invalidate(topicListProvider(widget.categoryId));
+      }
+      return;
+    }
+    unawaited(
+      preloaded.getInitialTopicList().then((fresh) {
+        if (mounted) _pendingFreshFirstPage = fresh;
+      }),
+    );
+  }
+
+  void _mergePendingFreshFirstPage() {
+    final fresh = _pendingFreshFirstPage;
+    if (fresh == null) return;
+    _pendingFreshFirstPage = null;
+    final insertedIds = ref
+        .read(topicListProvider(widget.categoryId).notifier)
+        .mergeFreshFirstPage(fresh);
+    if (insertedIds.isEmpty) return;
+    setState(() => _highlightedTopicIds.addAll(insertedIds));
+    final idsToRemove = insertedIds.toSet();
+    Future.delayed(const Duration(milliseconds: 2500), () {
+      if (!mounted) return;
+      setState(() => _highlightedTopicIds.removeAll(idsToRemove));
+    });
   }
 
   @override
@@ -3509,6 +3565,7 @@ class _TopicListState extends ConsumerState<_TopicList>
     if (controller.hasClients &&
         controller.positions.length == 1 &&
         controller.position.pixels <= 1) {
+      _mergePendingFreshFirstPage();
       scheduleAutoApplyTopicUpdates();
     }
   }
@@ -3516,6 +3573,7 @@ class _TopicListState extends ConsumerState<_TopicList>
   @override
   void dispose() {
     widget.scrollController.removeListener(_onScrollForTopicUpdates);
+    PreloadedDataService().freshRevision.removeListener(_onFreshPreload);
     if (PlatformUtils.isDesktop) {
       _listShortcutBinding.disposeDeferred();
     }
@@ -3558,7 +3616,8 @@ class _TopicListState extends ConsumerState<_TopicList>
         scrollToTop();
       });
       ref.listen(tabTagsProvider(widget.categoryId), (prev, next) {
-        if (prev != next) {
+        // 按内容比：两个空列表不算变化
+        if (!listEquals(prev, next)) {
           _loadMoreCoordinator.resetCooldown();
           ref.read(topicListProvider(widget.categoryId).notifier).refresh();
           _clearIncomingState();
