@@ -79,15 +79,7 @@ class _SettingsGroupPageState extends ConsumerState<SettingsGroupPage> {
       scrollCacheExtent: widget.highlightId != null
           ? const ScrollCacheExtent.pixels(double.maxFinite)
           : null,
-      children: [
-        for (final group in groups)
-          if (_hasVisibleItems(group)) ...[
-            _buildSectionHeader(theme, group.title, group.icon),
-            const SizedBox(height: 12),
-            _buildGroupItems(theme, group),
-            const SizedBox(height: 24),
-          ],
-      ],
+      children: _buildGroups(theme, groups),
     );
 
     return Scaffold(
@@ -102,6 +94,26 @@ class _SettingsGroupPageState extends ConsumerState<SettingsGroupPage> {
               ),
             ),
     );
+  }
+
+  /// 标题为空的分组不起小标题，贴在上一组下面（间距 12 而不是 24）：
+  /// 用来把一两个零散开关并进相邻的组，少一行标题
+  List<Widget> _buildGroups(ThemeData theme, List<SettingsGroup> groups) {
+    final visible = groups.where(_hasVisibleItems).toList();
+    final children = <Widget>[];
+    for (var i = 0; i < visible.length; i++) {
+      final group = visible[i];
+      final headless = group.title.isEmpty;
+      if (i > 0) children.add(SizedBox(height: headless ? 12 : 24));
+      if (!headless) {
+        children
+          ..add(_buildSectionHeader(theme, group.title, group.icon))
+          ..add(const SizedBox(height: 12));
+      }
+      children.add(_buildGroupItems(theme, group));
+    }
+    if (children.isNotEmpty) children.add(const SizedBox(height: 24));
+    return children;
   }
 
   Widget _buildGroupItems(ThemeData theme, SettingsGroup group) {

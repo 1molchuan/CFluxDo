@@ -6,7 +6,6 @@
   "dataManagement_aiChatData": "AI chat data",
   "dataManagement_allCleared": "All cache cleared, please log in again",
   "dataManagement_apiKeysCount": "Contains {count} API Keys",
-  "dataManagement_autoManagement": "Auto management",
   "dataManagement_backupSource": "Backup from: v{version}",
   "dataManagement_cacheManagement": "Cache management",
   "dataManagement_calculating": "Calculating...",

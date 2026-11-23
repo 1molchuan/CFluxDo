@@ -272,6 +272,9 @@ List<SettingsGroup> buildPreferencesGroups(BuildContext context) {
           id: 'aiPostReviewModel',
           title: l10n.preferences_aiPostReviewModel,
           icon: Symbols.psychology_alt_rounded,
+          // 没开审核时这一行没有作用，收起来（开关打开后才出现）
+          visibleWhen: (ref) =>
+              ref.watch(preferencesProvider).aiPostReviewEnabled,
           getDynamicSubtitle: (ref) {
             final selected = ref.watch(aiPostReviewSelectedModelProvider);
             if (selected == null) {
@@ -306,6 +309,9 @@ List<SettingsGroup> buildPreferencesGroups(BuildContext context) {
           id: 'aiTranslationTargetLanguage',
           title: l10n.ai_translationTargetLanguage,
           icon: Symbols.translate_rounded,
+          // 没开翻译时目标语言与模型都没有作用，收起来
+          visibleWhen: (ref) =>
+              ref.watch(preferencesProvider).aiTranslationEnabled,
           getDynamicSubtitle: (ref) {
             final preferred = ref.watch(
               preferencesProvider.select(
@@ -324,6 +330,8 @@ List<SettingsGroup> buildPreferencesGroups(BuildContext context) {
           id: 'aiTranslationModel',
           title: l10n.ai_translationModel,
           icon: Symbols.psychology_alt_rounded,
+          visibleWhen: (ref) =>
+              ref.watch(preferencesProvider).aiTranslationEnabled,
           getDynamicSubtitle: (ref) {
             final selected = ref.watch(aiTranslationSelectedModelProvider);
             if (selected == null) {

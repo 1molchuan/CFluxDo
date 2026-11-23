@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:app_icons/app_icons.dart';
@@ -130,16 +129,14 @@ class _CustomNodesPageState extends State<CustomNodesPage> {
     }
   }
 
-  /// 不做节点优选的原因（上游代理 / 加速关闭 / 网关关闭 / 平台不支持）；在做则为 null
+  /// 不做节点优选的原因（上游代理 / 加速关闭 / 平台不支持）；在做则为 null
   String? _ineligibleReason(AppLocalizations l10n) {
     if (_service.selectorEligible) return null;
     if (ProxySettingsService.instance.current.isValid) {
       return l10n.cfSelect_disabledByProxy;
     }
     if (!_service.current.dohEnabled) return l10n.cfSelect_disabledByDoh;
-    return (Platform.isAndroid || Platform.isLinux || Platform.isWindows)
-        ? l10n.netStatus_noSelectGateway
-        : l10n.netStatus_noSelectPlatform;
+    return l10n.netStatus_noSelectPlatform;
   }
 
   @override

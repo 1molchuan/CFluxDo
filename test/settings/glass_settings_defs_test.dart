@@ -59,9 +59,10 @@ void main() {
                     bottomItems.any((i) => i.id == 'bottomNavFloatingBlur'),
                     isFalse,
                   );
+                  // 底栏设置不再放「去外观页调玻璃」的跳转（重复入口）
                   expect(
                     bottomItems.any((i) => i.id == 'glassSettings'),
-                    isTrue,
+                    isFalse,
                   );
                   return ListView(
                     children: [
@@ -101,7 +102,7 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('VS Code 隐藏玻璃入口且不改变其他风格既有可见性', (tester) async {
+  testWidgets('玻璃设置只在经典风格的外观页出现，底栏设置里没有跳转入口', (tester) async {
     SharedPreferences.setMockInitialValues({});
     final prefs = await SharedPreferences.getInstance();
     for (final style in UiStyle.values) {
@@ -134,7 +135,7 @@ void main() {
                       .expand((group) => group.items);
                   expect(
                     bottomItems.any((item) => item.id == 'glassSettings'),
-                    style != UiStyle.mojian && style != UiStyle.vscode,
+                    isFalse,
                   );
                   return const SizedBox.shrink();
                 },

@@ -13,7 +13,6 @@
       }
     }
   },
-  "dataManagement_autoManagement": "自动管理",
   "dataManagement_backupSource": "备份来源: v{version}",
   "@dataManagement_backupSource": {
     "placeholders": {

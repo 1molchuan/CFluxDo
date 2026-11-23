@@ -121,14 +121,6 @@ List<SettingsGroup> buildNetworkGroups(BuildContext context) {
           icon: Symbols.article_rounded,
           onTap: (context, _) => _openLogs(context, LogTypeFilter.all),
         ),
-        ActionModel(
-          id: 'networkLogs',
-          title: l10n.debugTools_networkLogs,
-          subtitle: l10n.debugTools_networkLogsDesc,
-          wrapSubtitle: true,
-          icon: Symbols.dns_rounded,
-          onTap: (context, _) => _openLogs(context, LogTypeFilter.network),
-        ),
         // CF 验证日志只在开发者模式下落盘，入口也只在开发者模式下给
         ActionModel(
           id: 'cfLogs',

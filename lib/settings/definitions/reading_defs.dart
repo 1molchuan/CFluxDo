@@ -6,6 +6,7 @@ import 'package:app_icons/app_icons.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../l10n/s.dart';
+import '../../pages/progress_gesture_settings_page.dart';
 import '../../pages/topic_detail_page/widgets/progress_gesture_action_meta.dart';
 import '../../pages/topic_detail_page/widgets/progress_gesture_menu_settings_page.dart';
 import '../../providers/preferences_provider.dart';
@@ -17,7 +18,7 @@ List<SettingsGroup> buildReadingGroups(BuildContext context) {
   final l10n = context.l10n;
   return [
     SettingsGroup(
-      title: l10n.appearance_reading,
+      title: l10n.reading_contentGroup,
       icon: Symbols.chrome_reader_mode_rounded,
       items: [
         DoubleSliderModel(
@@ -43,14 +44,25 @@ List<SettingsGroup> buildReadingGroups(BuildContext context) {
           onChanged: (ref, v) =>
               ref.read(preferencesProvider.notifier).setDisplayPanguSpacing(v),
         ),
+        // 服务端未启用签名插件时隐藏该开关
+        if (PreloadedDataService().signaturesEnabled)
+          SwitchModel(
+            id: 'showSignatures',
+            title: l10n.reading_showSignatures,
+            subtitle: l10n.reading_showSignaturesDesc,
+            icon: Symbols.draw_rounded,
+            getValue: (ref) => ref.watch(preferencesProvider).showSignatures,
+            onChanged: (ref, v) =>
+                ref.read(preferencesProvider.notifier).setShowSignatures(v),
+          ),
         SwitchModel(
-          id: 'boostDanmaku',
-          title: l10n.reading_boostDanmaku,
-          subtitle: l10n.reading_boostDanmakuDesc,
-          icon: Symbols.rocket_launch_rounded,
-          getValue: (ref) => ref.watch(preferencesProvider).boostDanmaku,
+          id: 'expandRelatedLinks',
+          title: l10n.reading_expandRelatedLinks,
+          subtitle: l10n.reading_expandRelatedLinksDesc,
+          icon: Symbols.link_rounded,
+          getValue: (ref) => ref.watch(preferencesProvider).expandRelatedLinks,
           onChanged: (ref, v) =>
-              ref.read(preferencesProvider.notifier).setBoostDanmaku(v),
+              ref.read(preferencesProvider.notifier).setExpandRelatedLinks(v),
         ),
         SwitchModel(
           id: 'showSuggestedTopics',
@@ -61,10 +73,19 @@ List<SettingsGroup> buildReadingGroups(BuildContext context) {
           onChanged: (ref, v) =>
               ref.read(preferencesProvider.notifier).setShowSuggestedTopics(v),
         ),
+        SwitchModel(
+          id: 'boostDanmaku',
+          title: l10n.reading_boostDanmaku,
+          subtitle: l10n.reading_boostDanmakuDesc,
+          icon: Symbols.rocket_launch_rounded,
+          getValue: (ref) => ref.watch(preferencesProvider).boostDanmaku,
+          onChanged: (ref, v) =>
+              ref.read(preferencesProvider.notifier).setBoostDanmaku(v),
+        ),
       ],
     ),
     SettingsGroup(
-      title: l10n.preferences_basic,
+      title: l10n.reading_browseGroup,
       icon: Symbols.touch_app_rounded,
       items: [
         SwitchModel(
@@ -107,38 +128,6 @@ List<SettingsGroup> buildReadingGroups(BuildContext context) {
               .read(preferencesProvider.notifier)
               .setOpenExternalLinksInAppBrowser(v),
         ),
-        SwitchModel(
-          id: 'expandRelatedLinks',
-          title: l10n.reading_expandRelatedLinks,
-          subtitle: l10n.reading_expandRelatedLinksDesc,
-          icon: Symbols.link_rounded,
-          getValue: (ref) => ref.watch(preferencesProvider).expandRelatedLinks,
-          onChanged: (ref, v) =>
-              ref.read(preferencesProvider.notifier).setExpandRelatedLinks(v),
-        ),
-        // 服务端未启用签名插件时隐藏该开关
-        if (PreloadedDataService().signaturesEnabled)
-          SwitchModel(
-            id: 'showSignatures',
-            title: l10n.reading_showSignatures,
-            subtitle: l10n.reading_showSignaturesDesc,
-            icon: Symbols.draw_rounded,
-            getValue: (ref) => ref.watch(preferencesProvider).showSignatures,
-            onChanged: (ref, v) =>
-                ref.read(preferencesProvider.notifier).setShowSignatures(v),
-          ),
-        if (PreloadedDataService().signaturesEnabled)
-          SwitchModel(
-            id: 'adaptiveSignatureFrameRate',
-            title: l10n.reading_adaptiveSignatureFrameRate,
-            subtitle: l10n.reading_adaptiveSignatureFrameRateDesc,
-            icon: Symbols.speed_rounded,
-            getValue: (ref) =>
-                ref.watch(preferencesProvider).adaptiveSignatureFrameRate,
-            onChanged: (ref, v) => ref
-                .read(preferencesProvider.notifier)
-                .setAdaptiveSignatureFrameRate(v),
-          ),
         CustomModel(
           id: 'bookmarksOpenMode',
           title: l10n.reading_bookmarksOpenMode,
@@ -165,6 +154,34 @@ List<SettingsGroup> buildReadingGroups(BuildContext context) {
             );
           },
         ),
+      ],
+    ),
+    SettingsGroup(
+      title: l10n.reading_topicPageGroup,
+      icon: Symbols.forum_rounded,
+      items: [
+        SwitchModel(
+          id: 'defaultNestedView',
+          title: l10n.nested_defaultView,
+          subtitle: l10n.nested_defaultViewDesc,
+          icon: Symbols.account_tree_rounded,
+          getValue: (ref) => ref.watch(preferencesProvider).defaultNestedView,
+          onChanged: (ref, v) =>
+              ref.read(preferencesProvider.notifier).setDefaultNestedView(v),
+        ),
+        // 进度条手势的几项收在子页里，这里只留一个入口
+        ActionModel(
+          id: 'progressGestures',
+          title: l10n.progressGesture_title,
+          subtitle: l10n.reading_progressGesturesEntryDesc,
+          wrapSubtitle: true,
+          icon: Symbols.gesture_rounded,
+          onTap: (context, _) => Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (_) => const ProgressGestureSettingsPage(),
+            ),
+          ),
+        ),
         PlatformConditionalModel(
           inner: SwitchModel(
             id: 'aiSwipeEntry',
@@ -179,8 +196,16 @@ List<SettingsGroup> buildReadingGroups(BuildContext context) {
         ),
       ],
     ),
+  ];
+}
+
+/// 进度条手势子页（阅读设置里只留一个入口）
+List<SettingsGroup> buildProgressGestureGroups(BuildContext context) {
+  final l10n = context.l10n;
+  return [
+    // 页标题已经是「进度条手势」，组上不再重复一行标题
     SettingsGroup(
-      title: l10n.progressGesture_title,
+      title: '',
       icon: Symbols.gesture_rounded,
       items: [
         SwitchModel(
@@ -338,89 +363,7 @@ List<SettingsGroup> buildReadingGroups(BuildContext context) {
         ),
       ],
     ),
-    SettingsGroup(
-      title: l10n.nested_title,
-      icon: Symbols.account_tree_rounded,
-      items: [
-        SwitchModel(
-          id: 'defaultNestedView',
-          title: l10n.nested_defaultView,
-          subtitle: l10n.nested_defaultViewDesc,
-          icon: Symbols.account_tree_rounded,
-          getValue: (ref) => ref.watch(preferencesProvider).defaultNestedView,
-          onChanged: (ref, v) =>
-              ref.read(preferencesProvider.notifier).setDefaultNestedView(v),
-        ),
-        CustomModel(
-          id: 'nestedLineStyle',
-          title: l10n.nested_lineStyle,
-          builder: (context, ref) {
-            final currentStyle = ref.watch(preferencesProvider).nestedLineStyle;
-            final l = context.l10n;
-            return ListTile(
-              leading: Icon(
-                Symbols.linear_scale_rounded,
-                color: Theme.of(context).colorScheme.primary,
-              ),
-              title: Text(l.nested_lineStyle),
-              subtitle: Text(switch (currentStyle) {
-                NestedLineStyle.auto => l.nested_lineStyleAuto,
-                NestedLineStyle.lLine => l.nested_lineStyleL,
-                NestedLineStyle.straight => l.nested_lineStyleStraight,
-              }),
-              trailing: const Icon(Symbols.chevron_right_rounded),
-              onTap: () => _showLineStylePicker(context, ref, currentStyle),
-            );
-          },
-        ),
-      ],
-    ),
   ];
-}
-
-void _showLineStylePicker(
-  BuildContext context,
-  WidgetRef ref,
-  NestedLineStyle current,
-) {
-  final l10n = context.l10n;
-  final options = [
-    (NestedLineStyle.auto, l10n.nested_lineStyleAuto),
-    (NestedLineStyle.lLine, l10n.nested_lineStyleL),
-    (NestedLineStyle.straight, l10n.nested_lineStyleStraight),
-  ];
-
-  showDialog<NestedLineStyle>(
-    context: context,
-    builder: (context) => SimpleDialog(
-      title: Text(l10n.nested_lineStyle),
-      children: [
-        for (final (style, label) in options)
-          SimpleDialogOption(
-            onPressed: () => Navigator.pop(context, style),
-            child: Row(
-              children: [
-                Icon(
-                  style == current
-                      ? Symbols.radio_button_checked_rounded
-                      : Symbols.radio_button_unchecked_rounded,
-                  color: style == current
-                      ? Theme.of(context).colorScheme.primary
-                      : null,
-                  size: 20,
-                ),
-                const SizedBox(width: 12),
-                Text(label),
-              ],
-            ),
-          ),
-      ],
-    ),
-  ).then((selected) {
-    if (selected != null) {
-      ref.read(preferencesProvider.notifier).setNestedLineStyle(selected);
-    }
-  });
 }
 
 void _showBookmarksOpenModePicker(

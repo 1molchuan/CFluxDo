@@ -79,7 +79,6 @@
   "appearance_neutralDesc": "Surfaces stay untinted by theme color",
   "appearance_panguSpacing": "CJK spacing",
   "appearance_panguSpacingDesc": "Auto-optimize CJK/Latin spacing in posts",
-  "appearance_reading": "Reading",
   "appearance_schemeVariant": "Color Scheme",
   "appearance_small": "Small",
   "appearance_styleTransparent": "Transparent",
@@ -137,8 +136,6 @@
   "reading_boostDanmakuDesc": "Overlay Boosts on top of post content as scrolling danmaku. Pauses on touch.",
   "reading_expandRelatedLinks": "Expand related links by default",
   "reading_expandRelatedLinksDesc": "Show related links expanded in posts",
-  "reading_adaptiveSignatureFrameRate": "Adaptive signature frame rate",
-  "reading_adaptiveSignatureFrameRateDesc": "Dynamically reduce animated SVG frame rate while scrolling or under load to prevent stutter",
   "reading_showSignatures": "Show user signatures",
   "reading_showSignaturesDesc": "Display user signatures below post content",
   "reading_showSuggestedTopics": "Show suggested topics",
@@ -226,7 +223,6 @@
   "appearance_glassFull": "Full glass",
   "appearance_glassFullDesc": "Enables optical refraction; falls back to basic frost when the backend is unsupported or the shader is unavailable.",
   "appearance_glassUnsupported": "The current rendering backend does not support shader filters. Auto and Full glass both use basic frost.",
-  "appearance_glassSettingsEntry": "Open Appearance to adjust glass effects for the bottom navigation bar and editor tool island together.",
   "appearance_recommendedFonts": "Recommended fonts",
   "appearance_recommendedFontsHint": "Open-source Chinese fonts; download once and enable with a tap. Entries marked “CN mirror” use mirrors in mainland China; the rest come from GitHub and may be slow",
   "appearance_recommendedFontDownload": "Download",
@@ -244,5 +240,11 @@
   "appearance_fontImported": "Imported font",
   "appearance_fontDownloaded": "Downloaded",
   "appearance_fontMissingGlyphHint": "Characters a font doesn't have fall back to the system font.",
-  "appearance_fontInstalledLatinOnly": "Phone system fonts are mostly Latin-only, so Chinese text keeps the default font. Pick a recommended font or import one to change Chinese text."
+  "appearance_fontInstalledLatinOnly": "Phone system fonts are mostly Latin-only, so Chinese text keeps the default font. Pick a recommended font or import one to change Chinese text.",
+  "reading_contentGroup": "Post content",
+  "reading_browseGroup": "Browsing",
+  "reading_topicPageGroup": "Topic page",
+  "reading_progressGesturesEntryDesc": "Swipe actions and the long-press menu on the progress pill",
+  "appearance_fontEmojiGroup": "Font & emoji",
+  "appearance_effectsGroup": "Display effects"
 }

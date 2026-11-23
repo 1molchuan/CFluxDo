@@ -4,10 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../l10n/s.dart';
 import '../../navigation/nav_action_bus.dart';
-import '../../pages/appearance_page.dart';
 import '../../providers/preferences_provider.dart';
-import '../../theme/mojian_theme.dart';
-import '../../theme/vscode_theme.dart';
 import '../../utils/dialog_utils.dart';
 import '../settings_model.dart';
 
@@ -43,23 +40,6 @@ List<SettingsGroup> buildBottomNavGroups(BuildContext context) {
               .read(preferencesProvider.notifier)
               .setBottomNavFloating(value),
         ),
-        // 保留其他风格的原有入口，仅额外排除固定实色的 VS Code。
-        if (Theme.of(context).extension<MojianTokens>() == null &&
-            VscodeTokens.maybeOf(context) == null)
-          ActionModel(
-            id: 'glassSettings',
-            title: l10n.appearance_glass,
-            subtitle: l10n.appearance_glassSettingsEntry,
-            icon: Symbols.blur_on_rounded,
-            wrapSubtitle: true,
-            onTap: (context, ref) => Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) =>
-                    const AppearancePage(highlightId: 'glassEnabled'),
-              ),
-            ),
-          ),
       ],
     ),
     SettingsGroup(

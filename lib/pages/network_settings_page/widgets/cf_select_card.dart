@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:app_icons/app_icons.dart';
@@ -124,15 +123,13 @@ class _CfSelectCardState extends State<CfSelectCard> {
   ) {
     final l10n = context.l10n;
     final cs = theme.colorScheme;
-    // 上游代理开启 / 加速关闭 / 网关模式关闭时 Rust 侧不做优选，选了也不生效，说明原因
+    // 上游代理开启 / 加速关闭 / 平台不支持时 Rust 侧不做优选，选了也不生效，说明原因
     final String? ineligible = service.selectorEligible
         ? null
         : ProxySettingsService.instance.current.isValid
         ? l10n.cfSelect_disabledByProxy
         : !service.current.dohEnabled
         ? l10n.cfSelect_disabledByDoh
-        : (Platform.isAndroid || Platform.isLinux || Platform.isWindows)
-        ? l10n.netStatus_noSelectGateway
         : l10n.netStatus_noSelectPlatform;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,

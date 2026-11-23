@@ -111,7 +111,7 @@ class FetchOrderProbeService {
     if (!Platform.isAndroid) return false;
     final settings = NetworkSettingsService.instance;
     return settings.relaysWebViewThroughGateway &&
-        settings.current.h2Mitm &&
+        NetworkSettingsService.webViewH2Mitm &&
         settings.current.browserTls;
   }
 

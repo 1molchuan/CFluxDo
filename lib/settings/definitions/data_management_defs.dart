@@ -4,6 +4,7 @@ import 'package:app_icons/app_icons.dart';
 import '../../l10n/s.dart';
 import '../../providers/preferences_provider.dart';
 import '../../pages/data_management_page.dart';
+import '../../pages/notion_settings_page.dart';
 import '../settings_model.dart';
 
 /// 数据管理设置数据声明
@@ -25,9 +26,9 @@ List<SettingsGroup> buildDataManagementGroups(BuildContext context) {
       ],
     ),
 
-    // Section 2 — 自动管理
+    // Section 2 — 退出时自动清理（并在缓存这一组下面，不单独起标题）
     SettingsGroup(
-      title: l10n.dataManagement_autoManagement,
+      title: '',
       icon: Symbols.auto_delete_rounded,
       items: [
         SwitchModel(
@@ -53,6 +54,23 @@ List<SettingsGroup> buildDataManagementGroups(BuildContext context) {
           id: 'dataBackup',
           title: l10n.dataManagement_dataBackup,
           builder: (context, ref) => const DataBackupSection(),
+        ),
+      ],
+    ),
+
+    // Section 4 — 同步到 Notion（原来是设置总页里单独的一个入口）
+    SettingsGroup(
+      title: '',
+      icon: Symbols.cloud_sync_rounded,
+      items: [
+        ActionModel(
+          id: 'notionSync',
+          title: l10n.notion_title,
+          subtitle: l10n.notion_subtitle,
+          icon: Symbols.cloud_sync_rounded,
+          onTap: (context, _) => Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const NotionSettingsPage()),
+          ),
         ),
       ],
     ),

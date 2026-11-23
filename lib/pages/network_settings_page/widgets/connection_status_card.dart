@@ -33,7 +33,7 @@ enum NetStatusKind {
   /// 经上游代理连接，不做节点优选
   viaProxy,
 
-  /// 加速开着但不做优选（网关模式关了 / 平台不支持）
+  /// 加速开着但不做优选（平台不支持）
   accelOnNoSelect,
 
   /// 优选：正在检查上次的节点
@@ -236,13 +236,7 @@ class _ConnectionStatusCardState extends State<ConnectionStatusCard> {
       case NetStatusKind.accelOnNoSelect:
         tone = _Tone.ok;
         title = l10n.netStatus_accelOn;
-        final platformSupported =
-            Platform.isAndroid || Platform.isLinux || Platform.isWindows;
-        details.add(
-          platformSupported
-              ? l10n.netStatus_noSelectGateway
-              : l10n.netStatus_noSelectPlatform,
-        );
+        details.add(l10n.netStatus_noSelectPlatform);
       case NetStatusKind.checking:
         tone = _Tone.busy;
         title = l10n.cfSelect_statusVerifying;

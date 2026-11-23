@@ -32,7 +32,7 @@ Future<List<SettingsModel>> _pumpAndCollectBasicItems(
           child: Builder(
             builder: (context) {
               items = buildReadingGroups(context)
-                  .firstWhere((group) => group.title == context.l10n.preferences_basic)
+                  .firstWhere((group) => group.title == context.l10n.reading_browseGroup)
                   .items
                   .where((item) {
                     if (item is PlatformConditionalModel) {

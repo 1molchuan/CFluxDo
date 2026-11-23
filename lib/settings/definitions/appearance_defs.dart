@@ -389,9 +389,9 @@ List<SettingsGroup> buildAppearanceGroups(BuildContext context) {
       ],
     ),
 
-    // ── 字体 ──────────────────────────────────────────────────────
+    // ── 字体与表情 ────────────────────────────────────────────────
     SettingsGroup(
-      title: l10n.appearance_font,
+      title: l10n.appearance_fontEmojiGroup,
       icon: Symbols.font_download_rounded,
       items: [
         ActionModel(
@@ -413,44 +413,11 @@ List<SettingsGroup> buildAppearanceGroups(BuildContext context) {
             MaterialPageRoute(builder: (_) => const FontSettingsPage()),
           ),
         ),
-      ],
-    ),
-
-    // ── 表情风格 ──────────────────────────────────────────────────
-    SettingsGroup(
-      title: l10n.appearance_emojiStyle,
-      icon: Symbols.add_reaction_rounded,
-      items: [
         CustomModel(
           id: 'emojiStyle',
           title: l10n.appearance_emojiStyle,
           subtitle: l10n.appearance_emojiStyleDesc,
           builder: (context, ref) => const _EmojiStyleSection(),
-        ),
-      ],
-    ),
-
-    // ── 屏幕帧率（仅 Android）──────────────────────────────────────
-    SettingsGroup(
-      title: l10n.appearance_displayMode,
-      icon: Symbols.monitor_rounded,
-      items: [
-        PlatformConditionalModel(
-          condition: () => !kIsWeb && Platform.isAndroid,
-          inner: ActionModel(
-            id: 'displayMode',
-            title: l10n.appearance_displayMode,
-            icon: Symbols.monitor_heart_rounded,
-            getDynamicSubtitle: (ref) {
-              final rate = ref
-                  .watch(preferencesProvider)
-                  .displayModeRefreshRate;
-              return rate == 0
-                  ? context.l10n.appearance_displayModeAuto
-                  : '${rate}Hz';
-            },
-            onTap: (context, ref) => _showDisplayModeSheet(context, ref),
-          ),
         ),
       ],
     ),
@@ -486,20 +453,47 @@ List<SettingsGroup> buildAppearanceGroups(BuildContext context) {
       ],
     ),
 
-    // ── M3E 风格 ─────────────────────────────────────────────────
+    // ── 动效与质感 ────────────────────────────────────────────────
+    // 屏幕帧率只在 Android 上有；M3E 只在经典风格下有意义
     SettingsGroup(
-      title: l10n.appearance_m3eStyle,
-      visibleWhen: _classicOnly,
-      icon: Symbols.animation_rounded,
+      title: l10n.appearance_effectsGroup,
+      icon: Symbols.blur_on_rounded,
       items: [
+        PlatformConditionalModel(
+          condition: () => !kIsWeb && Platform.isAndroid,
+          inner: ActionModel(
+            id: 'displayMode',
+            title: l10n.appearance_displayMode,
+            icon: Symbols.monitor_heart_rounded,
+            getDynamicSubtitle: (ref) {
+              final rate = ref
+                  .watch(preferencesProvider)
+                  .displayModeRefreshRate;
+              return rate == 0
+                  ? context.l10n.appearance_displayModeAuto
+                  : '${rate}Hz';
+            },
+            onTap: (context, ref) => _showDisplayModeSheet(context, ref),
+          ),
+        ),
         SwitchModel(
           id: 'm3eStyle',
+          enabledWhen: _classicOnly,
           title: l10n.appearance_m3eStyle,
           subtitle: l10n.appearance_m3eStyleDesc,
           icon: Symbols.animation_rounded,
           getValue: (ref) => ref.watch(themeProvider).m3eEnabled,
           onChanged: (ref, v) =>
               ref.read(themeProvider.notifier).setM3eEnabled(v),
+        ),
+        SwitchModel(
+          id: 'dialogBlur',
+          title: l10n.appearance_dialogBlur,
+          subtitle: l10n.appearance_dialogBlurDesc,
+          icon: Symbols.blur_on_rounded,
+          getValue: (ref) => ref.watch(preferencesProvider).dialogBlur,
+          onChanged: (ref, v) =>
+              ref.read(preferencesProvider.notifier).setDialogBlur(v),
         ),
       ],
     ),
@@ -589,23 +583,6 @@ List<SettingsGroup> buildAppearanceGroups(BuildContext context) {
               ],
             );
           },
-        ),
-      ],
-    ),
-
-    // ── 对话框模糊 ──────────────────────────────────────────────────
-    SettingsGroup(
-      title: l10n.appearance_dialogBlur,
-      icon: Symbols.blur_on_rounded,
-      items: [
-        SwitchModel(
-          id: 'dialogBlur',
-          title: l10n.appearance_dialogBlur,
-          subtitle: l10n.appearance_dialogBlurDesc,
-          icon: Symbols.blur_on_rounded,
-          getValue: (ref) => ref.watch(preferencesProvider).dialogBlur,
-          onChanged: (ref, v) =>
-              ref.read(preferencesProvider.notifier).setDialogBlur(v),
         ),
       ],
     ),

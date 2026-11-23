@@ -28,7 +28,6 @@ class GatewayMediaSource {
     return {
       'gatewayMode': settings.isGatewayMode,
       'dohEnabled': settings.current.dohEnabled,
-      'gatewayEnabled': settings.current.gatewayEnabled,
       'hasProxyPort': settings.current.proxyPort != null,
     };
   }

@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 /// 设置项分组
 class SettingsGroup {
+  /// 小标题。空字符串 = 不起标题，贴在上一组下面
   final String title;
   final IconData icon;
   final List<SettingsModel> items;

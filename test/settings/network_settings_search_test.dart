@@ -62,7 +62,6 @@ void main() {
       'vpnAutoToggle',
       'networkAdvanced',
       'appLogs',
-      'networkLogs',
     ];
     const advancedIds = [
       'cfSelect',

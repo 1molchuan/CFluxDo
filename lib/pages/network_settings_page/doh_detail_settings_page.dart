@@ -17,7 +17,7 @@ import '../../widgets/common/app_bottom_sheet.dart';
 import 'package:common_ui/common_ui.dart';
 import 'package:m3e_ui/m3e_ui.dart';
 
-/// DNS 与网关细节页面（网关模式、内置网页 HTTP/2、服务端 IP、DoH 服务器列表、ECH、DNS 缓存）
+/// DNS 与网关细节页面（安卓上的浏览器指纹开关、DoH 服务器列表、ECH、DNS 缓存）
 class DohDetailSettingsPage extends StatefulWidget {
   const DohDetailSettingsPage({super.key});
 
@@ -55,33 +55,11 @@ class _DohDetailSettingsPageState extends State<DohDetailSettingsPage> {
           body: ListView(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             children: [
-              // 网关 / h2 MITM / 服务端 IP（IP 协议在「连接方式」卡片里）
-              SegmentedCardGroup(
-                children: [
-                  SwitchListTile(
-                    title: Text(context.l10n.dohDetail_gatewayMode),
-                    subtitle: Text(
-                      settings.gatewayEnabled
-                          ? context.l10n.dohDetail_gatewayEnabledDesc
-                          : context.l10n.dohDetail_gatewayDisabledDesc,
-                    ),
-                    secondary: const Icon(Symbols.swap_horiz_rounded),
-                    value: settings.gatewayEnabled,
-                    onChanged: (value) => _service.setGatewayEnabled(value),
-                  ),
-                  SwitchListTile(
-                    title: Text(context.l10n.dohDetail_h2Mitm),
-                    subtitle: Text(
-                      settings.h2Mitm
-                          ? context.l10n.dohDetail_h2MitmEnabledDesc
-                          : context.l10n.dohDetail_h2MitmDisabledDesc,
-                    ),
-                    secondary: const Icon(Symbols.bolt_rounded),
-                    value: settings.h2Mitm,
-                    onChanged: (value) => _service.setH2Mitm(value),
-                  ),
-                  // 浏览器指纹：只有安卓的原生库编进了这个能力
-                  if (Platform.isAndroid)
+              // 浏览器指纹：只有安卓的原生库编进了这个能力。
+              // 网关模式、内置网页 HTTP/2、服务端 IP 不再提供开关（见 NetworkSettingsService.initialize）
+              if (Platform.isAndroid) ...[
+                SegmentedCardGroup(
+                  children: [
                     SwitchListTile(
                       title: Text(context.l10n.dohDetail_browserTls),
                       subtitle: Text(
@@ -93,33 +71,10 @@ class _DohDetailSettingsPageState extends State<DohDetailSettingsPage> {
                       value: settings.browserTls,
                       onChanged: (value) => _service.setBrowserTls(value),
                     ),
-                  // Server IP
-                  ListTile(
-                    leading: const Icon(Symbols.dns_rounded),
-                    title: Text(context.l10n.dohDetail_serverIp),
-                    subtitle: Text(
-                      settings.serverIp != null &&
-                              settings.serverIp!.isNotEmpty
-                          ? settings.serverIp!
-                          : context.l10n.common_notSet,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                    trailing:
-                        settings.serverIp != null &&
-                            settings.serverIp!.isNotEmpty
-                        ? IconButton(
-                            icon: const Icon(Symbols.clear_rounded, size: 20),
-                            tooltip: context.l10n.common_clear,
-                            onPressed: () => _service.setServerIp(null),
-                          )
-                        : null,
-                    onTap: () => _showServerIpDialog(),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 24),
+                  ],
+                ),
+                const SizedBox(height: 24),
+              ],
 
               // 服务器列表
               _buildSectionHeader(theme, context.l10n.dohDetail_servers),
@@ -828,48 +783,6 @@ class _DohDetailSettingsPageState extends State<DohDetailSettingsPage> {
 
     if (result != null) {
       await _service.updateCustomServer(server, result);
-    }
-  }
-
-  Future<void> _showServerIpDialog() async {
-    final settings = _service.current;
-    final controller = TextEditingController(text: settings.serverIp ?? '');
-
-    final result = await showAppDialog<String?>(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: Text(context.l10n.dohDetail_serverIp),
-          content: TextField(
-            controller: controller,
-            decoration: InputDecoration(
-              hintText: context.l10n.dohDetail_serverIpHint,
-              labelText: context.l10n.dohDetail_ipAddress,
-            ),
-            keyboardType: TextInputType.text,
-            autofocus: true,
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: Text(context.l10n.common_cancel),
-            ),
-            if (settings.serverIp != null && settings.serverIp!.isNotEmpty)
-              TextButton(
-                onPressed: () => Navigator.pop(context, ''),
-                child: Text(context.l10n.common_clear),
-              ),
-            FilledButton(
-              onPressed: () => Navigator.pop(context, controller.text),
-              child: Text(context.l10n.common_confirm),
-            ),
-          ],
-        );
-      },
-    );
-
-    if (result != null) {
-      await _service.setServerIp(result.isEmpty ? null : result);
     }
   }
 

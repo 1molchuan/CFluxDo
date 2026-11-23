@@ -79,7 +79,6 @@
   "appearance_neutralDesc": "表面不随主题色彩染色",
   "appearance_panguSpacing": "阅读混排优化",
   "appearance_panguSpacingDesc": "浏览帖子时自动优化中英文间距",
-  "appearance_reading": "阅读",
   "appearance_schemeVariant": "配色风格",
   "appearance_small": "小",
   "appearance_styleTransparent": "透明",
@@ -137,8 +136,6 @@
   "reading_boostDanmakuDesc": "把 Boost 以弹幕形式叠加在帖子内容上方滚动，触摸暂停",
   "reading_expandRelatedLinks": "默认展开相关链接",
   "reading_expandRelatedLinksDesc": "帖子中的相关链接区域默认展开显示",
-  "reading_adaptiveSignatureFrameRate": "小尾巴自适应帧率",
-  "reading_adaptiveSignatureFrameRateDesc": "根据滚动和设备负载动态降低动画 SVG 帧率，减少卡顿",
   "reading_showSignatures": "显示用户签名",
   "reading_showSignaturesDesc": "在帖子内容下方显示用户签名",
   "reading_showSuggestedTopics": "显示推荐话题",
@@ -226,7 +223,6 @@
   "appearance_glassFull": "完整玻璃",
   "appearance_glassFullDesc": "启用光学折射；后端不支持或着色器不可用时回退到基础磨砂。",
   "appearance_glassUnsupported": "当前渲染后端不支持着色器滤镜，自动和完整玻璃均使用基础磨砂。",
-  "appearance_glassSettingsEntry": "前往外观设置，统一调整底栏与编辑工具岛的玻璃效果。",
   "appearance_recommendedFonts": "推荐字体",
   "appearance_recommendedFontsHint": "开源中文字体，下载后一键启用；标有「国内镜像」的走国内源，其余从 GitHub 下载可能较慢",
   "appearance_recommendedFontDownload": "下载",
@@ -244,5 +240,11 @@
   "appearance_fontImported": "导入的字体",
   "appearance_fontDownloaded": "已下载",
   "appearance_fontMissingGlyphHint": "字体里没有的字会自动用系统字体补上。",
-  "appearance_fontInstalledLatinOnly": "手机系统里能选的多是西文字体，中文仍是默认字体；要换中文字体请选上面的推荐字体或导入字体文件"
+  "appearance_fontInstalledLatinOnly": "手机系统里能选的多是西文字体，中文仍是默认字体；要换中文字体请选上面的推荐字体或导入字体文件",
+  "reading_contentGroup": "帖子内容",
+  "reading_browseGroup": "浏览",
+  "reading_topicPageGroup": "话题页",
+  "reading_progressGesturesEntryDesc": "悬浮进度条上的滑动动作和长按菜单",
+  "appearance_fontEmojiGroup": "字体与表情",
+  "appearance_effectsGroup": "显示效果"
 }

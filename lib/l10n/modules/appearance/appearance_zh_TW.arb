@@ -79,7 +79,6 @@
   "appearance_neutralDesc": "表面不隨主題色彩染色",
   "appearance_panguSpacing": "閱讀混排最佳化",
   "appearance_panguSpacingDesc": "瀏覽帖子時自動最佳化中英文間距",
-  "appearance_reading": "閱讀",
   "appearance_schemeVariant": "配色風格",
   "appearance_small": "小",
   "appearance_styleTransparent": "透明",
@@ -137,8 +136,6 @@
   "reading_boostDanmakuDesc": "把 Boost 以彈幕形式疊加在帖子內容上方滾動，觸控暫停",
   "reading_expandRelatedLinks": "預設展開相關連結",
   "reading_expandRelatedLinksDesc": "帖子中的相關連結區域預設展開顯示",
-  "reading_adaptiveSignatureFrameRate": "小尾巴自適應幀率",
-  "reading_adaptiveSignatureFrameRateDesc": "依滾動和裝置負載動態降低動畫 SVG 幀率，減少卡頓",
   "reading_showSignatures": "顯示使用者簽名",
   "reading_showSignaturesDesc": "在帖子內容下方顯示使用者簽名",
   "reading_showSuggestedTopics": "顯示推薦話題",
@@ -226,7 +223,6 @@
   "appearance_glassFull": "完整玻璃",
   "appearance_glassFullDesc": "啟用光學折射；後端不支援或著色器無法使用時退回基礎磨砂。",
   "appearance_glassUnsupported": "目前的繪製後端不支援著色器濾鏡，自動和完整玻璃均使用基礎磨砂。",
-  "appearance_glassSettingsEntry": "前往外觀設定，統一調整底欄與編輯工具島的玻璃效果。",
   "appearance_recommendedFonts": "推薦字型",
   "appearance_recommendedFontsHint": "開源中文字型，下載後一鍵啟用；標有「國內鏡像」的走國內來源，其餘從 GitHub 下載可能較慢",
   "appearance_recommendedFontDownload": "下載",
@@ -244,5 +240,11 @@
   "appearance_fontImported": "匯入的字型",
   "appearance_fontDownloaded": "已下載",
   "appearance_fontMissingGlyphHint": "字型裡沒有的字會自動用系統字型補上。",
-  "appearance_fontInstalledLatinOnly": "手機系統裡能選的多是西文字型，中文仍是預設字型；要換中文字型請選上面的推薦字型或匯入字型檔案"
+  "appearance_fontInstalledLatinOnly": "手機系統裡能選的多是西文字型，中文仍是預設字型；要換中文字型請選上面的推薦字型或匯入字型檔案",
+  "reading_contentGroup": "帖子內容",
+  "reading_browseGroup": "瀏覽",
+  "reading_topicPageGroup": "話題頁",
+  "reading_progressGesturesEntryDesc": "懸浮進度條上的滑動動作與長按選單",
+  "appearance_fontEmojiGroup": "字體與表情",
+  "appearance_effectsGroup": "顯示效果"
 }

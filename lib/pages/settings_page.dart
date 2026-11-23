@@ -18,7 +18,6 @@ import 'appearance_page.dart';
 import 'bottom_nav_settings_page.dart';
 import 'data_management_page.dart';
 import 'network_settings_page/network_settings_page.dart';
-import 'notion_settings_page.dart';
 import 'preferences_page.dart';
 import 'reading_settings_page.dart';
 import 'shortcut_settings_page.dart';
@@ -390,12 +389,6 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
               iconColor: Colors.brown,
               title: l10n.settings_dataManagement,
               onTap: () => _openSettingsPage((_) => const DataManagementPage()),
-            ),
-            _buildOptionTile(
-              icon: Symbols.cloud_sync_rounded,
-              iconColor: Colors.deepPurple,
-              title: l10n.notion_title,
-              onTap: () => _openSettingsPage((_) => const NotionSettingsPage()),
             ),
             // 快捷键（仅桌面端）
             if (PlatformUtils.isDesktop)
