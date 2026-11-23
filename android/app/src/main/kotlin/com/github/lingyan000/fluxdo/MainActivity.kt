@@ -157,6 +157,7 @@ class MainActivity : FlutterActivity() {
         MediaTranscodeChannel.dispose(flutterEngine.dartExecutor.binaryMessenger)
         PublicFileChannel.dispose(this, flutterEngine.dartExecutor.binaryMessenger)
         SystemProxyChannel.dispose(flutterEngine.dartExecutor.binaryMessenger)
+        CfNativeClickChannel.dispose(flutterEngine.dartExecutor.binaryMessenger)
         super.cleanUpFlutterEngine(flutterEngine)
     }
 
@@ -231,6 +232,7 @@ class MainActivity : FlutterActivity() {
         ConversationShortcutChannel.register(this, flutterEngine.dartExecutor.binaryMessenger)
         // 系统 HTTP 代理只读通道(网关上游跟随系统代理,与内置网页同一出口)
         SystemProxyChannel.register(this, flutterEngine.dartExecutor.binaryMessenger)
+        CfNativeClickChannel.register(this, flutterEngine)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
             when (call.method) {
                 "openInBrowser" -> {

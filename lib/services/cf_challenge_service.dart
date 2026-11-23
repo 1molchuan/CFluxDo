@@ -17,6 +17,8 @@ import 'app_logger.dart';
 import 'network/cf/cf_spinner_policy.dart';
 import 'cf_challenge_logger.dart';
 import 'cf_clearance_authority.dart';
+import 'cf_native_click.dart';
+import 'network/cf/cf_tap_policy.dart';
 import 'cf_clearance_refresh_service.dart';
 import 'network/cf/turnstile_configuration.dart';
 import 'network/cf/cf_verification_target.dart';
@@ -1018,6 +1020,9 @@ class _CfChallengePageState extends State<CfChallengePage> {
   /// 勾选框出来了。在这之前挑战页多半还在转圈自动验证，露给用户只能干等。
   bool _interactiveSignaled = false;
 
+  int _tapGeneration = -1;
+  bool _tapInFlight = false;
+
   /// 前台里挑战还在转圈：先盖着（只显示我们自己的加载动画），等勾选框出来再露；
   /// 万一收不到 Turnstile 的消息，最多盖这么久（见 [CfSpinnerPolicy]）
   static const _spinnerRevealFallback = CfSpinnerPolicy.revealFallback;
@@ -1591,19 +1596,79 @@ class _CfChallengePageState extends State<CfChallengePage> {
       if (_hasSeenChallenge && !_checkingOriginFallback) {
         _revealChallengeWebView();
       }
+      unawaited(_nativeTap());
       return;
     }
     final someoneWaiting =
         widget.foregroundAfter != null || widget.signals.hasForegroundWaiter;
     CfChallengeLogger.log(
       '[VERIFY] Turnstile $event while in background'
-      '${someoneWaiting ? ', promoting to foreground' : ', silent round keeps waiting'}',
+      '${someoneWaiting ? ', waiter present' : ', silent round keeps waiting'}',
     );
     if (someoneWaiting) {
-      _promoteToForeground();
-    } else if (!_pillVisible) {
-      // 没人在等：不把验证页弹到正在阅读的用户脸上，只露胶囊让用户自己点
-      setState(() => _pillVisible = true);
+      unawaited(_tapThenPromote());
+    } else {
+      unawaited(_nativeTap());
+      if (!_pillVisible) {
+        // 没人在等：不把验证页弹到正在阅读的用户脸上，只露胶囊让用户自己点
+        setState(() => _pillVisible = true);
+      }
+    }
+  }
+
+  Future<void> _tapThenPromote() async {
+    final dispatched = await _nativeTap();
+    if (!mounted || _hasPopped || _handedOff || !_isBackground) return;
+    if (dispatched) {
+      await Future<void>.delayed(CfTapPolicy.postTapGrace);
+      if (!mounted || _hasPopped || _handedOff || !_isBackground) return;
+    }
+    _promoteToForeground();
+  }
+
+  Future<bool> _nativeTap() async {
+    final generation = _loadGeneration;
+    if (!CfTapPolicy.shouldAttempt(
+      supported: CfNativeClick.isSupported,
+      interactiveSignaled: _interactiveSignaled,
+      alreadyAttempted: _tapGeneration == generation,
+      done: !mounted || _hasPopped || _handedOff,
+    )) {
+      return false;
+    }
+    if (_tapInFlight) return false;
+    final controller = _controller;
+    if (controller == null) return false;
+    _tapInFlight = true;
+    try {
+      final target = await CfNativeClick.locate(controller);
+      if (target == null) {
+        CfChallengeLogger.log('[VERIFY] 视口内没有 Turnstile widget');
+        return false;
+      }
+      if (!mounted ||
+          _hasPopped ||
+          _handedOff ||
+          generation != _loadGeneration) {
+        return false;
+      }
+      final viewId = controller.getViewId();
+      final host = Uri.tryParse(_target.current.toString())?.host;
+      final ok = await CfNativeClick.tap(
+        viewId: viewId is int ? viewId : null,
+        host: host,
+        nx: target.nx,
+        ny: target.ny,
+      );
+      if (ok) _tapGeneration = generation;
+      CfChallengeLogger.log(
+        '[VERIFY] ${ok ? 'native touch dispatched' : 'native touch failed'} '
+        '(${target.source}, ${target.nx.toStringAsFixed(3)}, '
+        '${target.ny.toStringAsFixed(3)})',
+      );
+      return ok;
+    } finally {
+      _tapInFlight = false;
     }
   }
 
@@ -2118,6 +2183,7 @@ class _CfChallengePageState extends State<CfChallengePage> {
     if (_interactiveSignaled && _hasSeenChallenge && !_challengeWebViewVisible) {
       _revealChallengeWebView();
     }
+    if (_interactiveSignaled) unawaited(_nativeTap());
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
@@ -2614,9 +2680,8 @@ class _CfChallengePageState extends State<CfChallengePage> {
   ///
   /// 2026-10-27 模拟器实测（Mac 出口，cf_clearance 失效）：Managed Challenge
   /// 要求点勾选框，同一页面里这个 widget 6～13 秒静默签出 cf_clearance（575 字符，
-  /// 原生链路认；clearance 失效和完全没有两种情况都过了），验证轮次照常经轮询定稿，
-  /// 用户什么都没点。它要互动时
-  /// （before-interactive）立刻移除，只留页面自己的挑战给用户，绝不替用户点。
+  /// 原生链路认；clearance 失效和完全没有两种情况都过了），验证轮次照常经轮询定稿。
+  /// 它要互动时（before-interactive）立刻移除，避免两个 widget 互相抢 Turnstile 焦点。
   /// 只在本站有缓存的公开配置时做；IDC Flare 这类没有的站点照旧。
   Future<void> _injectPreclearanceAssist(
     InAppWebViewController controller,
