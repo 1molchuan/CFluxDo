@@ -128,10 +128,11 @@ class CfNativeClick {
     'iframe[src*="challenges.cloudflare.com"], iframe[src*="challenge-platform"], ' +
     '.cf-turnstile iframe');
   for (var i = 0; i < iframes.length; i++) candidates.push([iframes[i], 'iframe']);
-  var hosts = document.querySelectorAll(
-    '#challenge-stage div, #challenge-form div, #challenge-running div, .cf-turnstile div');
+  // closed shadow root 的宿主：没有 light DOM 子节点、尺寸是标准 widget。
+  // 挑战页的容器类名会变（2026-11 实测在 .main-content 下），所以扫整页，
+  // 误选由下面的 elementFromPoint 兜住。
+  var hosts = document.querySelectorAll('div');
   for (var j = 0; j < hosts.length; j++) {
-    // closed shadow root 的宿主：没有 light DOM 子节点、尺寸是标准 widget
     if (hosts[j].children.length === 0 && standard(hosts[j])) {
       candidates.push([hosts[j], 'shadow-host']);
     }
