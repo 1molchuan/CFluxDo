@@ -157,6 +157,26 @@ void main() {
       expect(h.taps, isEmpty);
     });
 
+    test('running / effectiveAt：点中记时刻，换文档清空', () async {
+      final h = _Harness()..turnstileReacts = true;
+      expect(h.tapper.effectiveAt, isNull);
+      final future = h.tapper.run();
+      expect(h.tapper.running, isTrue);
+      await future;
+      expect(h.tapper.running, isFalse);
+      expect(h.tapper.effectiveAt, isNotNull);
+      h.tapper.newDocument();
+      expect(h.tapper.effectiveAt, isNull);
+    });
+
+    test('没点中不记 effectiveAt', () async {
+      final h = _Harness();
+      final future = h.tapper.run();
+      await h.elapseEffectWindows();
+      await future;
+      expect(h.tapper.effectiveAt, isNull);
+    });
+
     test('并发调用共享同一个流程', () async {
       final h = _Harness()..turnstileReacts = true;
       final results = await Future.wait([h.tapper.run(), h.tapper.run()]);

@@ -3,21 +3,22 @@ import 'dart:math' as math;
 /// 验证页「替用户点 Turnstile 勾选框」的规则（纯函数，便于单测）。
 ///
 /// - 只在 Turnstile 明确要人工操作（`interactiveBegin` / `interactiveTimeout`）后点；
-/// - 纯后台轮次（没人在等结果）不点：那是用户正在阅读时的静默尝试，维持
-///   「只露胶囊、让用户自己决定」；前台或有人在等结果的后台轮次才点；
-/// - 点下去要看到效果（Turnstile 上报 `interactiveEnd`）才算数，没效果有限次重试。
+/// - 前后台都点：后台轮次的 WebView 在屏幕外，注入的触摸只送进这个 WebView，
+///   用户全程无感；点不成才按原样弹前台 / 露胶囊交给用户；
+/// - 点下去要看到效果（Turnstile 上报 `interactiveEnd`）才算数，没效果有限次重试；
+/// - 点击进行中、以及点中后 [clearanceWait] 内，不自动弹前台、不超时放弃。
 class CfTapPolicy {
   const CfTapPolicy._();
 
   /// 点下去后等 Turnstile 反馈（`interactiveEnd`）的窗口
   static const effectWindow = Duration(milliseconds: 1800);
 
-  /// 有人在等的后台轮次：点中后再留这么久给 widget 签出 clearance，再弹前台
-  static const postTapGrace = Duration(milliseconds: 2500);
+  /// 点中后等 widget 签出 clearance 的时间：这期间压住自动弹前台和超时放弃
+  static const clearanceWait = Duration(seconds: 8);
 
   /// 定位不到（被遮罩盖住 / 还没渲染出来）时的重试
-  static const locateAttempts = 4;
-  static const locateRetryDelay = Duration(milliseconds: 250);
+  static const locateAttempts = 12;
+  static const locateRetryDelay = Duration(milliseconds: 100);
 
   /// 点了没效果，隔这么久再点
   static const retryDelay = Duration(milliseconds: 600);
@@ -40,14 +41,17 @@ class CfTapPolicy {
   static bool shouldAttempt({
     required bool supported,
     required bool interactiveSignaled,
-    required bool isBackground,
-    required bool someoneWaiting,
     required bool done,
+  }) => supported && interactiveSignaled && !done;
+
+  /// 自动点击还没出结果、或点中后还在等 clearance：别弹前台、别超时放弃
+  static bool holdsPromotion({
+    required bool tapRunning,
+    required DateTime? effectiveAt,
+    required DateTime now,
   }) =>
-      supported &&
-      interactiveSignaled &&
-      !done &&
-      (!isBackground || someoneWaiting);
+      tapRunning ||
+      (effectiveAt != null && now.difference(effectiveAt) < clearanceWait);
 
   /// 本回合 / 本文档还有没有点击余额
   static bool hasBudget({

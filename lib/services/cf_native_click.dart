@@ -105,6 +105,9 @@ class CfNativeClick {
   if (typeof window._cf_chl_opt === 'undefined' && !document.querySelector(CHALLENGE)) {
     return fail('not_challenge');
   }
+  // 页面里我们自己的 DOM 遮罩会挡住勾选框；用户看到的是 Flutter 层的覆盖，
+  // 撤掉它不会露出页面（导航时 notifyNav 会再强制盖上）
+  try { if (window.__fluxdoHideCfMask) window.__fluxdoHideCfMask(); } catch (_) {}
   var vv = window.visualViewport;
   var ox = vv ? (vv.offsetLeft || 0) : 0, oy = vv ? (vv.offsetTop || 0) : 0;
   var vw = vv && vv.width > 0 ? vv.width : (innerWidth || 0);

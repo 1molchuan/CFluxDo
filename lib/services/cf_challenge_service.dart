@@ -1021,7 +1021,7 @@ class _CfChallengePageState extends State<CfChallengePage> {
   /// 勾选框出来了。在这之前挑战页多半还在转圈自动验证，露给用户只能干等。
   bool _interactiveSignaled = false;
 
-  /// 替用户点勾选框（只在前台或有人在等结果时，见 [CfTapPolicy.shouldAttempt]）
+  /// 替用户点勾选框（见 [CfTapPolicy]）：后台轮次的 WebView 在屏幕外，点击对用户无感
   late final CfAutoTapper _autoTapper = CfAutoTapper(
     locate: () async {
       final controller = _controller;
@@ -1038,8 +1038,6 @@ class _CfChallengePageState extends State<CfChallengePage> {
     canTap: () => CfTapPolicy.shouldAttempt(
       supported: CfNativeClick.isSupported,
       interactiveSignaled: _interactiveSignaled,
-      isBackground: _isBackground,
-      someoneWaiting: _someoneWaiting,
       done: !mounted || _hasPopped || _handedOff,
     ),
     log: CfChallengeLogger.log,
@@ -1048,9 +1046,18 @@ class _CfChallengePageState extends State<CfChallengePage> {
   bool get _someoneWaiting =>
       widget.foregroundAfter != null || widget.signals.hasForegroundWaiter;
 
+  /// 自动点击在跑或刚点中、正等 clearance：先别弹前台、别超时放弃
+  bool get _autoTapHolding => CfTapPolicy.holdsPromotion(
+    tapRunning: _autoTapper.running,
+    effectiveAt: _autoTapper.effectiveAt,
+    now: DateTime.now(),
+  );
+
   /// 前台里挑战还在转圈：先盖着（只显示我们自己的加载动画），等勾选框出来再露；
   /// 万一收不到 Turnstile 的消息，最多盖这么久（见 [CfSpinnerPolicy]）
-  static const _spinnerRevealFallback = CfSpinnerPolicy.revealFallback;
+  static final _spinnerRevealFallback = CfNativeClick.isSupported
+      ? CfSpinnerPolicy.revealFallbackAutoTap
+      : CfSpinnerPolicy.revealFallback;
   Timer? _deferredRevealTimer;
   int _deferredRevealGeneration = -1;
 
@@ -1114,6 +1121,7 @@ class _CfChallengePageState extends State<CfChallengePage> {
       baseSeconds: base,
       spinning: _spinning,
       awaitingTap: _pillVisible,
+      autoTap: CfNativeClick.isSupported,
     );
   }
 
@@ -1602,9 +1610,8 @@ class _CfChallengePageState extends State<CfChallengePage> {
   /// Turnstile 上报「需要人工操作」（interactiveBegin / interactiveTimeout）
   /// 或「人工操作结束」（interactiveEnd）。
   ///
-  /// 后台尝试中、且有人在等结果（先静默再前台，或有前台等待者）时先替用户点一下
-  /// 勾选框，点中了留一小段宽限给 widget 签出 clearance，没过再转前台。纯静默轮次
-  /// 维持原样——不点、只露胶囊、超时放弃，不把验证页弹到正在阅读的用户脸上。
+  /// 勾选框一出来就先替用户点（[_tapSilently]），全程不露给用户；点不成才走原来的
+  /// 路径：前台露出挑战页，后台有人在等就转前台，纯静默轮次只露胶囊。
   void _onChallengeInteractive(List<dynamic> args) {
     if (!mounted || _hasPopped || _handedOff) return;
     final event = args.isNotEmpty ? '${args.first}' : 'interactive';
@@ -1625,40 +1632,56 @@ class _CfChallengePageState extends State<CfChallengePage> {
       );
     }
     if (!_isBackground) {
-      // 前台：勾选框出来了，现在才把页面露给用户
+      // 前台：先盖着替用户点，点不成再把勾选框露给用户
       _deferredRevealTimer?.cancel();
       _deferredRevealTimer = null;
+    }
+    CfChallengeLogger.log(
+      '[VERIFY] Turnstile $event ${_isBackground ? 'in background' : 'in foreground'}, '
+      'tapping silently',
+    );
+    unawaited(_tapSilently());
+  }
+
+  /// 不露挑战页替用户点勾选框；点不成（定位不到 / 注入失败 / 没反馈）才交给用户。
+  ///
+  /// 原生触摸直接送进 WebView，不经过 Flutter 层的覆盖，所以前台也可以一直盖着、
+  /// 用户只看到我们的加载动画；页面里的 DOM 遮罩由定位脚本自己撤掉。
+  Future<void> _tapSilently() async {
+    bool alive() => mounted && !_hasPopped && !_handedOff;
+    final outcome = await _autoTapper.run();
+    if (!alive()) return;
+    if (outcome == CfTapOutcome.effective) {
+      // 点中了：等 widget 签出 clearance（轮次会收口），这期间压住弹前台和超时；
+      // 到点还没收口就交给用户
+      final generation = _loadGeneration;
+      Timer(CfTapPolicy.clearanceWait, () {
+        if (!alive() || generation != _loadGeneration) return;
+        if (_autoTapHolding) return;
+        _handToUserAfterTap(CfTapOutcome.noEffect);
+      });
+      return;
+    }
+    if (outcome == CfTapOutcome.skipped && _autoTapper.running) return;
+    _handToUserAfterTap(outcome);
+  }
+
+  /// 自动点击没成：按原来的方式把勾选框交给用户
+  void _handToUserAfterTap(CfTapOutcome outcome) {
+    if (!mounted || _hasPopped || _handedOff) return;
+    CfChallengeLogger.log('[VERIFY] auto tap ${outcome.name}, handing to user');
+    if (!_isBackground) {
       if (_hasSeenChallenge && !_checkingOriginFallback) {
         _revealChallengeWebView();
       }
-      unawaited(_autoTapper.run());
       return;
     }
-    final someoneWaiting = _someoneWaiting;
-    CfChallengeLogger.log(
-      '[VERIFY] Turnstile $event while in background'
-      '${someoneWaiting ? ', tapping before promoting' : ', silent round keeps waiting'}',
-    );
-    if (someoneWaiting) {
-      unawaited(_tapThenPromote());
+    if (_someoneWaiting) {
+      _promoteToForeground();
     } else if (!_pillVisible) {
       // 没人在等：不把验证页弹到正在阅读的用户脸上，只露胶囊让用户自己点
       setState(() => _pillVisible = true);
     }
-  }
-
-  /// 有人在等的后台轮次：先替用户点，点中了再留 [CfTapPolicy.postTapGrace]
-  /// 等 clearance，还没过（或根本没点成）才转前台交给用户。
-  Future<void> _tapThenPromote() async {
-    bool stillWaiting() =>
-        mounted && !_hasPopped && !_handedOff && _isBackground;
-    final outcome = await _autoTapper.run();
-    if (!stillWaiting()) return;
-    if (outcome == CfTapOutcome.effective) {
-      await Future<void>.delayed(CfTapPolicy.postTapGrace);
-      if (!stillWaiting()) return;
-    }
-    _promoteToForeground();
   }
 
   /// challenge-platform 响应到达时的回调
@@ -1758,6 +1781,8 @@ class _CfChallengePageState extends State<CfChallengePage> {
       _pollCfClearance();
 
       if (_checkCount > _activeMaxCheckCount) {
+        // 自动点击在跑或刚点中：下一拍再看
+        if (_autoTapHolding) return;
         if (_isBackground) {
           if (widget.foregroundAfter == null &&
               !widget.signals.hasForegroundWaiter) {
@@ -2131,8 +2156,16 @@ class _CfChallengePageState extends State<CfChallengePage> {
 
   /// [afterGrace]：先静默再前台的宽限期（6 s）到了。挑战还在转圈就先不弹，
   /// 留在后台等勾选框或后台预算（[_spinnerBackgroundMaxSeconds]）到点
-  void _promoteToForeground({bool dueToTimeout = false, bool afterGrace = false}) {
+  void _promoteToForeground({
+    bool dueToTimeout = false,
+    bool afterGrace = false,
+  }) {
     if (!_isBackground || !mounted) return;
+    // 宽限 / 超时到点时自动点击还在跑或刚点中：先别弹，点不成会自己转前台
+    if ((afterGrace || dueToTimeout) && _autoTapHolding) {
+      CfChallengeLogger.log('[VERIFY] auto tap in progress, holding promotion');
+      return;
+    }
     if (CfSpinnerPolicy.holdGracePromotion(
       afterGrace: afterGrace,
       isBackground: _isBackground,
@@ -2171,7 +2204,9 @@ class _CfChallengePageState extends State<CfChallengePage> {
     // 后台就已经露出的挑战，转前台后用户才真正看到；补记一次交互。
     if (_challengeWebViewVisible) widget.signals.challengeShown();
     if (recover) _deferReveal();
-    if (_interactiveSignaled && _hasSeenChallenge && !_challengeWebViewVisible) {
+    if (_interactiveSignaled &&
+        _hasSeenChallenge &&
+        !_challengeWebViewVisible) {
       _revealChallengeWebView();
     }
     if (_interactiveSignaled) unawaited(_autoTapper.run());
@@ -2364,6 +2399,8 @@ class _CfChallengePageState extends State<CfChallengePage> {
       return;
     }
     _hasSeenChallenge = true;
+    // 正在替用户点 / 刚点中等 clearance：继续盖着，点不成会再来 reveal
+    if (!force && !_isBackground && _autoTapHolding) return;
     // 前台里 Turnstile 还没要人工操作：多半还在转圈，先盖着等勾选框
     if (CfSpinnerPolicy.deferReveal(
       isBackground: _isBackground,
@@ -2396,7 +2433,8 @@ class _CfChallengePageState extends State<CfChallengePage> {
   /// 自己过了的话，用户从头到尾只看到我们的加载动画
   void _deferReveal() {
     final generation = _loadGeneration;
-    if (_deferredRevealTimer != null && _deferredRevealGeneration == generation) {
+    if (_deferredRevealTimer != null &&
+        _deferredRevealGeneration == generation) {
       return;
     }
     _deferredRevealTimer?.cancel();
@@ -2410,6 +2448,8 @@ class _CfChallengePageState extends State<CfChallengePage> {
       if (!mounted || _hasPopped || _handedOff || _isBackground) return;
       if (generation != _loadGeneration) return;
       if (_challengeWebViewVisible || _checkingOriginFallback) return;
+      // 正在替用户点：点不成会自己 reveal
+      if (_autoTapHolding) return;
       CfChallengeLogger.log(
         '[VERIFY] No interactive signal within '
         '${_spinnerRevealFallback.inSeconds}s, revealing challenge anyway',

@@ -6,33 +6,66 @@ void main() {
     bool attempt({
       bool supported = true,
       bool interactiveSignaled = true,
-      bool isBackground = false,
-      bool someoneWaiting = false,
       bool done = false,
     }) => CfTapPolicy.shouldAttempt(
       supported: supported,
       interactiveSignaled: interactiveSignaled,
-      isBackground: isBackground,
-      someoneWaiting: someoneWaiting,
       done: done,
     );
 
-    test('前台、要人工操作、未结束：点', () {
+    test('要人工操作、未结束：点（前后台都点，后台 WebView 在屏幕外，用户无感）', () {
       expect(attempt(), isTrue);
-    });
-
-    test('后台有人在等结果：点', () {
-      expect(attempt(isBackground: true, someoneWaiting: true), isTrue);
-    });
-
-    test('纯后台轮次（没人在等）：不替正在阅读的用户点', () {
-      expect(attempt(isBackground: true, someoneWaiting: false), isFalse);
     });
 
     test('非 Android / 还在转圈 / 已结束：不点', () {
       expect(attempt(supported: false), isFalse);
       expect(attempt(interactiveSignaled: false), isFalse);
       expect(attempt(done: true), isFalse);
+    });
+  });
+
+  group('holdsPromotion', () {
+    final now = DateTime(2026, 11, 23, 12);
+
+    test('点击进行中：压住弹前台 / 超时', () {
+      expect(
+        CfTapPolicy.holdsPromotion(
+          tapRunning: true,
+          effectiveAt: null,
+          now: now,
+        ),
+        isTrue,
+      );
+    });
+
+    test('点中后等 clearance 的窗口内压住，过了就放开', () {
+      expect(
+        CfTapPolicy.holdsPromotion(
+          tapRunning: false,
+          effectiveAt: now.subtract(const Duration(seconds: 3)),
+          now: now,
+        ),
+        isTrue,
+      );
+      expect(
+        CfTapPolicy.holdsPromotion(
+          tapRunning: false,
+          effectiveAt: now.subtract(CfTapPolicy.clearanceWait),
+          now: now,
+        ),
+        isFalse,
+      );
+    });
+
+    test('没在点也没点中：不压', () {
+      expect(
+        CfTapPolicy.holdsPromotion(
+          tapRunning: false,
+          effectiveAt: null,
+          now: now,
+        ),
+        isFalse,
+      );
     });
   });
 

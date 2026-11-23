@@ -65,17 +65,20 @@ class CfAutoTapper {
     required bool Function() canTap,
     void Function(String message)? log,
     Future<void> Function(Duration duration)? delay,
+    DateTime Function()? clock,
   }) : _locate = locate,
        _dispatch = dispatch,
        _canTap = canTap,
        _log = log ?? _noLog,
-       _delay = delay ?? Future<void>.delayed;
+       _delay = delay ?? Future<void>.delayed,
+       _clock = clock ?? DateTime.now;
 
   final Future<CfTapLocation> Function() _locate;
   final Future<CfTapDispatch> Function(double nx, double ny) _dispatch;
   final bool Function() _canTap;
   final void Function(String message) _log;
   final Future<void> Function(Duration duration) _delay;
+  final DateTime Function() _clock;
 
   static void _noLog(String _) {}
 
@@ -85,8 +88,15 @@ class CfAutoTapper {
   bool _roundEnded = false;
   Completer<void>? _effect;
   Future<CfTapOutcome>? _inFlight;
+  DateTime? _effectiveAt;
 
   int get documentAttempts => _documentAttempts;
+
+  /// 正在定位 / 点击 / 等反馈
+  bool get running => _inFlight != null;
+
+  /// 本文档最近一次点中的时刻（换文档清空）
+  DateTime? get effectiveAt => _effectiveAt;
 
   /// 新文档（导航 / 重载）：额度清零，进行中的流程在下一个检查点作废
   void newDocument() {
@@ -94,6 +104,7 @@ class CfAutoTapper {
     _roundAttempts = 0;
     _documentAttempts = 0;
     _roundEnded = false;
+    _effectiveAt = null;
     _completeEffect();
   }
 
@@ -120,6 +131,7 @@ class CfAutoTapper {
 
   Future<CfTapOutcome> _run() async {
     final epoch = _epoch;
+    final startedAt = _clock();
     bool alive() => epoch == _epoch && !_roundEnded && _canTap();
 
     while (true) {
@@ -149,7 +161,8 @@ class CfAutoTapper {
       }
       _log(
         '[VERIFY][TAP] #$attempt 已注入触摸 (${location.source}, '
-        '${location.nx!.toStringAsFixed(3)}, ${location.ny!.toStringAsFixed(3)})',
+        '${location.nx!.toStringAsFixed(3)}, ${location.ny!.toStringAsFixed(3)}, '
+        '+${_clock().difference(startedAt).inMilliseconds}ms)',
       );
 
       final ended = await Future.any<bool>([
@@ -158,6 +171,7 @@ class CfAutoTapper {
       ]);
       if (epoch != _epoch) return CfTapOutcome.skipped;
       if (ended || _roundEnded) {
+        _effectiveAt = _clock();
         _log('[VERIFY][TAP] #$attempt Turnstile 已响应');
         return CfTapOutcome.effective;
       }
@@ -175,12 +189,19 @@ class CfAutoTapper {
   /// 定位不到时隔一会儿再试（遮罩刚揭开 / widget 刚渲染）；条件失效返回 null
   Future<CfTapLocation?> _locateWithRetry(bool Function() alive) async {
     CfTapLocation? last;
+    final misses = <String>[];
     for (var i = 0; i < CfTapPolicy.locateAttempts; i++) {
       if (i > 0) await _delay(CfTapPolicy.locateRetryDelay);
       if (!alive()) return null;
       last = await _locate();
       if (!alive()) return null;
-      if (last.found) return last;
+      if (last.found) {
+        if (misses.isNotEmpty) {
+          _log('[VERIFY][TAP] 定位重试 ${misses.length} 次: ${misses.join(',')}');
+        }
+        return last;
+      }
+      misses.add(last.reason ?? '?');
     }
     return last;
   }
