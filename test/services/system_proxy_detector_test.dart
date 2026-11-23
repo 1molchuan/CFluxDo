@@ -59,4 +59,72 @@ void main() {
       );
     });
   });
+
+  group('安卓 getDefaultProxy 读数', () {
+    test('固定代理 → http://host:port', () {
+      final c = SystemProxyDetector.parseAndroid({
+        'host': '127.0.0.1',
+        'port': 7890,
+        'pac': null,
+        'exclusions': <String>[],
+      }, forumHost: 'linux.do');
+      expect(c.proxyUrl, 'http://127.0.0.1:7890');
+      expect(c.isEnabled, isTrue);
+    });
+
+    test('IPv6 主机加方括号', () {
+      final c = SystemProxyDetector.parseAndroid({
+        'host': 'fd00::1',
+        'port': 8080,
+      }, forumHost: 'linux.do');
+      expect(c.proxyUrl, 'http://[fd00::1]:8080');
+    });
+
+    test('PAC：只记已启用，不给固定地址', () {
+      final c = SystemProxyDetector.parseAndroid({
+        'host': 'localhost',
+        'port': -1,
+        'pac': 'http://10.0.0.1/proxy.pac',
+      }, forumHost: 'linux.do');
+      expect(c.proxyUrl, isNull);
+      expect(c.pacUrl, 'http://10.0.0.1/proxy.pac');
+      expect(c.isEnabled, isTrue);
+    });
+
+    test('没有代理 / 端口不对 → 未启用', () {
+      expect(
+        SystemProxyDetector.parseAndroid(const {}, forumHost: 'linux.do')
+            .isEnabled,
+        isFalse,
+      );
+      expect(
+        SystemProxyDetector.parseAndroid(null, forumHost: 'linux.do').isEnabled,
+        isFalse,
+      );
+      expect(
+        SystemProxyDetector.parseAndroid({
+          'host': '10.0.0.2',
+          'port': 0,
+        }, forumHost: 'linux.do').isEnabled,
+        isFalse,
+      );
+    });
+
+    test('排除名单命中论坛 → 对论坛等于没有代理', () {
+      for (final rule in ['linux.do', '*.linux.do', '*linux.do', '.linux.do', '*']) {
+        final c = SystemProxyDetector.parseAndroid({
+          'host': '10.0.0.2',
+          'port': 3128,
+          'exclusions': [rule],
+        }, forumHost: 'linux.do');
+        expect(c.isEnabled, isFalse, reason: rule);
+      }
+      final other = SystemProxyDetector.parseAndroid({
+        'host': '10.0.0.2',
+        'port': 3128,
+        'exclusions': ['*.example.com', 'notlinux.do'],
+      }, forumHost: 'linux.do');
+      expect(other.proxyUrl, 'http://10.0.0.2:3128');
+    });
+  });
 }

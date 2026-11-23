@@ -9,6 +9,7 @@ import '../utils/client_id_generator.dart';
 import '../utils/scroll_busy_signal.dart';
 import 'message_bus_latency_probe.dart';
 import 'network/background_gate.dart';
+import 'network/cf/cf_rate_challenge_limiter.dart';
 import 'network/cf/cf_challenge_classifier.dart';
 import 'network/discourse_dio.dart';
 import 'preloaded_data_service.dart';
@@ -406,6 +407,13 @@ class MessageBusService {
               retryAfter: retryAfter == null
                   ? null
                   : Duration(seconds: retryAfter),
+            );
+          } else if (e.requestOptions.uri.host.toLowerCase() ==
+              CfRateChallengeLimiter.instance.mainHost) {
+            // 主站的挑战型 429（CF 速率规则）：和业务请求共用一份冷却
+            CfRateChallengeLimiter.instance.report(
+              e.requestOptions.uri.host,
+              path: e.requestOptions.uri.path,
             );
           }
         } else if (e.type == DioExceptionType.receiveTimeout) {

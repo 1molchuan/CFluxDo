@@ -44,6 +44,32 @@ void main() {
 
   tearDown(() => gate.resetForTest());
 
+  test('挑战型 429：后台停到冷却结束，之后 20 秒内一秒只放一个', () async {
+    gate.holdForRateChallenge(clock.now.add(const Duration(seconds: 60)));
+    expect(gate.backoffRemaining, const Duration(seconds: 60));
+
+    await gate.waitForTurn(); // 第一个：睡满冷却
+    final afterHold = clock.now;
+    await gate.waitForTurn(); // 第二个：等下一个空档
+    await gate.waitForTurn();
+
+    expect(clock.sleeps.first, const Duration(seconds: 60));
+    expect(clock.now.difference(afterHold), const Duration(seconds: 2));
+
+    // 恢复期过了就不再排队
+    clock.advance(BackgroundGate.recoveryPeriod);
+    clock.sleeps.clear();
+    await gate.waitForTurn();
+    await gate.waitForTurn();
+    expect(clock.sleeps, isEmpty);
+  });
+
+  test('挑战型冷却与真限流退避取更晚的那个', () {
+    gate.reportRateLimited(); // 10 s
+    gate.holdForRateChallenge(clock.now.add(const Duration(seconds: 90)));
+    expect(gate.backoffRemaining, const Duration(seconds: 90));
+  });
+
   test('没有前台请求、没有限流时立即放行', () async {
     await gate.waitForTurn();
     expect(clock.sleeps, isEmpty);
