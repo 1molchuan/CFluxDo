@@ -900,7 +900,7 @@ class NetworkSettingsService {
 
       final upstream = GatewayUpstream.resolve(
         applicationProxy: _proxyService.current,
-        systemProxyUrl: Platform.isWindows
+        systemProxyUrl: Platform.isWindows || Platform.isAndroid
             ? SystemProxyService.instance.effectiveProxyUrl
             : null,
       );
@@ -1416,9 +1416,10 @@ class NetworkSettingsService {
   }
 
   void _handleSystemProxyChanged() {
-    if (_prefs == null || !Platform.isWindows) return;
+    if (_prefs == null || !(Platform.isWindows || Platform.isAndroid)) return;
     // 应用内代理拥有更高优先级；只有走系统代理回退时才需要重启网关。
-    if (_proxyService.current.isValid || !shouldRunLocalProxy) return;
+    // 安卓让路时网关只为指纹在跑（[fingerprintOnlyGateway]），上游同样要换
+    if (_proxyService.current.isValid || !_shouldRunProxyProcess) return;
     _scheduleApplyProxyState();
   }
 

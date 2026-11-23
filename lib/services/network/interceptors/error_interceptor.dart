@@ -78,7 +78,7 @@ class ErrorInterceptor extends Interceptor {
       final retryAfter = extractRetryAfterSeconds(err.response);
       if (showErrorToast) {
         final toastMessage = retryAfter != null && retryAfter > 0
-            ? S.current.network_rateLimitedWait(_formatWaitDuration(retryAfter))
+            ? S.current.network_rateLimitedWait(formatWaitDuration(retryAfter))
             : (errorMessage ?? S.current.network_rateLimited);
         ToastService.showError(toastMessage);
       }
@@ -123,7 +123,8 @@ class ErrorInterceptor extends Interceptor {
     handler.next(err);
   }
 
-  String _formatWaitDuration(int seconds) {
+  /// 等待时长的人话（「3 分钟」「45 秒」），过盾拦截器的挑战型 429 提示也用
+  static String formatWaitDuration(int seconds) {
     if (seconds >= 86400) {
       return S.current.time_days((seconds / 86400).ceil());
     }

@@ -12,6 +12,7 @@
   "cf_autoVerifyDisabled": "已关闭自动 CF 验证，请在错误页面手动完成",
   "cf_autoVerifyTimeout": "自动验证需要你确认，请按页面提示完成",
   "cf_backgroundVerifying": "正在自动验证，点此查看",
+  "cf_backgroundNeedsTap": "需要人机验证，点此完成",
   "cf_cannotOpenVerifyPage": "无法打开验证页面，请稍后重试",
   "cf_challengeFailedCooldown": "安全验证失败，已进入冷却期，请稍后再试",
   "cf_challengeNotEffective": "验证未生效，请稍后重试",

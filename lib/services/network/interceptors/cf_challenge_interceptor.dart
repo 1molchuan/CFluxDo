@@ -9,6 +9,7 @@ import '../../app_logger.dart';
 import '../adapters/platform_adapter.dart';
 import '../cf/cf_challenge_classifier.dart';
 import '../cf/cf_challenge_recovery.dart';
+import '../cf/cf_rate_challenge_limiter.dart';
 import '../cf/cf_round_outcome.dart';
 import '../cookie/boundary_sync_service.dart';
 import '../cookie/cookie_jar_service.dart';
@@ -17,6 +18,8 @@ import '../webview/webview_adapter_settings_service.dart';
 import '../../../l10n/s.dart';
 import '../flux_request_spec.dart';
 import '../health/network_health_controller.dart';
+import '../../toast_service.dart';
+import 'error_interceptor.dart';
 
 /// Cloudflare 验证拦截器：撞盾请求的 Dio 适配层。
 ///
@@ -64,6 +67,9 @@ class CfChallengeInterceptor extends Interceptor {
           round: _ServiceRoundPort(),
           compat: _SessionCompatPort(),
           notify: _showNotice,
+          rateLimiter: CfRateChallengeLimiter.instance,
+          onRateChallenged: _showRateChallenged,
+          rateLimitMessage: _rateLimitMessage,
         );
   }
 
@@ -157,6 +163,19 @@ class CfChallengeInterceptor extends Interceptor {
       url: options.uri.toString(),
       statusCode: statusCode ?? 0,
     );
+  }
+
+  static String _rateLimitMessage(Duration wait) =>
+      S.current.network_rateLimitedWait(
+        ErrorInterceptor.formatWaitDuration(
+          (wait.inMilliseconds / 1000).ceil(),
+        ),
+      );
+
+  /// 挑战型 429：页面数据请求由 ErrorView 显示，写操作等即时提示一下
+  static void _showRateChallenged(Duration wait, {required bool actionPrompt}) {
+    if (!actionPrompt) return;
+    ToastService.showError(_rateLimitMessage(wait));
   }
 
   static void _showNotice(CfRecoveryNotice notice) {

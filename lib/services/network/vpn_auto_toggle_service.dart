@@ -242,6 +242,44 @@ class VpnAutoToggleService {
     );
   }
 
+  bool _androidProxyWatching = false;
+
+  /// 安卓的系统代理（Wi-Fi 代理 / PAC / VPN 下发）开关不一定伴随 connectivity
+  /// 事件：订阅 [SystemProxyService.version]（10 s 节拍 + 撞盾时立即重读）
+  void _ensureAndroidProxyWatch() {
+    if (_androidProxyWatching || !SystemProxyService.isAndroid) return;
+    _androidProxyWatching = true;
+    SystemProxyService.instance.version.addListener(_onAndroidSystemProxyChanged);
+  }
+
+  void _onAndroidSystemProxyChanged() {
+    final sig = _signatureFor(_lastConnectivityResults);
+    final changed = sig != _networkSig;
+    _onNetworkSig(sig);
+    if (changed) _scheduleProbe();
+    final hasVpn = _lastConnectivityResults.contains(ConnectivityResult.vpn);
+    _applyVpnState(
+      resolveVpnActive(
+        connectivityResults: _lastConnectivityResults,
+        hasWindowsVpnAdapter: false,
+        systemProxyEnabled: _androidSystemProxyEnabled,
+      ),
+      shouldSuppress: hasVpn,
+    );
+  }
+
+  /// 安卓开着系统代理：和 VPN 一样要实测「经系统给的路能不能直连论坛」再决定让不让路
+  static bool get _androidSystemProxyEnabled =>
+      SystemProxyService.isAndroid && SystemProxyService.instance.isEnabled;
+
+  /// 网络形态签名。安卓开着系统代理时加 `+sysproxy`：同一个 Wi-Fi 开不开代理，
+  /// 能不能直连是两回事，实测缓存不能混用
+  static String _signatureFor(List<ConnectivityResult> results) {
+    final base = ConnectivityService.signatureOf(results);
+    if (base.isEmpty || !_androidSystemProxyEnabled) return base;
+    return '$base+sysproxy';
+  }
+
   void _redetectWindows() {
     final generation = ++_windowsDetectionGeneration;
     unawaited(_detectWindowsVpnAndApply(_lastConnectivityResults, generation));
@@ -271,9 +309,22 @@ class VpnAutoToggleService {
     'accelResumed': accelResumed,
     'connectivity': [for (final r in _lastConnectivityResults) r.name],
     if (Platform.isWindows) 'windowsVpnAdapter': _lastHasWindowsVpnAdapter,
+    if (SystemProxyService.isAndroid)
+      'systemProxy': SystemProxyService.describe(
+        SystemProxyService.instance.registryConfig,
+      ),
   };
 
   bool _prefsReady = false;
+
+  String _vpnText() {
+    if (_androidSystemProxyEnabled) {
+      return _lastConnectivityResults.contains(ConnectivityResult.vpn)
+          ? '有 VPN 网卡、开着系统代理'
+          : '开着系统代理';
+    }
+    return vpnActive ? '有 VPN 网卡' : '无 VPN 网卡';
+  }
 
   /// 网络形态或让路判断变了才写一条（connectivity 事件、启动同步都会走到这里）
   void _logNetworkState(String source) {
@@ -281,7 +332,8 @@ class VpnAutoToggleService {
     final state =
         '${_lastConnectivityResults.map((r) => r.name).join(',')}'
         '|vpn=$vpnActive|suppress=$_shouldSuppress|yield=$_yieldAccel'
-        '|direct=$direct|on=$enabled|mode=${detectionMode.name}';
+        '|direct=$direct|on=$enabled|mode=${detectionMode.name}'
+        '|sysproxy=$_androidSystemProxyEnabled';
     if (state == _lastLoggedNetworkState) return;
     _lastLoggedNetworkState = state;
     final probeText = !_probeDriven
@@ -293,7 +345,7 @@ class VpnAutoToggleService {
     final holding = _probeDriven && _networkSig.isEmpty;
     AppLogger.info(
       '网络形态：${_lastConnectivityResults.map((r) => r.name).join('+')}，'
-      '${vpnActive ? '有 VPN 网卡' : '无 VPN 网卡'}$probeText'
+      '${_vpnText()}$probeText'
       '${enabled ? (_yieldAccel ? '，加速让路' : '，保持加速') : '（自动让路已关）'}'
       '${enabled && holding ? '（没有网络，沿用之前的判断）' : ''}',
       tag: 'VpnAutoToggle',
@@ -493,7 +545,7 @@ class VpnAutoToggleService {
   /// 由 ConnectivityService 调用
   void handleConnectivityChanged(List<ConnectivityResult> results) {
     _lastConnectivityResults = results;
-    final sig = ConnectivityService.signatureOf(results);
+    final sig = _signatureFor(results);
     final changed = sig != _networkSig;
     _onNetworkSig(sig);
     // 同一形态的重复事件不重测；换了网、或这个网还没测过（也没在测）才测
@@ -507,7 +559,14 @@ class VpnAutoToggleService {
       return;
     }
     final hasVpn = results.contains(ConnectivityResult.vpn);
-    _applyVpnState(hasVpn, shouldSuppress: hasVpn);
+    _applyVpnState(
+      resolveVpnActive(
+        connectivityResults: results,
+        hasWindowsVpnAdapter: false,
+        systemProxyEnabled: _androidSystemProxyEnabled,
+      ),
+      shouldSuppress: hasVpn,
+    );
   }
 
   Future<void> _detectWindowsVpnAndApply(
@@ -556,8 +615,9 @@ class VpnAutoToggleService {
         connectivityResults: _lastConnectivityResults,
         hasWindowsVpnAdapter: _lastHasWindowsVpnAdapter,
         systemProxyEnabled:
-            Platform.isWindows &&
-            SystemProxyService.instance.effectiveProxyUrl != null,
+            (Platform.isWindows &&
+                SystemProxyService.instance.effectiveProxyUrl != null) ||
+            _androidSystemProxyEnabled,
       ),
       shouldSuppress: shouldAutoSuppress(_lastConnectivityResults),
     );
@@ -566,7 +626,8 @@ class VpnAutoToggleService {
   /// 启动时同步一次 VPN 状态，避免首个请求发出后再切换网络配置。
   Future<void> syncInitialState(List<ConnectivityResult> results) async {
     _lastConnectivityResults = results;
-    _onNetworkSig(ConnectivityService.signatureOf(results));
+    _ensureAndroidProxyWatch();
+    _onNetworkSig(_signatureFor(results));
     _ensureWindowsSignalWatch();
     final hasWindowsVpnAdapter = Platform.isWindows
         ? (await WindowsVpnAdapterDetector.detect()).active
@@ -576,8 +637,9 @@ class VpnAutoToggleService {
       connectivityResults: results,
       hasWindowsVpnAdapter: hasWindowsVpnAdapter,
       systemProxyEnabled:
-          Platform.isWindows &&
-          SystemProxyService.instance.effectiveProxyUrl != null,
+          (Platform.isWindows &&
+              SystemProxyService.instance.effectiveProxyUrl != null) ||
+          _androidSystemProxyEnabled,
     );
     final mode = detectionMode;
     vpnActiveNotifier.value = resolveDetection(
@@ -718,8 +780,15 @@ class VpnAutoToggleService {
   /// 污染到别家 IP）、超时都算不能；连接被本机拒绝、没有路由、解析不出域名是网络还没
   /// 就绪（见 [classifyProbeError]）。只打论坛自己，不经第三方
   static Future<DirectProbeResult> probeDirect(Uri url) async {
+    // 安卓开着系统 HTTP 代理时经它测：要问的是「系统给 App 的这条路」能不能到论坛
+    final proxy = SystemProxyService.isAndroid
+        ? SystemProxyService.instance.effectiveProxyUrl
+        : null;
+    final proxyUri = proxy == null ? null : Uri.tryParse(proxy);
+    final viaProxy = proxyUri != null && proxyUri.scheme.startsWith('http');
     final client = HttpClient()
-      ..findProxy = ((_) => 'DIRECT')
+      ..findProxy = ((_) =>
+          viaProxy ? 'PROXY ${proxyUri.host}:${proxyUri.port}' : 'DIRECT')
       ..connectionTimeout = const Duration(seconds: 6)
       ..idleTimeout = const Duration(seconds: 1);
     try {

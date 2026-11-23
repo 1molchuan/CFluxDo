@@ -11,7 +11,10 @@ import 'package:win32_registry/win32_registry.dart';
 /// `ProxyEnable`（DWORD，1 表示已启用）+ `ProxyServer`（字符串），
 /// 或 `AutoConfigURL`（PAC 自动代理脚本）。
 /// 这是 WinINet/WinHTTP 系统代理的标准存放位置，IE/Edge/大多数拿系统代理
-/// 的工具均读写这里。仅 Windows 实现；其余平台恒返回 false。
+/// 的工具均读写这里。
+///
+/// 安卓走原生通道读 `ConnectivityManager.getDefaultProxy()`（异步，见
+/// [SystemProxyService]），解析在 [SystemProxyDetector.parseAndroid]。
 /// 系统代理注册表配置快照。
 class SystemProxyConfig {
   const SystemProxyConfig({this.proxyUrl, this.pacUrl});
@@ -98,6 +101,58 @@ class SystemProxyDetector {
     final socks = entries['socks'];
     if (socks != null) return _normalize(socks, 'socks5');
     return null;
+  }
+
+  /// 把安卓 `ConnectivityManager.getDefaultProxy()` 的读数（见原生
+  /// SystemProxyChannel）转成配置。
+  ///
+  /// - 有 PAC：Dart 侧求不了值，只记「系统代理已启用」，不给固定代理地址
+  ///   （与 Windows 的 PAC-only 一致）；
+  /// - 固定代理的排除名单命中论坛主机：对论坛等于没有代理，当成未启用。
+  static SystemProxyConfig parseAndroid(
+    Map<Object?, Object?>? raw, {
+    required String forumHost,
+  }) {
+    if (raw == null || raw.isEmpty) return const SystemProxyConfig();
+    final pac = (raw['pac'] as String?)?.trim();
+    if (pac != null && pac.isNotEmpty) return SystemProxyConfig(pacUrl: pac);
+    final host = (raw['host'] as String?)?.trim() ?? '';
+    final port = raw['port'] is int ? raw['port'] as int : -1;
+    if (host.isEmpty || port < 1 || port > 65535) {
+      return const SystemProxyConfig();
+    }
+    final exclusions = [
+      for (final e in (raw['exclusions'] as List?) ?? const [])
+        if (e is String) e,
+    ];
+    if (isExcluded(forumHost, exclusions)) return const SystemProxyConfig();
+    final hostPart = host.contains(':') && !host.startsWith('[')
+        ? '[$host]'
+        : host;
+    return SystemProxyConfig(proxyUrl: _normalize('$hostPart:$port', 'http'));
+  }
+
+  /// 安卓代理排除名单的匹配：条目是主机名，可带前导 `*`（`*.linux.do`、
+  /// `*linux.do`），也可能带前导点（`.linux.do`），不区分大小写
+  @visibleForTesting
+  static bool isExcluded(String host, List<String> exclusions) {
+    final h = host.toLowerCase();
+    for (final raw in exclusions) {
+      var e = raw.trim().toLowerCase();
+      if (e.isEmpty) continue;
+      if (e == '*') return true;
+      if (e.startsWith('*')) {
+        e = e.substring(1);
+        if (h.endsWith(e) || '.$h' == e) return true;
+        continue;
+      }
+      if (e.startsWith('.')) {
+        if (h.endsWith(e) || '.$h' == e) return true;
+        continue;
+      }
+      if (h == e) return true;
+    }
+    return false;
   }
 
   static String? _normalize(String hostPort, String defaultScheme) {

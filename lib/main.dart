@@ -34,6 +34,8 @@ import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'services/network/cookie/csrf_token_service.dart';
 import 'services/network/system_proxy_service.dart';
+import 'services/cf_clearance_authority.dart';
+import 'services/network/cf/cf_rate_challenge_limiter.dart';
 import 'services/network/cookie/cookie_devtools_extension.dart';
 import 'services/network/cookie/cookie_jar_service.dart';
 import 'services/network/cookie/cookie_store_observer.dart';
@@ -366,10 +368,17 @@ Future<void> main(List<String> args) async {
   await ErudaSettingsService.instance.initialize(prefs);
   StartupTimeline.mark('settings');
 
-  // Windows 固定系统代理必须先于本地 DoH/WebView 网关读取，网关才能按
+  // 系统代理（Windows 注册表 / 安卓默认网络）必须先于本地 DoH/WebView 网关读取，网关才能按
   // 「应用代理 > 系统代理 > 直连」选择首次启动的上游出口。
-  if (Platform.isWindows) {
+  // 上次没冷却完的挑战型 429（CF 速率规则的质询）接着冷却，别一启动就接着撞
+  CfRateChallengeLimiter.instance.initialize(
+    prefs,
+    mainHost: CfClearanceAuthority.mainHost,
+  );
+  // 安卓的系统代理（Wi-Fi 代理 / PAC / VPN 下发）经原生通道异步读，最多等 300 ms
+  if (Platform.isWindows || Platform.isAndroid) {
     SystemProxyService.instance.start();
+    if (Platform.isAndroid) await SystemProxyService.instance.ready();
   }
   // 一般早就出结果了；还没出来最多再等 300 ms，晚到的结果照样补种（网络设置在监听签名，
   // 会转告 Rust）。不能等 ConnectivityService.init()：它在首页挂载后才跑，预加载卡住时永远等不到

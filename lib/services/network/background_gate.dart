@@ -13,6 +13,10 @@ import 'package:flutter/foundation.dart';
 /// - 主站回了真限流的 429（不是 CF 挑战）后，所有后台请求一起退避，
 ///   短时间内连着撞上就翻倍；退避结束时各自加一点随机抖动，免得同一刻齐发。
 ///
+/// - 主站回了挑战型 429（CF 速率规则的质询，见 CfRateChallengeLimiter）后，
+///   后台请求停到冷却结束（[holdForRateChallenge]），之后的 [recoveryPeriod]
+///   内一秒只放一个，不让攒下的请求一齐涌出去再撞一次。
+///
 /// 前台请求的 429 仍由恢复层按 Retry-After 自己重放，这里不拦。
 class BackgroundGate {
   BackgroundGate._();
@@ -31,12 +35,19 @@ class BackgroundGate {
   static const _strikeReset = Duration(minutes: 2);
   static const _maxJitterMs = 1500;
 
+  /// 挑战型 429 冷却结束后的低速恢复期与其中后台请求的间隔
+  static const recoveryPeriod = Duration(seconds: 20);
+  static const recoverySpacing = Duration(seconds: 1);
+
   static final _epoch = DateTime.fromMillisecondsSinceEpoch(0);
 
   DateTime _lastForegroundAt = _epoch;
   DateTime _backoffUntil = _epoch;
   DateTime _lastRateLimitedAt = _epoch;
   int _strikes = 0;
+  DateTime _challengeHoldUntil = _epoch;
+  DateTime _recoveryUntil = _epoch;
+  DateTime _nextRecoverySlot = _epoch;
   math.Random _random = math.Random();
   DateTime Function() _now = DateTime.now;
   Future<void> Function(Duration) _delay = Future<void>.delayed;
@@ -67,9 +78,22 @@ class BackgroundGate {
     debugPrint('[BackgroundGate] 429 → 后台请求退避到 $_backoffUntil (第 $_strikes 次)');
   }
 
+  /// 主站撞了挑战型 429：后台请求停到 [until]，之后进 [recoveryPeriod]
+  void holdForRateChallenge(DateTime until) {
+    if (until.isAfter(_challengeHoldUntil)) _challengeHoldUntil = until;
+    final recovery = _challengeHoldUntil.add(recoveryPeriod);
+    if (recovery.isAfter(_recoveryUntil)) _recoveryUntil = recovery;
+    debugPrint('[BackgroundGate] 挑战型 429 → 后台请求停到 $_challengeHoldUntil');
+  }
+
+  DateTime get _holdUntil =>
+      _challengeHoldUntil.isAfter(_backoffUntil)
+          ? _challengeHoldUntil
+          : _backoffUntil;
+
   /// 后台请求还要因为限流再等多久（不含抖动）
   Duration get backoffRemaining {
-    final left = _backoffUntil.difference(_now());
+    final left = _holdUntil.difference(_now());
     return left > Duration.zero ? left : Duration.zero;
   }
 
@@ -83,7 +107,7 @@ class BackgroundGate {
     var backedOff = false;
     while (!(cancelToken?.isCancelled ?? false)) {
       final now = _now();
-      final backoff = _backoffUntil.difference(now);
+      final backoff = _holdUntil.difference(now);
       if (backoff > Duration.zero) {
         backedOff = true;
         await _sleep(backoff, cancelToken);
@@ -94,6 +118,16 @@ class BackgroundGate {
       if (yieldLeft > Duration.zero && budget > Duration.zero) {
         await _sleep(yieldLeft < budget ? yieldLeft : budget, cancelToken);
         continue;
+      }
+      // 挑战型 429 刚冷却完：一秒放一个
+      if (now.isBefore(_recoveryUntil)) {
+        final slotWait = _nextRecoverySlot.difference(now);
+        if (slotWait > Duration.zero) {
+          await _sleep(slotWait, cancelToken);
+          continue;
+        }
+        _nextRecoverySlot = now.add(recoverySpacing);
+        return;
       }
       break;
     }
@@ -116,6 +150,9 @@ class BackgroundGate {
     _backoffUntil = _epoch;
     _lastRateLimitedAt = _epoch;
     _strikes = 0;
+    _challengeHoldUntil = _epoch;
+    _recoveryUntil = _epoch;
+    _nextRecoverySlot = _epoch;
     _random = random ?? math.Random();
     _now = now ?? DateTime.now;
     _delay = delay ?? Future<void>.delayed;

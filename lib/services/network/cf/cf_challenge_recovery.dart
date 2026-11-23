@@ -6,6 +6,7 @@ import '../../cf_clearance_authority.dart';
 import '../exceptions/api_exception.dart';
 import '../flux_request_spec.dart';
 import 'cf_challenge_classifier.dart';
+import 'cf_rate_challenge_limiter.dart';
 import 'cf_round_outcome.dart';
 
 /// 重放端口：以 jar 当前 Cookie 头把请求再发一次（调用方已打好防环标记）。
@@ -82,6 +83,10 @@ enum CfRecoveryNotice {
 
 typedef CfRecoveryNotifier = void Function(CfRecoveryNotice notice);
 
+/// 挑战型 429 进了冷却：[wait] 是还要等多久，[actionPrompt] 为写操作等要即时提示的请求
+typedef CfRateChallengeNotifier =
+    void Function(Duration wait, {required bool actionPrompt});
+
 /// 过盾恢复的结果。
 sealed class CfRecoveryResult {
   const CfRecoveryResult();
@@ -126,8 +131,13 @@ class CfChallengeRecovery {
     required this.compat,
     CfClearanceAuthority? ledger,
     CfRecoveryNotifier? notify,
+    this.rateLimiter,
+    CfRateChallengeNotifier? onRateChallenged,
+    String Function(Duration wait)? rateLimitMessage,
   }) : ledger = ledger ?? CfClearanceAuthority.instance,
-       _notify = notify;
+       _notify = notify,
+       _onRateChallenged = onRateChallenged,
+       _rateLimitMessage = rateLimitMessage;
 
   final CfReplayPort replay;
   final CfClearancePort clearance;
@@ -135,6 +145,11 @@ class CfChallengeRecovery {
   final CfCompatPort compat;
   final CfClearanceAuthority ledger;
   final CfRecoveryNotifier? _notify;
+
+  /// 挑战型 429 的冷却（null = 不区分，和普通盾一样走验证；单测默认如此）
+  final CfRateChallengeLimiter? rateLimiter;
+  final CfRateChallengeNotifier? _onRateChallenged;
+  final String Function(Duration wait)? _rateLimitMessage;
 
   static const _mutationMethods = {'POST', 'PUT', 'DELETE', 'PATCH'};
 
@@ -166,6 +181,35 @@ class CfChallengeRecovery {
     final mode = requestMode(original);
     final actionPrompt = shouldShowActionPrompt(original);
     final isSilent = original.spec.isSilent;
+
+    // 0. 挑战型 429：CF 速率规则的质询，惩罚窗里过盾、换值重放都没用，只会继续
+    //    给计数加码。带着凭据撞上的先冷却（见 [CfRateChallengeLimiter]），不弹验证；
+    //    一枚凭据都没带的（新装 / 刚清过）质询确实要先拿凭据，照旧往下走
+    final limiter = rateLimiter;
+    final carriedAtHit = carriedClearance(original);
+    if (limiter != null &&
+        err.response?.statusCode == 429 &&
+        carriedAtHit != null &&
+        carriedAtHit.isNotEmpty) {
+      final wait = limiter.report(host, path: original.uri.path);
+      CfChallengeLogger.log(
+        '[INTERCEPTOR] Rate-limit challenge (429), cooling down '
+        '${wait.inSeconds}s instead of verifying: $label mode=$mode',
+      );
+      _onRateChallenged?.call(wait, actionPrompt: actionPrompt);
+      final seconds = (wait.inMilliseconds / 1000).ceil();
+      return CfRecoveryFailed(
+        DioException(
+          requestOptions: original,
+          type: DioExceptionType.unknown,
+          error: RateLimitException(
+            seconds,
+            _rateLimitMessage?.call(wait),
+            err.response,
+          ),
+        ),
+      );
+    }
 
     // 1. 过期 403 直接换 cookie 重放：本次请求携带的值若已不是 jar 当前值
     //    （请求在途期间另一轮验证换上了新值，或排队请求仍带着验证前的旧

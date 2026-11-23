@@ -6,7 +6,9 @@ import 'package:enhanced_cookie_jar/enhanced_cookie_jar.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fluxdo/services/cf_clearance_authority.dart';
 import 'package:fluxdo/services/cf_verification_round.dart';
+import 'package:fluxdo/services/network/background_gate.dart';
 import 'package:fluxdo/services/network/cf/cf_challenge_recovery.dart';
+import 'package:fluxdo/services/network/cf/cf_rate_challenge_limiter.dart';
 import 'package:fluxdo/services/network/cookie/cookie_jar_service.dart';
 import 'package:fluxdo/services/network/exceptions/api_exception.dart';
 import 'package:fluxdo/services/network/flux_request_spec.dart';
@@ -548,6 +550,93 @@ void main() {
       expect(round.acquired, 0);
     });
   });
+
+  group('挑战型 429（CF 速率规则）', () {
+    late DateTime now;
+    late BackgroundGate gate;
+    late CfRateChallengeLimiter limiter;
+    late List<Duration> rateNotices;
+
+    CfChallengeRecovery rateRecovery() => CfChallengeRecovery(
+      replay: replay,
+      clearance: clearance,
+      round: round,
+      compat: compat,
+      ledger: ledger,
+      notify: notices.add,
+      rateLimiter: limiter,
+      onRateChallenged: (wait, {required actionPrompt}) =>
+          rateNotices.add(wait),
+      rateLimitMessage: (wait) => 'wait ${wait.inSeconds}s',
+    );
+
+    setUp(() {
+      now = DateTime(2026, 11, 23, 12);
+      gate = BackgroundGate.instance..resetForTest(now: () => now);
+      limiter = CfRateChallengeLimiter(now: () => now, gate: gate);
+      rateNotices = [];
+    });
+
+    tearDown(() => gate.resetForTest());
+
+    test('带着凭据撞上：进冷却、不验证、不重放，交回带等待时长的限流异常', () async {
+      final result = await rateRecovery().recover(
+        _challenge(_request('old'), status: 429),
+      );
+
+      expect(result, isA<CfRecoveryFailed>());
+      final error = (result as CfRecoveryFailed).error.error;
+      expect(error, isA<RateLimitException>());
+      expect((error as RateLimitException).retryAfterSeconds, 60);
+      expect(error.toString(), 'wait 60s');
+      expect(round.acquired, 0, reason: '惩罚窗里过盾没用，不弹验证');
+      expect(replay.calls, isEmpty, reason: '重放只会继续给计数加码');
+      expect(clearance.swaps, 0);
+      expect(ledger.isKnownChallenged('old'), isFalse, reason: '凭据本身没坏');
+      expect(rateNotices, [const Duration(seconds: 60)]);
+      expect(gate.backoffRemaining, const Duration(seconds: 60));
+    });
+
+    test('一枚凭据都没带：质询要先拿凭据，照旧走验证', () async {
+      jar.value = null;
+      round.outcomes.add(_passed('new'));
+      replay.script.add(_ok);
+      final options = RequestOptions(
+        path: 'https://linux.do/session/csrf',
+        headers: {'Cookie': '_t=token'},
+      );
+
+      final result = await rateRecovery().recover(
+        _challenge(options, status: 429),
+      );
+
+      expect(result, isA<CfRecovered>());
+      expect(round.acquired, 1);
+      expect(gate.backoffRemaining, Duration.zero);
+    });
+
+    test('403 挑战不受影响', () async {
+      round.outcomes.add(_passed('new'));
+      replay.script.add(_ok);
+
+      final result = await rateRecovery().recover(_challenge(_request('old')));
+
+      expect(result, isA<CfRecovered>());
+      expect(round.acquired, 1);
+    });
+
+    test('没注入冷却器（旧行为）：429 挑战照旧验证', () async {
+      round.outcomes.add(_passed('new'));
+      replay.script.add(_ok);
+
+      final result = await recovery().recover(
+        _challenge(_request('old'), status: 429),
+      );
+
+      expect(result, isA<CfRecovered>());
+      expect(round.acquired, 1);
+    });
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -574,12 +663,13 @@ Headers get _cfHeaders => Headers.fromMap({
   'content-type': ['text/html'],
 });
 
-DioException _challenge(RequestOptions options) => DioException.badResponse(
-  statusCode: 403,
+DioException _challenge(RequestOptions options, {int status = 403}) =>
+    DioException.badResponse(
+  statusCode: status,
   requestOptions: options,
   response: Response<dynamic>(
     requestOptions: options,
-    statusCode: 403,
+    statusCode: status,
     headers: _cfHeaders,
     data: '<title>Just a moment...</title>',
   ),
