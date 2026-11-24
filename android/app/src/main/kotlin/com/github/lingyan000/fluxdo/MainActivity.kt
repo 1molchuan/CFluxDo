@@ -232,7 +232,8 @@ class MainActivity : FlutterActivity() {
         ConversationShortcutChannel.register(this, flutterEngine.dartExecutor.binaryMessenger)
         // 系统 HTTP 代理只读通道(网关上游跟随系统代理,与内置网页同一出口)
         SystemProxyChannel.register(this, flutterEngine.dartExecutor.binaryMessenger)
-        CfNativeClickChannel.register(this, flutterEngine)
+        // 验证页替用户点 Turnstile 勾选框(只点 Dart 指定的那个 WebView)
+        CfNativeClickChannel.register(flutterEngine)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
             when (call.method) {
                 "openInBrowser" -> {

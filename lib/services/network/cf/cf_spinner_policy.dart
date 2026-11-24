@@ -15,7 +15,15 @@ class CfSpinnerPolicy {
   const CfSpinnerPolicy._();
 
   static const revealFallback = Duration(seconds: 6);
+
+  /// 能替用户点勾选框时，前台转圈多盖一会儿：勾选框出来直接点掉，用户只看到
+  /// 我们的加载动画；真收不到消息才露出来
+  static const revealFallbackAutoTap = Duration(seconds: 25);
   static const spinnerBackgroundMax = Duration(seconds: 20);
+
+  /// 能替用户点勾选框时（见 CfTapPolicy）转圈多等一会儿：勾选框出来会在后台
+  /// 直接点掉，用户无感；慢机器上 Turnstile 转 20 多秒才出勾选框（模拟器实测 25 s）
+  static const spinnerBackgroundMaxAutoTap = Duration(seconds: 35);
 
   /// 挑战已在页面上、Turnstile 还没要人工操作
   static bool spinning({
@@ -34,17 +42,20 @@ class CfSpinnerPolicy {
   /// 纯后台轮次里勾选框已出来、胶囊在等用户点：留这么久再放弃
   static const awaitingTapMax = Duration(seconds: 45);
 
-  /// 后台轮次的预算（秒）：转圈时至少给到 [spinnerBackgroundMax]；
-  /// 胶囊在等用户点时至少给到 [awaitingTapMax]
+  /// 后台轮次的预算（秒）：转圈时至少给到 [spinnerBackgroundMax]（能自动点时
+  /// [spinnerBackgroundMaxAutoTap]）；胶囊在等用户点时至少给到 [awaitingTapMax]
   static int backgroundBudgetSeconds({
     required int baseSeconds,
     required bool spinning,
     bool awaitingTap = false,
+    bool autoTap = false,
   }) {
     if (awaitingTap) return math.max(baseSeconds, awaitingTapMax.inSeconds);
-    return spinning
-        ? math.max(baseSeconds, spinnerBackgroundMax.inSeconds)
-        : baseSeconds;
+    if (!spinning) return baseSeconds;
+    final spinnerMax = autoTap
+        ? spinnerBackgroundMaxAutoTap
+        : spinnerBackgroundMax;
+    return math.max(baseSeconds, spinnerMax.inSeconds);
   }
 
   /// 先静默再前台的宽限期到点时要不要暂缓弹前台

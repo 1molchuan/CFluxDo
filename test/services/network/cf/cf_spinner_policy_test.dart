@@ -90,6 +90,25 @@ void main() {
     );
   });
 
+  test('能自动点勾选框时，转圈在后台多等到 35 s（勾选框出来直接点掉，用户无感）', () {
+    expect(
+      CfSpinnerPolicy.backgroundBudgetSeconds(
+        baseSeconds: 6,
+        spinning: true,
+        autoTap: true,
+      ),
+      35,
+    );
+    expect(
+      CfSpinnerPolicy.backgroundBudgetSeconds(
+        baseSeconds: 6,
+        spinning: false,
+        autoTap: true,
+      ),
+      6,
+    );
+  });
+
   test('纯后台轮次勾选框出来、胶囊在等用户点：至少留 45 s 再放弃', () {
     expect(
       CfSpinnerPolicy.backgroundBudgetSeconds(
